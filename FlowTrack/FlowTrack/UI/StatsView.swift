@@ -44,7 +44,7 @@ struct StatsView: View {
             .padding()
         }
         .background(theme.timelineBg)
-        .toolbarBackground(theme.timelineBg, for: .windowToolbar)
+        .toolbarBackground(.hidden, for: .windowToolbar)
         .onAppear { loadData() }
         .onChange(of: selectedDate) { Task { loadData() } }
         .onChange(of: period) { selectedHourStat = nil; selectedFlowHour = nil; Task { loadData() } }

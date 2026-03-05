@@ -26,7 +26,8 @@ struct GeminiProvider: AIProvider, Sendable {
         guard let key = SecureStore.shared.loadKey(for: AIProviderType.gemini.rawValue), !key.isEmpty else {
             throw AIError.noAPIKey
         }
-        let request = URLRequest(url: URL(string: "https://generativelanguage.googleapis.com/v1/models?key=\(key)")!)
+        var request = URLRequest(url: URL(string: "https://generativelanguage.googleapis.com/v1/models")!)
+        request.setValue(key, forHTTPHeaderField: "x-goog-api-key")
         let (_, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw AIError.networkError("Health check failed")
@@ -47,7 +48,7 @@ struct GeminiProvider: AIProvider, Sendable {
             throw AIError.noAPIKey
         }
         let isChat = messages.count > 1 || systemPrompt != nil
-        let url = URL(string: "https://generativelanguage.googleapis.com/v1/models/\(model):generateContent?key=\(key)")!
+        let url = URL(string: "https://generativelanguage.googleapis.com/v1/models/\(model):generateContent")!
         // Gemini uses "contents" array with roles; prepend system as first user turn
         var contents: [[String: Any]] = []
         if let sys = systemPrompt {
@@ -64,7 +65,8 @@ struct GeminiProvider: AIProvider, Sendable {
         ]
         let jsonData = try JSONSerialization.data(withJSONObject: body)
         let (data, _) = try await AIHTTPHelper.sendRequest(url: url, headers: [
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "x-goog-api-key": key
         ], body: jsonData)
 
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {

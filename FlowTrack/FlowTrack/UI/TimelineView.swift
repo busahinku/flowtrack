@@ -114,7 +114,7 @@ struct TimelineView: View {
             }
         }
         .background(theme.timelineBg)
-        .toolbarBackground(theme.timelineBg, for: .windowToolbar)
+        .toolbarBackground(.hidden, for: .windowToolbar)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {

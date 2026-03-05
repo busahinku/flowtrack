@@ -2,11 +2,12 @@ import Foundation
 import SwiftUI
 import OSLog
 
-private let appStateLogger = Logger(subsystem: "com.flowtrack", category: "AppState")
 
 @MainActor @Observable
 final class AppState {
     static let shared = AppState()
+
+    nonisolated private let log = Logger(subsystem: "com.flowtrack", category: "AppState")
 
     var timeSlots: [TimeSlot] = []
     var categoryStats: [CategoryStat] = []
@@ -92,7 +93,7 @@ final class AppState {
             // Memory caps: keep only last 200 entries in AI caches
             enforceAICacheLimit()
         } catch {
-            appStateLogger.error("Refresh error: \(error.localizedDescription)")
+            log.error("Refresh error: \(error.localizedDescription)")
         }
     }
 
@@ -132,10 +133,10 @@ final class AppState {
 
             if !updates.isEmpty {
                 try Database.shared.updateCategoriesBatch(updates)
-                appStateLogger.info("Re-categorized \(updates.count) activities with rules")
+                log.info("Re-categorized \(updates.count) activities with rules")
             }
         } catch {
-            appStateLogger.error("Re-categorize error: \(error.localizedDescription)")
+            log.error("Re-categorize error: \(error.localizedDescription)")
         }
     }
 
@@ -181,7 +182,7 @@ final class AppState {
                         }
                         return (slot.id, title)
                     } catch {
-                        appStateLogger.error("Title generation failed for \(slot.id): \(error.localizedDescription)")
+                        self.log.error("Title generation failed for \(slot.id): \(error.localizedDescription)")
                         return nil
                     }
                 }
@@ -204,7 +205,7 @@ final class AppState {
                         }
                         return (slot.id, summary)
                     } catch {
-                        appStateLogger.error("Summary generation failed for \(slot.id): \(error.localizedDescription)")
+                        self.log.error("Summary generation failed for \(slot.id): \(error.localizedDescription)")
                         return nil
                     }
                 }
@@ -266,7 +267,7 @@ final class AppState {
                         }
                     }
                 } catch {
-                    appStateLogger.warning("Batch categorization failed, falling back to individual: \(error.localizedDescription)")
+                    log.warning("Batch categorization failed, falling back to individual: \(error.localizedDescription)")
                     for record in batchRecords {
                         guard let id = record.id else { continue }
                         do {
@@ -281,7 +282,7 @@ final class AppState {
                             allUpdates.append((id: id, category: category))
                             learnCategory(category, for: record)
                         } catch {
-                            appStateLogger.warning("Individual categorization failed for \(record.appName): \(error.localizedDescription)")
+                            log.warning("Individual categorization failed for \(record.appName): \(error.localizedDescription)")
                         }
                     }
                 }
@@ -289,10 +290,10 @@ final class AppState {
 
             if !allUpdates.isEmpty {
                 try Database.shared.updateCategoriesBatch(allUpdates)
-                appStateLogger.info("Categorized \(allUpdates.count) activities")
+                log.info("Categorized \(allUpdates.count) activities")
             }
         } catch {
-            appStateLogger.error("Batch error: \(error.localizedDescription)")
+            log.error("Batch error: \(error.localizedDescription)")
         }
     }
 
@@ -305,7 +306,10 @@ final class AppState {
         let isBrowser = browserBIDs.contains(where: { bid.contains($0) })
         if !isBrowser {
             // Evict cache if it grows too large
-            if aiCategoryCache.count >= 500 { aiCategoryCache.removeAll() }
+            if aiCategoryCache.count >= 500 {
+                // LRU eviction: drop oldest 50 entries instead of wiping the entire cache
+                aiCategoryCache.keys.prefix(50).forEach { aiCategoryCache.removeValue(forKey: $0) }
+            }
             aiCategoryCache[bid] = category
             RuleEngine.shared.learnFromAI(appName: record.appName, bundleID: record.bundleID, category: category)
         }
@@ -325,7 +329,7 @@ final class AppState {
             if providerType.needsAPIKey {
                 let key = SecureStore.shared.loadKey(for: providerType.rawValue)
                 if key == nil || key?.isEmpty == true {
-                    appStateLogger.debug("Skipping \(providerType.rawValue, privacy: .public): no API key")
+                    log.debug("Skipping \(providerType.rawValue, privacy: .public): no API key")
                     continue
                 }
             }
@@ -335,7 +339,7 @@ final class AppState {
                 do {
                     return try await operation(provider)
                 } catch {
-                    appStateLogger.warning("\(providerType.rawValue) attempt \(attempt) failed: \(error.localizedDescription)")
+                    log.warning("\(providerType.rawValue) attempt \(attempt) failed: \(error.localizedDescription)")
                     lastError = error
                     // Don't retry on noAPIKey or cliNotFound
                     if case AIError.noAPIKey = error { break }
@@ -383,7 +387,7 @@ final class AppState {
                 if let summary = item.summary { sessionSummaries[item.sessionId] = summary }
             }
         } catch {
-            appStateLogger.error("Failed to load persisted AI data: \(error.localizedDescription)")
+            log.error("Failed to load persisted AI data: \(error.localizedDescription)")
         }
     }
 
@@ -399,7 +403,7 @@ final class AppState {
         if hasDeepWork != isInDeepWork {
             isInDeepWork = hasDeepWork
             if hasDeepWork {
-                appStateLogger.info("Deep work session detected")
+                log.info("Deep work session detected")
             }
         }
     }

@@ -8,6 +8,7 @@ final class RuleEngine: @unchecked Sendable {
     private var learnedRules: [Rule] = []
     private let customRulesURL: URL
     private let learnedRulesURL: URL
+    private let lock = NSLock()
 
     // Cache: bundleID → category (from AI learning)
     private var categoryCache: [String: Category] = [:]
@@ -216,7 +217,10 @@ final class RuleEngine: @unchecked Sendable {
         // Check if already learned
         if categoryCache[bid] != nil { return }
 
-        // Learn it
+        // Learn it (lock protects concurrent writes from withTaskGroup AI batches)
+        lock.lock()
+        defer { lock.unlock() }
+        guard categoryCache[bid] == nil else { return } // double-check after acquiring lock
         let rule = Rule(matchType: .bundleID, pattern: bundleID, category: category.rawValue)
         learnedRules.append(rule)
         categoryCache[bid] = category
@@ -246,6 +250,8 @@ final class RuleEngine: @unchecked Sendable {
     }
 
     func clearLearnedRules() {
+        lock.lock()
+        defer { lock.unlock() }
         learnedRules.removeAll()
         categoryCache.removeAll()
         saveLearnedRules()

@@ -24,7 +24,7 @@ struct HeatmapView: View {
             .padding()
         }
         .background(theme.timelineBg)
-        .toolbarBackground(theme.timelineBg, for: .windowToolbar)
+        .toolbarBackground(.hidden, for: .windowToolbar)
         .onAppear { loadData() }
         .toolbar {
             ToolbarItem(placement: .principal) {

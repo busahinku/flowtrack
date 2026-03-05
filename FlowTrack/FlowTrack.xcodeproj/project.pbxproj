@@ -603,15 +603,15 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		AA000001AAAA0001AAAAAAAA /* GRDB */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = AA000001AAAA0000AAAAAAAA /* XCRemoteSwiftPackageReference "GRDB.swift" */;
-			productName = GRDB;
-		};
 		7A918CF12F5A1400007FA75E /* KeychainSwift */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 7A918D732F5A12F4007FA75D /* XCRemoteSwiftPackageReference "keychain-swift" */;
 			productName = KeychainSwift;
+		};
+		AA000001AAAA0001AAAAAAAA /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA000001AAAA0000AAAAAAAA /* XCRemoteSwiftPackageReference "GRDB.swift" */;
+			productName = GRDB;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

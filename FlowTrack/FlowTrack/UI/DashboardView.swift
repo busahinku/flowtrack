@@ -4,12 +4,14 @@ enum DashboardTab: String, CaseIterable, Hashable {
     case timeline = "Timeline"
     case stats = "Statistics"
     case heatmap = "Heatmap"
+    case chat = "AI Chat"
 
     var icon: String {
         switch self {
         case .timeline: return "calendar.day.timeline.leading"
         case .stats:    return "chart.bar.fill"
         case .heatmap:  return "square.grid.3x3.fill"
+        case .chat:     return "sparkles"
         }
     }
 }
@@ -39,6 +41,7 @@ struct DashboardView: View {
         case .timeline: TimelineView()
         case .stats:    StatsView()
         case .heatmap:  HeatmapView()
+        case .chat:     ChatView()
         case nil:       TimelineView()
         }
     }

@@ -452,7 +452,8 @@ final class Database: Sendable {
             let cutoff = Calendar.current.date(byAdding: .day, value: -retentionDays, to: Date())!
             try? self.dbQueue.write { db in
                 try db.execute(sql: "DELETE FROM activities WHERE timestamp < ?", arguments: [cutoff])
-                try db.execute(sql: "DELETE FROM session_ai WHERE session_id NOT IN (SELECT DISTINCT id FROM activities)")
+                // Prune orphaned AI sessions: keep only those updated after the cutoff
+                try db.execute(sql: "DELETE FROM session_ai WHERE updatedAt < ?", arguments: [cutoff])
             }
             UserDefaults.standard.set(Date(), forKey: lastPruneKey)
             dbLogger.info("Scheduled retention: pruned data older than \(retentionDays) days")
