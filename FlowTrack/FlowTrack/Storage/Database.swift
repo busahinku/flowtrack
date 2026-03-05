@@ -142,6 +142,53 @@ final class Database: Sendable {
         return sessions
     }
 
+    // MARK: - Sessions for Range
+    func sessionsForRange(from: Date, to: Date, gapThreshold: TimeInterval = 300) throws -> [TimeSlot] {
+        let activities = try activitiesForRange(from: from, to: to)
+        guard !activities.isEmpty else { return [] }
+
+        var sessions: [TimeSlot] = []
+        var currentActivities: [ActivityRecord] = []
+        var currentCategory: Category?
+        var sessionStart: Date?
+
+        for record in activities {
+            if let cat = currentCategory, let start = sessionStart {
+                let gap = record.timestamp.timeIntervalSince(currentActivities.last?.timestamp ?? start)
+                if record.category.rawValue != cat.rawValue || gap > gapThreshold {
+                    let endTime = currentActivities.last.map { $0.timestamp.addingTimeInterval($0.duration) } ?? record.timestamp
+                    let summaries = buildSummaries(from: currentActivities)
+                    let slot = TimeSlot(
+                        id: "\(start.timeIntervalSince1970)-\(endTime.timeIntervalSince1970)",
+                        startTime: start, endTime: endTime,
+                        category: cat, activities: summaries, isIdle: cat == .idle
+                    )
+                    sessions.append(slot)
+                    currentActivities = []
+                    sessionStart = record.timestamp
+                    currentCategory = record.category
+                }
+            } else {
+                sessionStart = record.timestamp
+                currentCategory = record.category
+            }
+            currentActivities.append(record)
+        }
+
+        if let cat = currentCategory, let start = sessionStart, !currentActivities.isEmpty {
+            let endTime = currentActivities.last.map { $0.timestamp.addingTimeInterval($0.duration) } ?? start
+            let summaries = buildSummaries(from: currentActivities)
+            let slot = TimeSlot(
+                id: "\(start.timeIntervalSince1970)-\(endTime.timeIntervalSince1970)",
+                startTime: start, endTime: endTime,
+                category: cat, activities: summaries, isIdle: cat == .idle
+            )
+            sessions.append(slot)
+        }
+
+        return sessions
+    }
+
     private func buildSummaries(from records: [ActivityRecord]) -> [ActivitySummary] {
         var grouped: [String: (appName: String, bundleID: String, titles: [String], urls: Set<String>, duration: TimeInterval, timestamps: [Date])] = [:]
 
@@ -316,6 +363,7 @@ final class Database: Sendable {
     func clearSessionAI() throws {
         try dbQueue.write { db in
             try db.execute(sql: "DELETE FROM session_ai")
+            try db.execute(sql: "VACUUM")
         }
     }
 
@@ -323,6 +371,7 @@ final class Database: Sendable {
         try dbQueue.write { db in
             try db.execute(sql: "DELETE FROM activities")
             try db.execute(sql: "DELETE FROM session_ai")
+            try db.execute(sql: "VACUUM")
         }
     }
 

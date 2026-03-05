@@ -13,6 +13,7 @@ struct StatsView: View {
     @State private var period: StatsPeriod = .day
     @State private var selectedDate = Date()
     @State private var allActivities: [ActivityRecord] = []
+    @State private var periodTimeSlots: [TimeSlot] = []
     @State private var selectedApp: AppUsageInfo?
     @State private var selectedCatStat: CategoryStat?
     @State private var selectedHourStat: Int?
@@ -120,7 +121,7 @@ struct StatsView: View {
                        icon: "checkmark.circle.fill", color: .green)
             SummaryCard(title: "Distraction", value: "\(Int(distractionPercent))%",
                        icon: "eye.slash.fill", color: .red)
-            SummaryCard(title: "Sessions", value: "\(appState.timeSlots.filter { !$0.isIdle }.count)",
+            SummaryCard(title: "Sessions", value: "\(periodTimeSlots.filter { !$0.isIdle }.count)",
                        icon: "square.stack.fill", color: .purple)
             SummaryCard(title: "Top App", value: topAppName,
                        icon: "star.fill", color: .orange)
@@ -269,7 +270,7 @@ struct StatsView: View {
                 }
             }
 
-            Chart(productivityByHour) { item in
+            Chart(productivityByHour.filter { $0.hasData }) { item in
                 AreaMark(
                     x: .value("Hour", item.hour),
                     y: .value("Score", item.score)
@@ -469,6 +470,7 @@ struct StatsView: View {
     private func loadData() {
         let (from, to) = dateRange
         allActivities = (try? Database.shared.activitiesForRange(from: from, to: to)) ?? []
+        periodTimeSlots = (try? Database.shared.sessionsForRange(from: from, to: to)) ?? []
     }
 
     private var dateRange: (from: Date, to: Date) {
@@ -548,9 +550,22 @@ struct StatsView: View {
             let hour = cal.component(.hour, from: a.timestamp)
             hourCats[hour, default: [:]][a.category.rawValue, default: 0] += a.duration / 60
         }
-        return hourCats.flatMap { (hour, cats) in
-            cats.map { HourStat(hour: hour, category: Category(rawValue: $0.key), minutes: $0.value) }
+
+        // Collect all categories present in data for stable ordering
+        let allCategoryNames = Set(hourCats.values.flatMap(\.keys)).sorted()
+
+        // Generate entries for all hours 0-23 with all categories for stability
+        var result: [HourStat] = []
+        for hour in 0...23 {
+            let cats = hourCats[hour] ?? [:]
+            for catName in allCategoryNames {
+                let minutes = cats[catName] ?? 0
+                if minutes > 0 {
+                    result.append(HourStat(hour: hour, category: Category(rawValue: catName), minutes: minutes))
+                }
+            }
         }
+        return result
     }
 
     private var productivityByHour: [HourScore] {
@@ -566,7 +581,8 @@ struct StatsView: View {
         return (0...23).map { hour in
             let entry = hourProd[hour]
             let score = entry.map { $0.total > 0 ? $0.prod / $0.total * 100 : 0 } ?? 0
-            return HourScore(hour: hour, score: score)
+            let hasData = entry != nil
+            return HourScore(hour: hour, score: score, hasData: hasData)
         }
     }
 
@@ -605,7 +621,7 @@ struct StatsView: View {
     }
 
     private var filteredSessions: [TimeSlot] {
-        let slots = appState.timeSlots.filter { !$0.isIdle }
+        let slots = periodTimeSlots.filter { !$0.isIdle }
         if searchText.isEmpty { return slots }
         return slots.filter {
             appState.sessionTitle(for: $0).lowercased().contains(searchText.lowercased()) ||
@@ -620,6 +636,13 @@ struct HourScore: Identifiable {
     let id = UUID()
     let hour: Int
     let score: Double
+    let hasData: Bool
+
+    init(hour: Int, score: Double, hasData: Bool = true) {
+        self.hour = hour
+        self.score = score
+        self.hasData = hasData
+    }
 }
 
 struct AppUsageInfo: Identifiable {

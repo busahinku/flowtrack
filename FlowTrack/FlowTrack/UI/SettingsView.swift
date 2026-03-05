@@ -1,6 +1,7 @@
 import SwiftUI
 import ServiceManagement
 import UniformTypeIdentifiers
+import Combine
 
 struct SettingsView: View {
     var body: some View {
@@ -107,6 +108,9 @@ struct GeneralTab: View {
                     hasAccessibility = PermissionChecker.hasAccessibility
                 }
             }
+            updateDBSize()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("FlowTrackDataCleared"))) { _ in
             updateDBSize()
         }
     }
@@ -1047,6 +1051,7 @@ struct PrivacyTab: View {
                 AppState.shared.sessionTitles.removeAll()
                 AppState.shared.sessionSummaries.removeAll()
                 clearResult = "AI data cleared"
+                NotificationCenter.default.post(name: .init("FlowTrackDataCleared"), object: nil)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { clearResult = nil }
             }
         } message: {
@@ -1060,6 +1065,7 @@ struct PrivacyTab: View {
                 AppState.shared.sessionSummaries.removeAll()
                 Task { await AppState.shared.refreshData() }
                 clearResult = "All data cleared"
+                NotificationCenter.default.post(name: .init("FlowTrackDataCleared"), object: nil)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { clearResult = nil }
             }
         } message: {

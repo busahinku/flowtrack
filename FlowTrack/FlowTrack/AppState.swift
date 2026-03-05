@@ -78,7 +78,6 @@ final class AppState {
     }
 
     func generateAllSessionContent(maxTitles: Int = 50, maxSummaries: Int = 20) async {
-        // Process ALL sessions that don't have titles yet
         let slotsWithoutTitles = timeSlots.filter { !$0.isIdle && sessionTitles[$0.id] == nil }
         let slotsWithoutSummaries = timeSlots.filter { !$0.isIdle && sessionSummaries[$0.id] == nil && settings.aiSummariesEnabled }
 
@@ -116,29 +115,60 @@ final class AppState {
     private func categorizeBatch(limit: Int) async {
         do {
             let uncategorized = try Database.shared.uncategorizedActivities(limit: limit)
-            var updates: [(id: Int64, category: Category)] = []
-            let batchSize = 30
-            for batch in stride(from: 0, to: uncategorized.count, by: batchSize) {
-                let end = min(batch + batchSize, uncategorized.count)
-                for record in uncategorized[batch..<end] {
-                    guard let id = record.id else { continue }
-                    do {
-                        let category = try await withFallback { provider in
-                            try await provider.categorize(
-                                appName: record.appName,
-                                bundleID: record.bundleID,
-                                windowTitle: record.windowTitle,
-                                url: record.url
-                            )
+            guard !uncategorized.isEmpty else { return }
+
+            var allUpdates: [(id: Int64, category: Category)] = []
+            let batchSize = 10
+
+            for batchStart in stride(from: 0, to: uncategorized.count, by: batchSize) {
+                let end = min(batchStart + batchSize, uncategorized.count)
+                let batchRecords = Array(uncategorized[batchStart..<end])
+
+                let items = batchRecords.enumerated().map { (idx, record) in
+                    BatchCategorizeItem(
+                        index: idx,
+                        appName: record.appName,
+                        bundleID: record.bundleID,
+                        windowTitle: record.windowTitle,
+                        url: record.url
+                    )
+                }
+
+                do {
+                    let results = try await withFallback { provider in
+                        try await provider.categorizeBatch(items: items)
+                    }
+
+                    for (idx, record) in batchRecords.enumerated() {
+                        guard let id = record.id else { continue }
+                        if let category = results[idx] {
+                            allUpdates.append((id: id, category: category))
                         }
-                        updates.append((id: id, category: category))
-                    } catch {
-                        print("[AI] Categorization failed for \(record.appName): \(error)")
+                    }
+                } catch {
+                    // Fall back to individual categorization for this batch
+                    print("[AI] Batch categorization failed, falling back to individual: \(error)")
+                    for record in batchRecords {
+                        guard let id = record.id else { continue }
+                        do {
+                            let category = try await withFallback { provider in
+                                try await provider.categorize(
+                                    appName: record.appName,
+                                    bundleID: record.bundleID,
+                                    windowTitle: record.windowTitle,
+                                    url: record.url
+                                )
+                            }
+                            allUpdates.append((id: id, category: category))
+                        } catch {
+                            print("[AI] Individual categorization failed for \(record.appName): \(error)")
+                        }
                     }
                 }
             }
-            if !updates.isEmpty {
-                try Database.shared.updateCategoriesBatch(updates)
+
+            if !allUpdates.isEmpty {
+                try Database.shared.updateCategoriesBatch(allUpdates)
             }
         } catch {
             print("[AI] Batch error: \(error)")

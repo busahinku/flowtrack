@@ -23,9 +23,19 @@ enum AIError: Error, LocalizedError {
     }
 }
 
+// MARK: - Batch Categorization Item
+struct BatchCategorizeItem: Sendable {
+    let index: Int
+    let appName: String
+    let bundleID: String
+    let windowTitle: String
+    let url: String?
+}
+
 // MARK: - AIProvider Protocol
 protocol AIProvider: Sendable {
     func categorize(appName: String, bundleID: String, windowTitle: String, url: String?) async throws -> Category
+    func categorizeBatch(items: [BatchCategorizeItem]) async throws -> [Int: Category]
     func summarize(activities: [ActivitySummary]) async throws -> String
     func generateTitle(activities: [ActivitySummary], category: Category) async throws -> String
     func checkHealth() async throws -> Bool
@@ -39,6 +49,17 @@ extension AIProvider {
         throw AIError.invalidResponse("Not implemented")
     }
     func checkHealth() async throws -> Bool { true }
+
+    // Default: fall back to individual calls
+    func categorizeBatch(items: [BatchCategorizeItem]) async throws -> [Int: Category] {
+        var results: [Int: Category] = [:]
+        for item in items {
+            let cat = try await categorize(appName: item.appName, bundleID: item.bundleID,
+                                           windowTitle: item.windowTitle, url: item.url)
+            results[item.index] = cat
+        }
+        return results
+    }
 }
 
 // MARK: - AIProviderFactory
@@ -63,23 +84,64 @@ struct AIPromptBuilder {
     static func categorizationPrompt(appName: String, bundleID: String, windowTitle: String, url: String?) -> String {
         let categories = CategoryManager.shared.allCategories
         let catList = categories.map { cat in
-            var desc = "\(cat.name) (\(cat.isProductive ? "productive" : "non-productive"))"
-            if !cat.aiPrompt.isEmpty { desc += ": \(cat.aiPrompt)" }
-            return desc
-        }.joined(separator: "\n")
+            "\(cat.name) (\(cat.isProductive ? "productive" : "non-productive"))"
+        }.joined(separator: ", ")
         var prompt = """
-        Categorize this macOS app activity into exactly ONE category.
-        
-        Categories:
-        \(catList)
+        Categorize this app activity. Categories: \(catList)
 
-        App: \(appName)
-        Bundle ID: \(bundleID)
-        Window Title: \(windowTitle)
+        App: \(appName) (\(bundleID))
+        Title: \(windowTitle)
         """
         if let url = url { prompt += "\nURL: \(url)" }
-        prompt += "\n\nRespond with ONLY the category name, nothing else."
+        prompt += "\n\nRespond with ONLY the category name."
         return prompt
+    }
+
+    static func batchCategorizationPrompt(items: [BatchCategorizeItem]) -> String {
+        let categories = CategoryManager.shared.allCategories
+        let catList = categories.map { cat in
+            "\(cat.name) (\(cat.isProductive ? "productive" : "non-productive"))"
+        }.joined(separator: ", ")
+
+        var prompt = """
+        Categorize each activity. Categories: \(catList)
+
+        Activities:
+        """
+        for item in items {
+            var line = "\n\(item.index). \(item.appName) (\(item.bundleID)) — \(item.windowTitle)"
+            if let url = item.url { line += " [\(url)]" }
+            prompt += line
+        }
+        prompt += "\n\nRespond with ONLY numbered categories, one per line: \"1. CategoryName\""
+        return prompt
+    }
+
+    static func parseBatchCategories(_ text: String, count: Int) -> [Int: Category] {
+        var results: [Int: Category] = [:]
+        let lines = text.components(separatedBy: .newlines)
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+            // Match patterns like "1. Work" or "1: Work"
+            let parts = trimmed.split(separator: ".", maxSplits: 1)
+            if parts.count == 2, let idx = Int(parts[0].trimmingCharacters(in: .whitespaces)) {
+                let catText = String(parts[1]).trimmingCharacters(in: .whitespaces)
+                if let cat = parseCategory(catText) {
+                    results[idx] = cat
+                }
+            } else {
+                // Try colon separator
+                let colonParts = trimmed.split(separator: ":", maxSplits: 1)
+                if colonParts.count == 2, let idx = Int(colonParts[0].trimmingCharacters(in: .whitespaces)) {
+                    let catText = String(colonParts[1]).trimmingCharacters(in: .whitespaces)
+                    if let cat = parseCategory(catText) {
+                        results[idx] = cat
+                    }
+                }
+            }
+        }
+        return results
     }
 
     static func titlePrompt(activities: [ActivitySummary], category: Category) -> String {
@@ -87,16 +149,11 @@ struct AIPromptBuilder {
         return """
         Generate a short title (5-10 words) for this time block.
         Category: \(category.rawValue)
-        Apps used:
+        Apps:
         \(apps)
 
-        Rules:
-        - Be specific about what was done, not vague
-        - Don't use words like "Various", "Multiple", "Session"
-        - Vary sentence structure (don't always start with a verb)
-        - Examples: "Debugging auth flow in FlowTrack", "Research on SwiftUI Charts API"
-
-        Respond with ONLY the title, nothing else.
+        Be specific. Don't use "Various", "Multiple", "Session".
+        Respond with ONLY the title.
         """
     }
 
@@ -107,12 +164,11 @@ struct AIPromptBuilder {
             return line
         }.joined(separator: "\n")
         return """
-        Summarize this computer activity session in 2-3 sentences.
+        Summarize this session in 2-3 sentences. Be specific about tasks and apps.
         Activities:
         \(apps)
 
-        Be specific about what was accomplished. Mention key apps and tasks.
-        Respond with ONLY the summary, nothing else.
+        Respond with ONLY the summary.
         """
     }
 

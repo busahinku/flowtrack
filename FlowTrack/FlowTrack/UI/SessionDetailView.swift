@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - Session Detail View (popup)
+// MARK: - Session Detail View (popup from StatsView sessions)
 struct SessionDetailView: View {
     let slot: TimeSlot
     @Environment(\.dismiss) private var dismiss
@@ -77,44 +77,10 @@ struct SessionDetailView: View {
                 .padding()
                 .background(theme.cardBg)
                 .cornerRadius(10)
-
-                // Re-categorize
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Category")
-                        .font(.headline)
-                    HStack(spacing: 8) {
-                        ForEach(CategoryManager.shared.selectableCategories, id: \.name) { def in
-                            Button(action: {
-                                // Re-categorize all activities in this slot
-                                for activity in slot.activities {
-                                    // We'd need the record IDs, but for now just show the option
-                                }
-                            }) {
-                                VStack(spacing: 4) {
-                                    Image(systemName: def.icon)
-                                        .font(.title3)
-                                    Text(def.name)
-                                        .font(.caption2)
-                                }
-                                .frame(width: 60, height: 50)
-                                .background(
-                                    slot.category.rawValue == def.name
-                                    ? def.color.opacity(0.2)
-                                    : Color.clear
-                                )
-                                .cornerRadius(8)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-                .padding()
-                .background(theme.cardBg)
-                .cornerRadius(10)
             }
             .padding()
         }
-        .frame(minWidth: 500, minHeight: 400)
+        .frame(minWidth: 500, minHeight: 350)
         .background(theme.timelineBg)
     }
 }
@@ -155,25 +121,6 @@ struct AppDetailRow: View {
                             .font(.caption2)
                             .foregroundStyle(.blue)
                             .lineLimit(1)
-                    }
-                    // Activity timeline
-                    if !activity.timestamps.isEmpty {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Activity Timeline")
-                                .font(.caption2.bold())
-                                .foregroundStyle(.secondary)
-                            ForEach(activity.timestamps.prefix(10), id: \.self) { ts in
-                                HStack(spacing: 6) {
-                                    Circle()
-                                        .fill(.blue)
-                                        .frame(width: 4, height: 4)
-                                    Text(Theme.formatTime(ts))
-                                        .font(.caption2)
-                                        .foregroundStyle(.tertiary)
-                                }
-                            }
-                        }
-                        .padding(.leading, 8)
                     }
                 }
                 .padding(.leading, 32)
