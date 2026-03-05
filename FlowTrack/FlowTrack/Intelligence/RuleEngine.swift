@@ -73,6 +73,7 @@ final class RuleEngine: @unchecked Sendable {
 
     // MARK: - Custom Rules CRUD
     var allCustomRules: [Rule] { customRules }
+    var defaultRuleCount: Int { defaultRules.count }
 
     func addRule(_ rule: Rule) {
         customRules.append(rule)

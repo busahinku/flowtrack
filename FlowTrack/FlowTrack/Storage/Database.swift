@@ -311,4 +311,18 @@ final class Database: Sendable {
             }
         }
     }
+
+    // MARK: - Data Management
+    func clearSessionAI() throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM session_ai")
+        }
+    }
+
+    func clearAllData() throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM activities")
+            try db.execute(sql: "DELETE FROM session_ai")
+        }
+    }
 }
