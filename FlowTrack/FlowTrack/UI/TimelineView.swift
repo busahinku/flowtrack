@@ -177,20 +177,24 @@ struct TimelineView: View {
     private func sessionCard(_ slot: TimeSlot, index: Int, allSlots: [TimeSlot]) -> some View {
         let y = yPosition(for: slot.startTime)
         let naturalHeight = slotHeight(for: slot)
+        // Find next non-idle slot to calculate available space
         let nextY: CGFloat = {
-            if index + 1 < allSlots.count {
-                return yPosition(for: allSlots[index + 1].startTime)
+            for i in (index + 1)..<allSlots.count {
+                if !allSlots[i].isIdle {
+                    return yPosition(for: allSlots[i].startTime)
+                }
             }
-            return y + naturalHeight
+            return y + naturalHeight + 4
         }()
-        let availableSpace = nextY - y - 2
-        let height = max(min(max(naturalHeight, 50), availableSpace), 20)
+        let availableSpace = max(nextY - y - 2, 0)
+        let height = max(min(naturalHeight, availableSpace), 20)
 
         SessionCardView(slot: slot, title: appState.sessionTitle(for: slot))
-            .frame(minHeight: height)
+            .frame(height: height)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.trailing, 16)
             .offset(y: y)
+            .clipped()
     }
 
     // MARK: - Now Indicator
@@ -233,147 +237,54 @@ struct TimelineView: View {
 struct SessionCardView: View {
     let slot: TimeSlot
     let title: String
-    @State private var isExpanded = false
-    @Bindable var appState = AppState.shared
+    @State private var showDetail = false
 
     private var theme: AppTheme { AppSettings.shared.appTheme }
     private var categoryColor: Color { Theme.color(for: slot.category) }
 
     var body: some View {
-        Button(action: { withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() } }) {
+        Button(action: { showDetail = true }) {
             HStack(spacing: 0) {
-                // Category color bar
                 RoundedRectangle(cornerRadius: 2)
                     .fill(categoryColor)
                     .frame(width: 4)
 
-                VStack(alignment: .leading, spacing: 0) {
-                    compactContent
-                    if isExpanded {
-                        expandedContent
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(title)
+                            .font(.caption.bold())
+                            .lineLimit(1)
+                        Spacer()
+                        Text(Theme.formatTimeRange(slot.startTime, slot.endTime))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack(spacing: 4) {
+                        ForEach(slot.activities.prefix(4)) { app in
+                            AppIconImage(bundleID: app.bundleID, size: 12)
+                        }
+                        if slot.activities.count > 4 {
+                            Text("+\(slot.activities.count - 4)")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer()
+                        Text(Theme.formatDuration(slot.duration))
+                            .font(.caption2.bold())
+                            .foregroundStyle(.secondary)
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
             }
-            .background(categoryColor.opacity(0.04))
             .background(theme.cardBg)
             .cornerRadius(8)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-            )
             .shadow(color: .black.opacity(0.06), radius: 3, y: 1)
         }
         .buttonStyle(.plain)
-    }
-
-    // MARK: - Compact Content (always visible)
-    private var compactContent: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: slot.category.icon)
-                    .font(.caption)
-                    .foregroundStyle(categoryColor)
-
-                Text(title)
-                    .font(.caption.bold())
-                    .lineLimit(1)
-
-                Spacer()
-
-                Text(Theme.formatTimeRange(slot.startTime, slot.endTime))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-
-                Text(Theme.formatDuration(slot.duration))
-                    .font(.caption2.bold())
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack(spacing: 6) {
-                // App icons row
-                HStack(spacing: 3) {
-                    ForEach(slot.activities.prefix(3)) { app in
-                        HStack(spacing: 3) {
-                            AppIconImage(bundleID: app.bundleID, size: 12)
-                            Text(app.appName)
-                                .font(.system(size: 10))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                    if slot.activities.count > 3 {
-                        Text("+\(slot.activities.count - 3)")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-
-                Spacer()
-
-                // AI summary preview or uncategorized badge
-                if let summary = appState.sessionSummaries[slot.id] {
-                    Text(summary)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .frame(maxWidth: 200, alignment: .trailing)
-                } else if slot.category == .uncategorized {
-                    Text("Uncategorized")
-                        .font(.system(size: 9).bold())
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Color.orange.opacity(0.1))
-                        .cornerRadius(3)
-                }
-            }
-        }
-    }
-
-    // MARK: - Expanded Content (shown on click)
-    private var expandedContent: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Divider()
-                .padding(.vertical, 4)
-
-            // AI Summary
-            if let summary = appState.sessionSummaries[slot.id] {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("AI Summary", systemImage: "sparkles")
-                        .font(.caption.bold())
-                        .foregroundStyle(categoryColor)
-                    Text(summary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            // All apps with durations
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Apps Used")
-                    .font(.caption.bold())
-
-                ForEach(slot.activities) { activity in
-                    HStack(spacing: 6) {
-                        AppIconImage(bundleID: activity.bundleID, size: 16)
-                        Text(activity.appName)
-                            .font(.caption)
-                        Spacer()
-                        Text(activity.title)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                            .frame(maxWidth: 200, alignment: .trailing)
-                        Text(Theme.formatDuration(activity.duration))
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 1)
-                }
-            }
+        .sheet(isPresented: $showDetail) {
+            SessionDetailView(slot: slot)
         }
     }
 }
