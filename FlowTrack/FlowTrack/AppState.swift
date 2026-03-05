@@ -17,10 +17,16 @@ final class AppState {
     private var refreshTimer: Timer?
     let settings = AppSettings.shared
 
+    // AI category cache: bundleID → category (prevents same app getting different categories)
+    private var aiCategoryCache: [String: Category] = [:]
+
     private init() {
         loadPersistedAIData()
         startTimers()
-        Task { await refreshData() }
+        Task {
+            await reCategorizeWithRules()
+            await refreshData()
+        }
     }
 
     private func startTimers() {
@@ -53,6 +59,37 @@ final class AppState {
         }
     }
 
+    // MARK: - Re-categorize with Rules
+
+    /// Re-runs the rule engine on all Uncategorized activities.
+    /// This catches records that were saved before new rules or learned rules existed.
+    func reCategorizeWithRules() async {
+        do {
+            let uncategorized = try Database.shared.uncategorizedActivities(limit: 5000)
+            guard !uncategorized.isEmpty else { return }
+
+            var updates: [(id: Int64, category: Category)] = []
+            for record in uncategorized {
+                guard let id = record.id else { continue }
+                if let cat = RuleEngine.shared.categorize(
+                    appName: record.appName,
+                    bundleID: record.bundleID,
+                    windowTitle: record.windowTitle,
+                    url: record.url
+                ) {
+                    updates.append((id: id, category: cat))
+                }
+            }
+
+            if !updates.isEmpty {
+                try Database.shared.updateCategoriesBatch(updates)
+                print("[AppState] Re-categorized \(updates.count) activities with rules")
+            }
+        } catch {
+            print("[AppState] Re-categorize error: \(error)")
+        }
+    }
+
     // MARK: - AI Processing
 
     /// Manual AI run — processes ALL unprocessed sessions
@@ -61,8 +98,11 @@ final class AppState {
         isRunningAI = true
         defer { isRunningAI = false }
 
-        await generateAllSessionContent(maxTitles: 50, maxSummaries: 20)
+        // First try rules (fast, free)
+        await reCategorizeWithRules()
+        // Then AI for the rest
         await categorizeBatch(limit: 500)
+        await generateAllSessionContent(maxTitles: 50, maxSummaries: 20)
         await refreshData()
     }
 
@@ -72,8 +112,9 @@ final class AppState {
         isRunningAI = true
         defer { isRunningAI = false }
 
-        await generateAllSessionContent(maxTitles: 8, maxSummaries: 5)
+        await reCategorizeWithRules()
         await categorizeBatch(limit: settings.aiBatchSize)
+        await generateAllSessionContent(maxTitles: 8, maxSummaries: 5)
         await refreshData()
     }
 
@@ -118,11 +159,23 @@ final class AppState {
             guard !uncategorized.isEmpty else { return }
 
             var allUpdates: [(id: Int64, category: Category)] = []
-            let batchSize = 10
 
-            for batchStart in stride(from: 0, to: uncategorized.count, by: batchSize) {
-                let end = min(batchStart + batchSize, uncategorized.count)
-                let batchRecords = Array(uncategorized[batchStart..<end])
+            // First: apply cached AI categories (instant, no API calls)
+            var needsAI: [ActivityRecord] = []
+            for record in uncategorized {
+                guard let id = record.id else { continue }
+                if let cached = aiCategoryCache[record.bundleID.lowercased()] {
+                    allUpdates.append((id: id, category: cached))
+                } else {
+                    needsAI.append(record)
+                }
+            }
+
+            // Then: batch AI categorize the rest
+            let batchSize = 10
+            for batchStart in stride(from: 0, to: needsAI.count, by: batchSize) {
+                let end = min(batchStart + batchSize, needsAI.count)
+                let batchRecords = Array(needsAI[batchStart..<end])
 
                 let items = batchRecords.enumerated().map { (idx, record) in
                     BatchCategorizeItem(
@@ -143,10 +196,11 @@ final class AppState {
                         guard let id = record.id else { continue }
                         if let category = results[idx] {
                             allUpdates.append((id: id, category: category))
+                            // Cache and learn
+                            learnCategory(category, for: record)
                         }
                     }
                 } catch {
-                    // Fall back to individual categorization for this batch
                     print("[AI] Batch categorization failed, falling back to individual: \(error)")
                     for record in batchRecords {
                         guard let id = record.id else { continue }
@@ -160,6 +214,7 @@ final class AppState {
                                 )
                             }
                             allUpdates.append((id: id, category: category))
+                            learnCategory(category, for: record)
                         } catch {
                             print("[AI] Individual categorization failed for \(record.appName): \(error)")
                         }
@@ -169,9 +224,23 @@ final class AppState {
 
             if !allUpdates.isEmpty {
                 try Database.shared.updateCategoriesBatch(allUpdates)
+                print("[AI] Categorized \(allUpdates.count) activities")
             }
         } catch {
             print("[AI] Batch error: \(error)")
+        }
+    }
+
+    /// Cache AI result and teach the rule engine
+    private func learnCategory(_ category: Category, for record: ActivityRecord) {
+        guard category != .uncategorized, category != .idle else { return }
+        let bid = record.bundleID.lowercased()
+        // Only cache for non-browser apps (browsers should be categorized per URL)
+        let browserBIDs = ["safari", "chrome", "firefox", "arc", "brave", "edge", "opera", "vivaldi", "browser"]
+        let isBrowser = browserBIDs.contains(where: { bid.contains($0) })
+        if !isBrowser {
+            aiCategoryCache[bid] = category
+            RuleEngine.shared.learnFromAI(appName: record.appName, bundleID: record.bundleID, category: category)
         }
     }
 
@@ -179,9 +248,21 @@ final class AppState {
 
     func withFallback<T>(_ operation: (any AIProvider) async throws -> T) async throws -> T {
         let chain = providerChain()
+        guard !chain.isEmpty else {
+            throw AIError.invalidResponse("No AI providers configured")
+        }
         var lastError: Error?
 
         for providerType in chain {
+            // Skip providers that need API keys but don't have them
+            if providerType.needsAPIKey {
+                let key = SecureStore.shared.loadKey(for: providerType.rawValue)
+                if key == nil || key?.isEmpty == true {
+                    print("[AI] Skipping \(providerType.rawValue): no API key")
+                    continue
+                }
+            }
+
             let provider = AIProviderFactory.create(for: providerType)
             for attempt in 1...2 {
                 do {
@@ -189,6 +270,9 @@ final class AppState {
                 } catch {
                     print("[AI] \(providerType.rawValue) attempt \(attempt) failed: \(error.localizedDescription)")
                     lastError = error
+                    // Don't retry on noAPIKey or cliNotFound
+                    if case AIError.noAPIKey = error { break }
+                    if case AIError.cliNotFound = error { break }
                 }
             }
         }
@@ -212,8 +296,14 @@ final class AppState {
 
     func sessionTitle(for slot: TimeSlot) -> String {
         if let title = sessionTitles[slot.id] { return title }
-        let topApps = slot.activities.prefix(3).map(\.appName)
-        return topApps.joined(separator: ", ")
+        // Better fallback: show category + top app
+        if let topApp = slot.activities.first {
+            if slot.activities.count > 1 {
+                return "\(topApp.appName) + \(slot.activities.count - 1) more"
+            }
+            return topApp.appName
+        }
+        return slot.category.rawValue
     }
 
     // MARK: - Persistence

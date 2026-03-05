@@ -87,9 +87,8 @@ final class Database: Sendable {
         }
     }
 
-    // MARK: - Sessions for Date (dynamic grouping)
-    func sessionsForDate(_ date: Date, gapThreshold: TimeInterval = 300) throws -> [TimeSlot] {
-        let activities = try activitiesForDate(date)
+    // MARK: - Session Building (shared logic)
+    private func buildSessions(from activities: [ActivityRecord], gapThreshold: TimeInterval = 300) -> [TimeSlot] {
         guard !activities.isEmpty else { return [] }
 
         var sessions: [TimeSlot] = []
@@ -98,14 +97,14 @@ final class Database: Sendable {
         var sessionStart: Date?
 
         for record in activities {
-            if let cat = currentCategory, let start = sessionStart {
-                let gap = record.timestamp.timeIntervalSince(currentActivities.last?.timestamp ?? start)
+            if let cat = currentCategory, let start = sessionStart, let lastActivity = currentActivities.last {
+                let lastEnd = lastActivity.timestamp.addingTimeInterval(lastActivity.duration)
+                let gap = record.timestamp.timeIntervalSince(lastEnd)
                 if record.category.rawValue != cat.rawValue || gap > gapThreshold {
-                    // End current session
-                    let endTime = currentActivities.last.map { $0.timestamp.addingTimeInterval($0.duration) } ?? record.timestamp
+                    let endTime = lastEnd
                     let summaries = buildSummaries(from: currentActivities)
                     let slot = TimeSlot(
-                        id: "\(start.timeIntervalSince1970)-\(endTime.timeIntervalSince1970)",
+                        id: "\(Int(start.timeIntervalSince1970))-\(Int(endTime.timeIntervalSince1970))",
                         startTime: start,
                         endTime: endTime,
                         category: cat,
@@ -129,7 +128,7 @@ final class Database: Sendable {
             let endTime = currentActivities.last.map { $0.timestamp.addingTimeInterval($0.duration) } ?? start
             let summaries = buildSummaries(from: currentActivities)
             let slot = TimeSlot(
-                id: "\(start.timeIntervalSince1970)-\(endTime.timeIntervalSince1970)",
+                id: "\(Int(start.timeIntervalSince1970))-\(Int(endTime.timeIntervalSince1970))",
                 startTime: start,
                 endTime: endTime,
                 category: cat,
@@ -139,54 +138,63 @@ final class Database: Sendable {
             sessions.append(slot)
         }
 
-        return sessions
+        // Merge adjacent sessions with the same category
+        return mergeAdjacentSameCategory(sessions)
+    }
+
+    /// Combines consecutive TimeSlots that share the same category into one.
+    private func mergeAdjacentSameCategory(_ slots: [TimeSlot]) -> [TimeSlot] {
+        guard !slots.isEmpty else { return [] }
+        var merged: [TimeSlot] = []
+        var current = slots[0]
+
+        for i in 1..<slots.count {
+            let next = slots[i]
+            if next.category == current.category && next.isIdle == current.isIdle {
+                // Combine: extend end time, merge activities
+                var combined = Set(current.activities.map { $0.appName })
+                var allActivities = current.activities
+                for a in next.activities {
+                    if !combined.contains(a.appName) {
+                        allActivities.append(a)
+                        combined.insert(a.appName)
+                    } else if let idx = allActivities.firstIndex(where: { $0.appName == a.appName }) {
+                        // Merge duration
+                        allActivities[idx] = ActivitySummary(
+                            appName: a.appName, bundleID: a.bundleID,
+                            title: allActivities[idx].title, url: allActivities[idx].url ?? a.url,
+                            duration: allActivities[idx].duration + a.duration,
+                            timestamps: allActivities[idx].timestamps + a.timestamps
+                        )
+                    }
+                }
+                current = TimeSlot(
+                    id: "\(Int(current.startTime.timeIntervalSince1970))-\(Int(next.endTime.timeIntervalSince1970))",
+                    startTime: current.startTime,
+                    endTime: next.endTime,
+                    category: current.category,
+                    activities: allActivities,
+                    isIdle: current.isIdle
+                )
+            } else {
+                merged.append(current)
+                current = next
+            }
+        }
+        merged.append(current)
+        return merged
+    }
+
+    // MARK: - Sessions for Date
+    func sessionsForDate(_ date: Date, gapThreshold: TimeInterval = 300) throws -> [TimeSlot] {
+        let activities = try activitiesForDate(date)
+        return buildSessions(from: activities, gapThreshold: gapThreshold)
     }
 
     // MARK: - Sessions for Range
     func sessionsForRange(from: Date, to: Date, gapThreshold: TimeInterval = 300) throws -> [TimeSlot] {
         let activities = try activitiesForRange(from: from, to: to)
-        guard !activities.isEmpty else { return [] }
-
-        var sessions: [TimeSlot] = []
-        var currentActivities: [ActivityRecord] = []
-        var currentCategory: Category?
-        var sessionStart: Date?
-
-        for record in activities {
-            if let cat = currentCategory, let start = sessionStart {
-                let gap = record.timestamp.timeIntervalSince(currentActivities.last?.timestamp ?? start)
-                if record.category.rawValue != cat.rawValue || gap > gapThreshold {
-                    let endTime = currentActivities.last.map { $0.timestamp.addingTimeInterval($0.duration) } ?? record.timestamp
-                    let summaries = buildSummaries(from: currentActivities)
-                    let slot = TimeSlot(
-                        id: "\(start.timeIntervalSince1970)-\(endTime.timeIntervalSince1970)",
-                        startTime: start, endTime: endTime,
-                        category: cat, activities: summaries, isIdle: cat == .idle
-                    )
-                    sessions.append(slot)
-                    currentActivities = []
-                    sessionStart = record.timestamp
-                    currentCategory = record.category
-                }
-            } else {
-                sessionStart = record.timestamp
-                currentCategory = record.category
-            }
-            currentActivities.append(record)
-        }
-
-        if let cat = currentCategory, let start = sessionStart, !currentActivities.isEmpty {
-            let endTime = currentActivities.last.map { $0.timestamp.addingTimeInterval($0.duration) } ?? start
-            let summaries = buildSummaries(from: currentActivities)
-            let slot = TimeSlot(
-                id: "\(start.timeIntervalSince1970)-\(endTime.timeIntervalSince1970)",
-                startTime: start, endTime: endTime,
-                category: cat, activities: summaries, isIdle: cat == .idle
-            )
-            sessions.append(slot)
-        }
-
-        return sessions
+        return buildSessions(from: activities, gapThreshold: gapThreshold)
     }
 
     private func buildSummaries(from records: [ActivityRecord]) -> [ActivitySummary] {
