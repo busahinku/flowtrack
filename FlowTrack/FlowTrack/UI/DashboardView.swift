@@ -21,9 +21,8 @@ struct DashboardView: View {
     private var theme: AppTheme { AppSettings.shared.appTheme }
 
     var body: some View {
-        NavigationSplitView {
+        HSplitView {
             sidebar
-        } detail: {
             detailView
         }
         .preferredColorScheme(theme.colorScheme)
@@ -164,7 +163,7 @@ struct DashboardView: View {
             }
         }
         .background(theme.sidebarBg)
-        .frame(minWidth: 210)
+        .frame(minWidth: 210, maxWidth: 250)
     }
 
     @ViewBuilder
@@ -172,13 +171,10 @@ struct DashboardView: View {
         switch selectedTab {
         case .timeline:
             TimelineView()
-                .navigationTitle("")
         case .stats:
             StatsView()
-                .navigationTitle("")
         case .heatmap:
             HeatmapView()
-                .navigationTitle("")
         }
     }
 
