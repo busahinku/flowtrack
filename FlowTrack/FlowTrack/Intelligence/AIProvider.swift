@@ -1,4 +1,7 @@
 import Foundation
+import OSLog
+
+private let aiLogger = Logger(subsystem: "com.flowtrack", category: "AI")
 
 // MARK: - AIError
 enum AIError: Error, LocalizedError {
@@ -81,6 +84,15 @@ struct AIProviderFactory {
 
 // MARK: - AIPromptBuilder
 struct AIPromptBuilder {
+    // MARK: - URL Sanitization
+    /// Strips URL to domain only before sending to external AI providers (avoids leaking tokens/query params).
+    static func domainOnly(from urlString: String) -> String {
+        guard let components = URLComponents(string: urlString), let host = components.host else {
+            return urlString
+        }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+
     static func categorizationPrompt(appName: String, bundleID: String, windowTitle: String, url: String?) -> String {
         let categories = CategoryManager.shared.allCategories
         let catList = categories.map { cat in
@@ -92,7 +104,7 @@ struct AIPromptBuilder {
         App: \(appName) (\(bundleID))
         Title: \(windowTitle)
         """
-        if let url = url { prompt += "\nURL: \(url)" }
+        if let url = url { prompt += "\nURL: \(domainOnly(from: url))" }
         prompt += "\n\nRespond with ONLY the category name."
         return prompt
     }
@@ -110,7 +122,7 @@ struct AIPromptBuilder {
         """
         for item in items {
             var line = "\n\(item.index). \(item.appName) (\(item.bundleID)) — \(item.windowTitle)"
-            if let url = item.url { line += " [\(url)]" }
+            if let url = item.url { line += " [\(domainOnly(from: url))]" }
             prompt += line
         }
         prompt += "\n\nRespond with ONLY numbered categories, one per line: \"1. CategoryName\""
@@ -160,7 +172,7 @@ struct AIPromptBuilder {
     static func summaryPrompt(activities: [ActivitySummary]) -> String {
         let apps = activities.prefix(15).map {
             var line = "\($0.appName) (\(Int($0.duration))s): \($0.title)"
-            if let url = $0.url { line += " [\(url)]" }
+            if let url = $0.url { line += " [\(domainOnly(from: url))]" }
             return line
         }.joined(separator: "\n")
         return """
@@ -205,7 +217,7 @@ struct AIHTTPHelper {
 
         if httpResponse.statusCode == 404 {
             let bodyStr = String(data: data.prefix(500), encoding: .utf8) ?? "(non-utf8)"
-            print("[AI HTTP] 404 from \(url.host ?? ""): \(bodyStr)")
+            aiLogger.error("404 from \(url.host ?? "", privacy: .public): \(bodyStr, privacy: .private)")
             throw AIError.modelNotFound(url.absoluteString)
         }
 
@@ -215,7 +227,7 @@ struct AIHTTPHelper {
 
         if httpResponse.statusCode >= 400 {
             let bodyStr = String(data: data.prefix(500), encoding: .utf8) ?? "(non-utf8)"
-            print("[AI HTTP] \(httpResponse.statusCode) from \(url.host ?? ""): \(bodyStr)")
+            aiLogger.error("\(httpResponse.statusCode) from \(url.host ?? "", privacy: .public): \(bodyStr, privacy: .private)")
             throw AIError.networkError("HTTP \(httpResponse.statusCode): \(String(bodyStr.prefix(200)))")
         }
 

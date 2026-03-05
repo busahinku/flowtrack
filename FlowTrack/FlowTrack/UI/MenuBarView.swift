@@ -1,16 +1,18 @@
 import SwiftUI
+import Combine
 
 struct MenuBarView: View {
     @Bindable var appState = AppState.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openWindow) private var openWindow
+    @State private var currentSessionDuration: String = ""
+    private let sessionTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(spacing: 12) {
             // Status header
             HStack {
-                Image(systemName: "bolt.fill")
-                    .foregroundStyle(.blue)
+                ThemeAwareMenuIcon(size: 20)
                 Text("FlowTrack")
                     .font(.headline)
                 Spacer()
@@ -30,7 +32,14 @@ struct MenuBarView: View {
                     Text(ActivityTracker.shared.currentApp)
                         .font(.caption.bold())
                     Spacer()
+                    if !currentSessionDuration.isEmpty {
+                        Text(currentSessionDuration)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .onReceive(sessionTimer) { _ in updateSessionDuration() }
+                .onAppear { updateSessionDuration() }
             }
 
             // Quick stats
@@ -100,6 +109,20 @@ struct MenuBarView: View {
         }
         .padding()
         .frame(width: 300)
+    }
+
+    private func updateSessionDuration() {
+        let elapsed = Date().timeIntervalSince(ActivityTracker.shared.currentAppSince)
+        let minutes = Int(elapsed / 60)
+        if minutes < 1 {
+            currentSessionDuration = "< 1 min"
+        } else if minutes < 60 {
+            currentSessionDuration = "\(minutes) min"
+        } else {
+            let hours = minutes / 60
+            let mins = minutes % 60
+            currentSessionDuration = mins > 0 ? "\(hours)h \(mins)m" : "\(hours)h"
+        }
     }
 
     private func openDashboard() {

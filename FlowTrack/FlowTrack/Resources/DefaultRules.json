@@ -1,122 +1,552 @@
 [
-  {"matchType": "bundleID", "pattern": "com.apple.dt.Xcode", "category": "Work"},
-  {"matchType": "appName", "pattern": "Xcode", "category": "Work"},
-  {"matchType": "appName", "pattern": "Visual Studio Code", "category": "Work"},
-  {"matchType": "bundleID", "pattern": "com.microsoft.VSCode", "category": "Work"},
-  {"matchType": "appName", "pattern": "IntelliJ", "category": "Work"},
-  {"matchType": "appName", "pattern": "PyCharm", "category": "Work"},
-  {"matchType": "appName", "pattern": "WebStorm", "category": "Work"},
-  {"matchType": "appName", "pattern": "Android Studio", "category": "Work"},
-  {"matchType": "appName", "pattern": "Sublime Text", "category": "Work"},
-  {"matchType": "appName", "pattern": "Cursor", "category": "Work"},
-  {"matchType": "appName", "pattern": "Nova", "category": "Work"},
-  {"matchType": "appName", "pattern": "Zed", "category": "Work"},
-  {"matchType": "appName", "pattern": "Terminal", "category": "Work"},
-  {"matchType": "appName", "pattern": "iTerm", "category": "Work"},
-  {"matchType": "appName", "pattern": "Warp", "category": "Work"},
-  {"matchType": "appName", "pattern": "Ghostty", "category": "Work"},
-  {"matchType": "bundleID", "pattern": "com.mitchellh.ghostty", "category": "Work"},
-  {"matchType": "appName", "pattern": "FlowTrack", "category": "Productivity"},
-  {"matchType": "bundleID", "pattern": "com.buraksahinkucuk.FlowTrack", "category": "Productivity"},
-  {"matchType": "appName", "pattern": "TablePlus", "category": "Work"},
-  {"matchType": "appName", "pattern": "Postman", "category": "Work"},
-  {"matchType": "appName", "pattern": "Docker", "category": "Work"},
-  {"matchType": "appName", "pattern": "GitHub Desktop", "category": "Work"},
-  {"matchType": "appName", "pattern": "Tower", "category": "Work"},
-  {"matchType": "appName", "pattern": "Fork", "category": "Work"},
-
-  {"matchType": "domain", "pattern": "github.com", "category": "Work"},
-  {"matchType": "domain", "pattern": "gitlab.com", "category": "Work"},
-  {"matchType": "domain", "pattern": "bitbucket.org", "category": "Work"},
-  {"matchType": "domain", "pattern": "stackoverflow.com", "category": "Work"},
-  {"matchType": "domain", "pattern": "developer.apple.com", "category": "Learning"},
-  {"matchType": "domain", "pattern": "docs.swift.org", "category": "Learning"},
-  {"matchType": "domain", "pattern": "chatgpt.com", "category": "Work"},
-  {"matchType": "domain", "pattern": "claude.ai", "category": "Work"},
-  {"matchType": "domain", "pattern": "gemini.google.com", "category": "Work"},
-  {"matchType": "domain", "pattern": "vercel.com", "category": "Work"},
-  {"matchType": "domain", "pattern": "netlify.com", "category": "Work"},
-  {"matchType": "domain", "pattern": "heroku.com", "category": "Work"},
-
-  {"matchType": "appName", "pattern": "Notion", "category": "Productivity"},
-  {"matchType": "appName", "pattern": "Obsidian", "category": "Productivity"},
-  {"matchType": "appName", "pattern": "Linear", "category": "Productivity"},
-  {"matchType": "appName", "pattern": "Jira", "category": "Productivity"},
-  {"matchType": "appName", "pattern": "Asana", "category": "Productivity"},
-  {"matchType": "appName", "pattern": "Trello", "category": "Productivity"},
-  {"matchType": "appName", "pattern": "Calendar", "category": "Productivity"},
-  {"matchType": "appName", "pattern": "Notes", "category": "Productivity"},
-  {"matchType": "appName", "pattern": "Reminders", "category": "Productivity"},
-  {"matchType": "appName", "pattern": "Numbers", "category": "Productivity"},
-  {"matchType": "appName", "pattern": "Excel", "category": "Productivity"},
-  {"matchType": "appName", "pattern": "Sheets", "category": "Productivity"},
-
-  {"matchType": "appName", "pattern": "Figma", "category": "Creative"},
-  {"matchType": "appName", "pattern": "Sketch", "category": "Creative"},
-  {"matchType": "appName", "pattern": "Photoshop", "category": "Creative"},
-  {"matchType": "appName", "pattern": "Illustrator", "category": "Creative"},
-  {"matchType": "appName", "pattern": "Canva", "category": "Creative"},
-  {"matchType": "appName", "pattern": "Blender", "category": "Creative"},
-  {"matchType": "appName", "pattern": "Final Cut", "category": "Creative"},
-  {"matchType": "appName", "pattern": "Logic Pro", "category": "Creative"},
-  {"matchType": "appName", "pattern": "GarageBand", "category": "Creative"},
-  {"matchType": "domain", "pattern": "figma.com", "category": "Creative"},
-  {"matchType": "domain", "pattern": "canva.com", "category": "Creative"},
-
-  {"matchType": "appName", "pattern": "Slack", "category": "Communication"},
-  {"matchType": "appName", "pattern": "Discord", "category": "Communication"},
-  {"matchType": "appName", "pattern": "Microsoft Teams", "category": "Communication"},
-  {"matchType": "appName", "pattern": "Zoom", "category": "Communication"},
-  {"matchType": "appName", "pattern": "Messages", "category": "Communication"},
-  {"matchType": "appName", "pattern": "Mail", "category": "Communication"},
-  {"matchType": "appName", "pattern": "Outlook", "category": "Communication"},
-  {"matchType": "appName", "pattern": "Telegram", "category": "Communication"},
-  {"matchType": "appName", "pattern": "WhatsApp", "category": "Communication"},
-  {"matchType": "domain", "pattern": "slack.com", "category": "Communication"},
-  {"matchType": "domain", "pattern": "discord.com", "category": "Communication"},
-  {"matchType": "domain", "pattern": "mail.google.com", "category": "Communication"},
-
-  {"matchType": "domain", "pattern": "khanacademy.org", "category": "Learning"},
-  {"matchType": "domain", "pattern": "coursera.org", "category": "Learning"},
-  {"matchType": "domain", "pattern": "udemy.com", "category": "Learning"},
-  {"matchType": "domain", "pattern": "edx.org", "category": "Learning"},
-  {"matchType": "domain", "pattern": "freecodecamp.org", "category": "Learning"},
-  {"matchType": "domain", "pattern": "medium.com", "category": "Learning"},
-  {"matchType": "domain", "pattern": "dev.to", "category": "Learning"},
-
-  {"matchType": "domain", "pattern": "reddit.com", "category": "Distraction"},
-  {"matchType": "domain", "pattern": "twitter.com", "category": "Distraction"},
-  {"matchType": "domain", "pattern": "x.com", "category": "Distraction"},
-  {"matchType": "domain", "pattern": "instagram.com", "category": "Distraction"},
-  {"matchType": "domain", "pattern": "tiktok.com", "category": "Distraction"},
-  {"matchType": "domain", "pattern": "facebook.com", "category": "Distraction"},
-  {"matchType": "domain", "pattern": "9gag.com", "category": "Distraction"},
-  {"matchType": "domain", "pattern": "buzzfeed.com", "category": "Distraction"},
-
-  {"matchType": "domain", "pattern": "youtube.com", "category": "Entertainment"},
-  {"matchType": "domain", "pattern": "netflix.com", "category": "Entertainment"},
-  {"matchType": "domain", "pattern": "twitch.tv", "category": "Entertainment"},
-  {"matchType": "domain", "pattern": "spotify.com", "category": "Entertainment"},
-  {"matchType": "appName", "pattern": "Spotify", "category": "Entertainment"},
-  {"matchType": "appName", "pattern": "Music", "category": "Entertainment"},
-  {"matchType": "appName", "pattern": "TV", "category": "Entertainment"},
-  {"matchType": "appName", "pattern": "Podcasts", "category": "Entertainment"},
-
-  {"matchType": "appName", "pattern": "Finder", "category": "Personal"},
-  {"matchType": "appName", "pattern": "System Settings", "category": "Personal"},
-  {"matchType": "appName", "pattern": "System Preferences", "category": "Personal"},
-  {"matchType": "appName", "pattern": "1Password", "category": "Personal"},
-  {"matchType": "appName", "pattern": "Bitwarden", "category": "Personal"},
-  {"matchType": "appName", "pattern": "CleanMyMac", "category": "Personal"},
-  {"matchType": "appName", "pattern": "App Store", "category": "Personal"},
-  {"matchType": "appName", "pattern": "Preview", "category": "Personal"},
-  {"matchType": "appName", "pattern": "Calculator", "category": "Personal"},
-
-  {"matchType": "domain", "pattern": "amazon.com", "category": "Personal"},
-  {"matchType": "domain", "pattern": "google.com/maps", "category": "Personal"},
-  {"matchType": "domain", "pattern": "maps.google.com", "category": "Personal"},
-
-  {"matchType": "appName", "pattern": "Health", "category": "Health"},
-  {"matchType": "appName", "pattern": "Fitness", "category": "Health"},
-  {"matchType": "domain", "pattern": "strava.com", "category": "Health"}
+  {
+    "matchType": "bundleID",
+    "pattern": "com.apple.dt.Xcode",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Xcode",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Visual Studio Code",
+    "category": "Work"
+  },
+  {
+    "matchType": "bundleID",
+    "pattern": "com.microsoft.VSCode",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "IntelliJ",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "PyCharm",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "WebStorm",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Android Studio",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Sublime Text",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Cursor",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Nova",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Zed",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Terminal",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "iTerm",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Warp",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Ghostty",
+    "category": "Work"
+  },
+  {
+    "matchType": "bundleID",
+    "pattern": "com.mitchellh.ghostty",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "FlowTrack",
+    "category": "Work"
+  },
+  {
+    "matchType": "bundleID",
+    "pattern": "com.buraksahinkucuk.FlowTrack",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "TablePlus",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Postman",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Docker",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "GitHub Desktop",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Tower",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Fork",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "github.com",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "gitlab.com",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "bitbucket.org",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "stackoverflow.com",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "developer.apple.com",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "docs.swift.org",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "chatgpt.com",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "claude.ai",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "gemini.google.com",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "vercel.com",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "netlify.com",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "heroku.com",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Notion",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Obsidian",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Linear",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Jira",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Asana",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Trello",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Calendar",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Notes",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Reminders",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Numbers",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Excel",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Sheets",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Figma",
+    "category": "Creative"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Sketch",
+    "category": "Creative"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Photoshop",
+    "category": "Creative"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Illustrator",
+    "category": "Creative"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Canva",
+    "category": "Creative"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Blender",
+    "category": "Creative"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Final Cut",
+    "category": "Creative"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Logic Pro",
+    "category": "Creative"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "GarageBand",
+    "category": "Creative"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "figma.com",
+    "category": "Creative"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "canva.com",
+    "category": "Creative"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Slack",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Discord",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Microsoft Teams",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Zoom",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Messages",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Mail",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Outlook",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Telegram",
+    "category": "Work"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "WhatsApp",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "slack.com",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "discord.com",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "mail.google.com",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "khanacademy.org",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "coursera.org",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "udemy.com",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "edx.org",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "freecodecamp.org",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "medium.com",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "dev.to",
+    "category": "Work"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "reddit.com",
+    "category": "Distraction"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "twitter.com",
+    "category": "Distraction"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "x.com",
+    "category": "Distraction"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "instagram.com",
+    "category": "Distraction"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "tiktok.com",
+    "category": "Distraction"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "facebook.com",
+    "category": "Distraction"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "9gag.com",
+    "category": "Distraction"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "buzzfeed.com",
+    "category": "Distraction"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "youtube.com",
+    "category": "Entertainment"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "netflix.com",
+    "category": "Entertainment"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "twitch.tv",
+    "category": "Entertainment"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "spotify.com",
+    "category": "Entertainment"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Spotify",
+    "category": "Entertainment"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Music",
+    "category": "Entertainment"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "TV",
+    "category": "Entertainment"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Podcasts",
+    "category": "Entertainment"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Finder",
+    "category": "Personal"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "System Settings",
+    "category": "Personal"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "System Preferences",
+    "category": "Personal"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "1Password",
+    "category": "Personal"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Bitwarden",
+    "category": "Personal"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "CleanMyMac",
+    "category": "Personal"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "App Store",
+    "category": "Personal"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Preview",
+    "category": "Personal"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Calculator",
+    "category": "Personal"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "amazon.com",
+    "category": "Personal"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "google.com/maps",
+    "category": "Personal"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "maps.google.com",
+    "category": "Personal"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Health",
+    "category": "Personal"
+  },
+  {
+    "matchType": "appName",
+    "pattern": "Fitness",
+    "category": "Personal"
+  },
+  {
+    "matchType": "domain",
+    "pattern": "strava.com",
+    "category": "Personal"
+  }
 ]

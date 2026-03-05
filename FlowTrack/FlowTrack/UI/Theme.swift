@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(AppKit)
+import AppKit
+#endif
 
 // MARK: - AppTheme
 enum AppTheme: String, CaseIterable, Identifiable, Sendable {
@@ -75,6 +78,96 @@ enum AppTheme: String, CaseIterable, Identifiable, Sendable {
         case .pastel: return Color(red: 0.6, green: 0.4, blue: 0.8)
         case .midnight: return Color(red: 0.3, green: 0.4, blue: 0.9)
         }
+    }
+
+    /// Asset name for menu bar / in-app logo by theme. For .system, pass current colorScheme.
+    func menuBarIconName(under colorScheme: ColorScheme?) -> String {
+        switch self {
+        case .system:
+            return (colorScheme == .dark) ? "WhiteLogo" : "DarkLogo"
+        case .light:
+            return "DarkLogo"
+        case .dark, .midnight:
+            return "WhiteLogo"
+        case .pastel:
+            return "PastelLogo"
+        }
+    }
+}
+
+// MARK: - Menu bar icon: follows macOS menu bar appearance (not app theme)
+// Light menu bar → DarkLogo. Dark menu bar → WhiteLogo. So it matches other menu bar icons.
+struct MenuBarIconView: View {
+    @State private var isMenuBarDark: Bool = {
+        NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }()
+    var size: CGFloat = 18
+
+    var body: some View {
+        Group {
+            if let nsImage = loadIcon(name: isMenuBarDark ? "WhiteLogo" : "DarkLogo", side: size) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: size))
+            }
+        }
+        .frame(width: size, height: size)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            isMenuBarDark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        }
+    }
+
+    private func loadIcon(name: String, side: CGFloat) -> NSImage? {
+        guard let img = NSImage(named: name) else { return nil }
+        let targetSize = NSSize(width: side, height: side)
+        let newImage = NSImage(size: targetSize)
+        newImage.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .high
+        img.draw(in: NSRect(origin: .zero, size: targetSize),
+                 from: NSRect(origin: .zero, size: img.size),
+                 operation: .copy,
+                 fraction: 1)
+        newImage.unlockFocus()
+        return newImage
+    }
+}
+
+// MARK: - Theme-aware icon for in-app only (headers, onboarding) — uses app theme
+struct ThemeAwareMenuIcon: View {
+    @Bindable private var settings = AppSettings.shared
+    @Environment(\.colorScheme) private var colorScheme
+
+    var size: CGFloat = 18
+
+    var body: some View {
+        Group {
+            if let nsImage = loadIcon(name: settings.appTheme.menuBarIconName(under: colorScheme), side: size) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: size))
+            }
+        }
+        .frame(width: size, height: size)
+    }
+
+    private func loadIcon(name: String, side: CGFloat) -> NSImage? {
+        guard let img = NSImage(named: name) else { return nil }
+        let targetSize = NSSize(width: side, height: side)
+        let newImage = NSImage(size: targetSize)
+        newImage.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .high
+        img.draw(in: NSRect(origin: .zero, size: targetSize),
+                 from: NSRect(origin: .zero, size: img.size),
+                 operation: .copy,
+                 fraction: 1)
+        newImage.unlockFocus()
+        return newImage
     }
 }
 

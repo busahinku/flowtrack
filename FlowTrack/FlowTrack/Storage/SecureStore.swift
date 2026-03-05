@@ -1,58 +1,59 @@
 import Foundation
+import KeychainSwift
+import OSLog
 
-// MARK: - SecureStore (file-based API key storage)
+private let secureStoreLogger = Logger(subsystem: "com.flowtrack", category: "SecureStore")
+
+// MARK: - SecureStore (Keychain-backed API key storage)
 final class SecureStore: @unchecked Sendable {
     static let shared = SecureStore()
 
-    private var cache: [String: String] = [:]
+    private let keychain: KeychainSwift
     private let lock = NSLock()
-    private let fileURL: URL
 
     private init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let folder = appSupport.appendingPathComponent("FlowTrack")
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        self.fileURL = folder.appendingPathComponent(".apikeys")
-        loadFromDisk()
+        keychain = KeychainSwift(keyPrefix: "FlowTrack_")
+        keychain.synchronizable = false
+        migrateFromFileIfNeeded()
     }
 
     func save(key: String, for provider: String) {
         lock.lock()
         defer { lock.unlock() }
-        cache[provider] = key
-        saveToDisk()
-        print("[SecureStore] Saved API key for \(provider)")
+        keychain.set(key, forKey: provider)
+        secureStoreLogger.debug("Saved API key for \(provider, privacy: .private)")
     }
 
     func loadKey(for provider: String) -> String? {
         lock.lock()
         defer { lock.unlock() }
-        return cache[provider]
+        return keychain.get(provider)
     }
 
     func hasKey(for provider: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        return cache[provider] != nil && !cache[provider]!.isEmpty
+        guard let key = keychain.get(provider) else { return false }
+        return !key.isEmpty
     }
 
     func deleteKey(for provider: String) {
         lock.lock()
         defer { lock.unlock() }
-        cache.removeValue(forKey: provider)
-        saveToDisk()
+        keychain.delete(provider)
     }
 
-    private func loadFromDisk() {
-        guard let data = try? Data(contentsOf: fileURL),
+    /// One-time migration: reads the old plaintext .apikeys file, moves keys to Keychain, then deletes the file.
+    private func migrateFromFileIfNeeded() {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let fileURL = appSupport.appendingPathComponent("FlowTrack/.apikeys")
+        guard FileManager.default.fileExists(atPath: fileURL.path),
+              let data = try? Data(contentsOf: fileURL),
               let dict = try? JSONDecoder().decode([String: String].self, from: data) else { return }
-        cache = dict
-    }
-
-    private func saveToDisk() {
-        guard let data = try? JSONEncoder().encode(cache) else { return }
-        try? data.write(to: fileURL, options: .atomic)
-        // Set file permissions to owner-only
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+        for (provider, key) in dict where !key.isEmpty {
+            keychain.set(key, forKey: provider)
+        }
+        try? FileManager.default.removeItem(at: fileURL)
+        secureStoreLogger.info("Migrated API keys from plaintext file to Keychain")
     }
 }

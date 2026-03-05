@@ -51,7 +51,7 @@ final class CategoryManager: @unchecked Sendable {
         if let data = try? Data(contentsOf: fileURL),
            let loaded = try? JSONDecoder().decode([CategoryDefinition].self, from: data) {
             self.definitions = loaded
-            // Migrate: add missing categories (e.g. Productivity) and aiPrompts
+            // Migrate: add missing categories and aiPrompts; remap removed categories
             migrateDefaults()
         } else {
             self.definitions = Self.defaultDefinitions
@@ -62,6 +62,17 @@ final class CategoryManager: @unchecked Sendable {
     private func migrateDefaults() {
         var changed = false
         let defaults = Dictionary(uniqueKeysWithValues: Self.defaultDefinitions.map { ($0.name, $0) })
+
+        // Remap removed categories to their new homes
+        let remapped = ["Communication": "Work", "Learning": "Work", "Health": "Personal", "Productivity": "Work"]
+        for (old, new) in remapped {
+            if let idx = definitions.firstIndex(where: { $0.name == old }) {
+                definitions.remove(at: idx)
+                changed = true
+            }
+            _ = new // suppress unused warning
+        }
+
         // Add default categories that don't exist yet
         for def in Self.defaultDefinitions {
             if !definitions.contains(where: { $0.name == def.name }) {
@@ -81,21 +92,13 @@ final class CategoryManager: @unchecked Sendable {
 
     static let defaultDefinitions: [CategoryDefinition] = [
         CategoryDefinition(name: "Work", colorHex: "#3B82F6", icon: "briefcase.fill", isProductive: true, isSystem: false,
-                           aiPrompt: "Coding, software development, IDEs, terminals, Git, code editors, programming tools, DevOps, databases, API testing"),
-        CategoryDefinition(name: "Productivity", colorHex: "#10B981", icon: "chart.bar.fill", isProductive: true, isSystem: false,
-                           aiPrompt: "Planning, notes, calendars, task management, project management, documentation, spreadsheets, time tracking, Notion, Obsidian"),
-        CategoryDefinition(name: "Personal", colorHex: "#22C55E", icon: "person.fill", isProductive: false, isSystem: false,
-                           aiPrompt: "Personal activities, banking, shopping, food delivery, personal email, personal finance, travel booking"),
-        CategoryDefinition(name: "Distraction", colorHex: "#EF4444", icon: "eye.slash.fill", isProductive: false, isSystem: false,
-                           aiPrompt: "Social media scrolling, news feeds, Reddit, Twitter/X, TikTok, Instagram, YouTube shorts, memes, clickbait, non-work browsing"),
-        CategoryDefinition(name: "Communication", colorHex: "#06B6D4", icon: "bubble.left.and.bubble.right.fill", isProductive: true, isSystem: false,
-                           aiPrompt: "Email, Slack, Discord, Teams, Zoom, video calls, messaging, chat apps, work communication"),
-        CategoryDefinition(name: "Learning", colorHex: "#8B5CF6", icon: "book.fill", isProductive: true, isSystem: false,
-                           aiPrompt: "Online courses, tutorials, documentation reading, Stack Overflow research, educational content, tech articles, learning platforms"),
+                           aiPrompt: "Coding, software development, IDEs, terminals, Git, programming tools, DevOps, databases, API testing, email (Mail, Outlook, Gmail), work communication (Slack, Teams, Zoom, Discord, Messages, chat), online learning, tutorials, documentation, courses, Stack Overflow, tech articles, planning, notes, calendars, task management, project management, spreadsheets, Notion, Obsidian"),
         CategoryDefinition(name: "Creative", colorHex: "#EC4899", icon: "paintbrush.fill", isProductive: true, isSystem: false,
                            aiPrompt: "Design tools, Figma, Photoshop, illustration, video editing, music production, creative writing, 3D modeling"),
-        CategoryDefinition(name: "Health", colorHex: "#14B8A6", icon: "heart.fill", isProductive: false, isSystem: false,
-                           aiPrompt: "Fitness apps, health tracking, meditation, workout timers, nutrition tracking, mental health apps"),
+        CategoryDefinition(name: "Personal", colorHex: "#22C55E", icon: "person.fill", isProductive: false, isSystem: false,
+                           aiPrompt: "Personal activities, banking, shopping, food delivery, personal finance, travel booking, fitness, health tracking, meditation, system settings, Finder"),
+        CategoryDefinition(name: "Distraction", colorHex: "#EF4444", icon: "eye.slash.fill", isProductive: false, isSystem: false,
+                           aiPrompt: "Social media scrolling, news feeds, Reddit, Twitter/X, TikTok, Instagram, YouTube shorts, memes, clickbait, non-work browsing"),
         CategoryDefinition(name: "Entertainment", colorHex: "#F97316", icon: "play.circle.fill", isProductive: false, isSystem: false,
                            aiPrompt: "Streaming video, Netflix, movies, TV shows, gaming, music listening, Spotify, podcasts, leisure content"),
         CategoryDefinition(name: "Idle", colorHex: "#9CA3AF", icon: "moon.fill", isProductive: false, isSystem: true,

@@ -10,14 +10,15 @@ struct Category: RawRepresentable, Codable, Hashable, Sendable {
     static let idle = Category(rawValue: "Idle")
     static let uncategorized = Category(rawValue: "Uncategorized")
     static let work = Category(rawValue: "Work")
-    static let productivity = Category(rawValue: "Productivity")
+    static let productivity = Category(rawValue: "Work")  // merged into Work
     static let personal = Category(rawValue: "Personal")
     static let distraction = Category(rawValue: "Distraction")
-    static let communication = Category(rawValue: "Communication")
-    static let learning = Category(rawValue: "Learning")
     static let creative = Category(rawValue: "Creative")
-    static let health = Category(rawValue: "Health")
     static let entertainment = Category(rawValue: "Entertainment")
+    // Legacy aliases — kept for backward compat with any stored data
+    static let communication = Category(rawValue: "Work")
+    static let learning = Category(rawValue: "Work")
+    static let health = Category(rawValue: "Personal")
 
     var isProductive: Bool {
         CategoryManager.shared.definition(for: self)?.isProductive ?? false
@@ -83,7 +84,7 @@ struct ActivitySummary: Identifiable, Sendable {
     let timestamps: [Date]
 
     init(appName: String, bundleID: String, title: String, url: String?, duration: TimeInterval, timestamps: [Date] = []) {
-        self.id = "\(appName)-\(title)-\(duration)"
+        self.id = "\(bundleID)-\(timestamps.first.map { Int($0.timeIntervalSince1970) } ?? 0)"
         self.appName = appName
         self.bundleID = bundleID
         self.title = title
@@ -261,6 +262,18 @@ final class AppSettings {
     var appTheme: AppTheme {
         didSet { UserDefaults.standard.set(appTheme.rawValue, forKey: "appTheme") }
     }
+    var captureWindowTitles: Bool {
+        didSet { UserDefaults.standard.set(captureWindowTitles, forKey: "captureWindowTitles") }
+    }
+    var excludedBundleIDs: [String] {
+        didSet { UserDefaults.standard.set(excludedBundleIDs, forKey: "excludedBundleIDs") }
+    }
+    var idleThresholdSeconds: Int {
+        didSet { UserDefaults.standard.set(idleThresholdSeconds, forKey: "idleThresholdSeconds") }
+    }
+    var distractionAlertMinutes: Int {
+        didSet { UserDefaults.standard.set(distractionAlertMinutes, forKey: "distractionAlertMinutes") }
+    }
 
     private init() {
         let defaults = UserDefaults.standard
@@ -275,6 +288,10 @@ final class AppSettings {
         self.launchAtLogin = defaults.bool(forKey: "launchAtLogin")
         self.hasCompletedOnboarding = defaults.bool(forKey: "hasCompletedOnboarding")
         self.appTheme = AppTheme(rawValue: defaults.string(forKey: "appTheme") ?? "") ?? .system
+        self.captureWindowTitles = defaults.object(forKey: "captureWindowTitles") as? Bool ?? true
+        self.excludedBundleIDs = defaults.stringArray(forKey: "excludedBundleIDs") ?? []
+        self.idleThresholdSeconds = defaults.object(forKey: "idleThresholdSeconds") as? Int ?? 120
+        self.distractionAlertMinutes = defaults.object(forKey: "distractionAlertMinutes") as? Int ?? 0
     }
 
     func modelName(for provider: AIProviderType) -> String {

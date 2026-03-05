@@ -28,22 +28,25 @@ struct StatsView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
-                dateNavigation
                 summaryCards
                 HStack(alignment: .top, spacing: 16) {
                     categoryDonut
-                    hourlyChart
+                        .frame(maxHeight: .infinity)
+                    activityChart
+                        .frame(maxHeight: .infinity)
                 }
-                productivityFlow
+                periodProductivityFlow
+                distractionSection
                 topApps
                 sessionsSection
             }
             .padding()
         }
         .background(theme.timelineBg)
+        .toolbarBackground(theme.timelineBg, for: .windowToolbar)
         .onAppear { loadData() }
         .onChange(of: selectedDate) { Task { loadData() } }
-        .onChange(of: period) { Task { loadData() } }
+        .onChange(of: period) { selectedHourStat = nil; selectedFlowHour = nil; Task { loadData() } }
         .sheet(item: $selectedApp) { app in
             AppDetailSheet(app: app, allActivities: allActivities)
         }
@@ -53,78 +56,101 @@ struct StatsView: View {
         .sheet(item: $selectedCatStat) { stat in
             CategoryDetailSheet(stat: stat, activities: allActivities.filter { $0.category.rawValue == stat.category.rawValue })
         }
+        .toolbar {
+            // Period picker — custom capsule style, no system segmented background
+            ToolbarItem(placement: .principal) {
+                periodPicker
+            }
+
+            // Date navigation — right
+            ToolbarItemGroup(placement: .primaryAction) {
+                statsDateNav
+            }
+        }
     }
 
-    // MARK: - Date Navigation
-    private var dateNavigation: some View {
-        HStack(spacing: 12) {
-            // Period picker
-            Picker("Period", selection: $period) {
-                ForEach(StatsPeriod.allCases, id: \.self) { p in
-                    Text(p.rawValue).tag(p)
-                }
+    private var periodPicker: some View {
+        HStack(spacing: 2) {
+            ForEach(StatsPeriod.allCases, id: \.self) { p in
+                Button(p.rawValue) { period = p }
+                    .buttonStyle(.plain)
+                    .font(.subheadline.weight(period == p ? .semibold : .regular))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(
+                        period == p ? theme.accentColor : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 6)
+                    )
+                    .foregroundStyle(period == p ? .white : .secondary)
+                    .animation(.easeInOut(duration: 0.15), value: period)
             }
-            .pickerStyle(.segmented)
-            .frame(width: 240)
-            .labelsHidden()
+        }
+    }
 
-            Spacer()
-
-            HStack(spacing: 4) {
-                if !Calendar.current.isDateInToday(selectedDate) {
-                    Button("Today") {
-                        selectedDate = Date()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-
-                Button(action: navigateBack) {
-                    Image(systemName: "chevron.left")
-                        .font(.caption.bold())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24, height: 24)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                Button(action: { showDatePicker.toggle() }) {
-                    Text(dateRangeLabel)
-                        .font(.headline)
-                }
-                .buttonStyle(.plain)
-                .popover(isPresented: $showDatePicker) {
-                    DatePicker("Select Date", selection: $selectedDate, displayedComponents: .date)
-                        .datePickerStyle(.graphical)
-                        .padding()
-                        .frame(width: 320)
-                }
-
-                Button(action: navigateForward) {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.bold())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24, height: 24)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+    private var statsDateNav: some View {
+        HStack(spacing: 2) {
+            if !isCurrentPeriod {
+                Button("Today") { selectedDate = Date() }
+                    .buttonStyle(.plain)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(theme.accentColor)
             }
+
+            Button(action: navigateBack) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+
+            Button { showDatePicker.toggle() } label: {
+                Text(dateRangeLabel)
+                    .font(.headline)
+                    .frame(minWidth: 90)
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showDatePicker) {
+                DatePicker("Select Date", selection: $selectedDate, displayedComponents: .date)
+                    .datePickerStyle(.graphical)
+                    .padding()
+                    .frame(width: 320)
+            }
+
+            Button(action: navigateForward) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private var isCurrentPeriod: Bool {
+        switch period {
+        case .day:   return Calendar.current.isDateInToday(selectedDate)
+        case .week:  return Calendar.current.isDate(selectedDate, equalTo: Date(), toGranularity: .weekOfYear)
+        case .month: return Calendar.current.isDate(selectedDate, equalTo: Date(), toGranularity: .month)
         }
     }
 
     // MARK: - Summary Cards
     private var summaryCards: some View {
         HStack(spacing: 12) {
-            SummaryCard(title: "Total Active", value: Theme.formatDuration(totalActiveSeconds),
+            SummaryCard(title: "Active", value: Theme.formatDuration(totalActiveSeconds),
                        icon: "clock.fill", color: .blue)
             SummaryCard(title: "Productive", value: "\(Int(productivePercent))%",
                        icon: "checkmark.circle.fill", color: .green)
-            SummaryCard(title: "Distraction", value: "\(Int(distractionPercent))%",
+            SummaryCard(title: "Distraction", value: Theme.formatDuration(distractionSeconds),
                        icon: "eye.slash.fill", color: .red)
             SummaryCard(title: "Sessions", value: "\(periodTimeSlots.filter { !$0.isIdle }.count)",
                        icon: "square.stack.fill", color: .purple)
-            SummaryCard(title: "Top App", value: topAppName,
-                       icon: "star.fill", color: .orange)
+            SummaryCard(title: "Focus Score",
+                       value: totalActiveSeconds > 0 ? "\(Int(productivePercent))%" : "—",
+                       icon: "brain", color: theme.accentColor)
         }
     }
 
@@ -194,7 +220,7 @@ struct StatsView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
         .background(theme.cardBg)
         .cornerRadius(12)
@@ -202,127 +228,337 @@ struct StatsView: View {
 
     @State private var chartAngleSelection: Double?
 
-    // MARK: - Hourly Chart
-    private var hourlyChart: some View {
+    // MARK: - Activity Chart (period-aware: hours for day, days for week/month)
+    private var activityChart: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Hourly Activity")
+                Text(period == .day ? "Hourly Activity" : "Daily Activity")
                     .font(.headline)
                 Spacer()
-                if let h = selectedHourStat {
-                    let total = hourlyStats.filter { $0.hour == h }.reduce(0.0) { $0 + $1.minutes }
-                    Text("\(h == 0 ? 12 : (h > 12 ? h - 12 : h)):00 \(h < 12 ? "AM" : "PM") — \(Int(total))m")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(theme.accentColor.opacity(0.1))
-                        .cornerRadius(6)
+                Group {
+                    if let x = selectedHourStat {
+                        Text(activitySelectionLabel(x))
+                    } else {
+                        Text(" ")
+                    }
                 }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(theme.accentColor.opacity(selectedHourStat != nil ? 0.1 : 0))
+                .cornerRadius(6)
             }
 
-            Chart(hourlyStats) { stat in
-                BarMark(
-                    x: .value("Hour", stat.hour),
-                    y: .value("Minutes", stat.minutes),
-                    width: .fixed(max(8, 400.0 / 24.0 - 2))
-                )
-                .foregroundStyle(Theme.color(for: stat.category))
-                .opacity(selectedHourStat == stat.hour ? 0.7 : 1.0)
+            switch period {
+            case .day:   dayActivityChart
+            case .week:  weekActivityChart
+            case .month: monthActivityChart
             }
-            .chartXScale(domain: 0...23)
-            .chartXSelection(value: $selectedHourStat)
-            .chartXAxis {
-                AxisMarks(values: Array(stride(from: 0, through: 23, by: 3))) { value in
-                    AxisValueLabel {
-                        if let h = value.as(Int.self) {
-                            Text("\(h == 0 ? 12 : (h > 12 ? h - 12 : h))\(h < 12 ? "a" : "p")")
-                                .font(.caption2)
-                        }
-                    }
-                    AxisGridLine()
-                }
-            }
-            .frame(height: 200)
+
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
         .background(theme.cardBg)
         .cornerRadius(12)
     }
 
-    // MARK: - Productivity Flow
-    private var productivityFlow: some View {
+    private var dayActivityChart: some View {
+        Chart(hourlyStats) { stat in
+            BarMark(
+                x: .value("Hour", stat.hour),
+                y: .value("Minutes", stat.minutes),
+                width: .fixed(max(8, 400.0 / 24.0 - 2))
+            )
+            .foregroundStyle(Theme.color(for: stat.category))
+            .opacity(selectedHourStat == stat.hour ? 0.7 : 1.0)
+        }
+        .chartXScale(domain: 0...23)
+        .chartYScale(domain: 0...60)
+        .chartXSelection(value: $selectedHourStat)
+        .chartXAxis {
+            AxisMarks(values: Array(stride(from: 0, through: 23, by: 3))) { value in
+                AxisValueLabel {
+                    if let h = value.as(Int.self) {
+                        Text("\(h == 0 ? 12 : (h > 12 ? h - 12 : h))\(h < 12 ? "a" : "p")")
+                            .font(.caption2)
+                    }
+                }
+                AxisGridLine()
+            }
+        }
+        .chartYAxis {
+            AxisMarks(values: [0, 15, 30, 45, 60]) { value in
+                AxisValueLabel {
+                    if let v = value.as(Int.self) { Text("\(v)m").font(.caption2) }
+                }
+                AxisGridLine()
+            }
+        }
+        .frame(height: 280)
+    }
+
+    private var weekActivityChart: some View {
+        Chart(dailyActivityStats) { stat in
+            BarMark(x: .value("Day", stat.x), y: .value("Minutes", stat.minutes))
+                .foregroundStyle(Theme.color(for: stat.category))
+                .opacity(selectedHourStat == stat.x ? 0.7 : 1.0)
+        }
+        .chartXScale(domain: 0...6)
+        .chartXSelection(value: $selectedHourStat)
+        .chartXAxis {
+            let names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            AxisMarks(values: Array(0...6)) { value in
+                AxisValueLabel {
+                    if let v = value.as(Int.self) { Text(names[v]).font(.caption2) }
+                }
+                AxisGridLine()
+            }
+        }
+        .chartYAxis {
+            AxisMarks { value in
+                AxisValueLabel {
+                    if let v = value.as(Double.self) { Text("\(Int(v))m").font(.caption2) }
+                }
+                AxisGridLine()
+            }
+        }
+        .frame(height: 280)
+    }
+
+    private var monthActivityChart: some View {
+        let days = daysInCurrentMonth
+        return Chart(dailyActivityStats) { stat in
+            BarMark(x: .value("Day", stat.x), y: .value("Minutes", stat.minutes))
+                .foregroundStyle(Theme.color(for: stat.category))
+                .opacity(selectedHourStat == stat.x ? 0.7 : 1.0)
+        }
+        .chartXScale(domain: 1...days)
+        .chartXSelection(value: $selectedHourStat)
+        .chartXAxis {
+            AxisMarks(values: Array(stride(from: 1, through: days, by: 5))) { value in
+                AxisValueLabel {
+                    if let v = value.as(Int.self) { Text("\(v)").font(.caption2) }
+                }
+                AxisGridLine()
+            }
+        }
+        .chartYAxis {
+            AxisMarks { value in
+                AxisValueLabel {
+                    if let v = value.as(Double.self) { Text("\(Int(v))m").font(.caption2) }
+                }
+                AxisGridLine()
+            }
+        }
+        .frame(height: 280)
+    }
+
+    private func activitySelectionLabel(_ x: Int) -> String {
+        switch period {
+        case .day:
+            let total = hourlyStats.filter { $0.hour == x }.reduce(0.0) { $0 + $1.minutes }
+            let h = x == 0 ? 12 : (x > 12 ? x - 12 : x)
+            return "\(h):00 \(x < 12 ? "AM" : "PM") — \(Int(total))m"
+        case .week:
+            let names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            let total = dailyActivityStats.filter { $0.x == x }.reduce(0.0) { $0 + $1.minutes }
+            return "\(names[max(0, min(6, x))]) — \(Int(total))m"
+        case .month:
+            let total = dailyActivityStats.filter { $0.x == x }.reduce(0.0) { $0 + $1.minutes }
+            return "Day \(x) — \(Int(total))m"
+        }
+    }
+
+    // MARK: - Productivity Flow (period-aware)
+    private var periodProductivityFlow: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Productivity Flow")
                     .font(.headline)
                 Spacer()
-                if let h = selectedFlowHour {
-                    let item = productivityByHour.first(where: { $0.hour == h })
-                    Text("\(h == 0 ? 12 : (h > 12 ? h - 12 : h)):00 \(h < 12 ? "AM" : "PM") — \(Int(item?.score ?? 0))% focus")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.green.opacity(0.1))
-                        .cornerRadius(6)
+                Group {
+                    if let x = selectedFlowHour {
+                        Text(flowSelectionLabel(x))
+                    } else {
+                        Text(" ")
+                    }
                 }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color.green.opacity(selectedFlowHour != nil ? 0.1 : 0))
+                .cornerRadius(6)
             }
 
-            Chart(productivityByHour.filter { $0.hasData }) { item in
-                AreaMark(
-                    x: .value("Hour", item.hour),
-                    y: .value("Score", item.score)
-                )
-                .foregroundStyle(
-                    LinearGradient(colors: [.green.opacity(0.3), .green.opacity(0.05)],
-                                  startPoint: .top, endPoint: .bottom)
-                )
-                .interpolationMethod(.catmullRom)
+            switch period {
+            case .day:   dayFlowChart
+            case .week:  periodicFlowChart(data: productivityByDay, domain: 0...6)
+            case .month: periodicFlowChart(data: productivityByDay, domain: 1...daysInCurrentMonth)
+            }
+        }
+        .padding()
+        .background(theme.cardBg)
+        .cornerRadius(12)
+    }
 
-                LineMark(
-                    x: .value("Hour", item.hour),
-                    y: .value("Score", item.score)
-                )
+    private var dayFlowChart: some View {
+        Chart(productivityByHour.filter { $0.hasData }) { item in
+            AreaMark(x: .value("Hour", item.hour), y: .value("Score", item.score))
+                .foregroundStyle(LinearGradient(colors: [.green.opacity(0.3), .green.opacity(0.05)],
+                                               startPoint: .top, endPoint: .bottom))
+                .interpolationMethod(.catmullRom)
+            LineMark(x: .value("Hour", item.hour), y: .value("Score", item.score))
                 .foregroundStyle(.green)
                 .interpolationMethod(.catmullRom)
                 .lineStyle(StrokeStyle(lineWidth: 2))
+            if let sel = selectedFlowHour, sel == item.hour {
+                PointMark(x: .value("Hour", item.hour), y: .value("Score", item.score))
+                    .foregroundStyle(.green).symbolSize(60)
+            }
+        }
+        .chartXScale(domain: 0...23)
+        .chartYScale(domain: 0...100)
+        .chartXSelection(value: $selectedFlowHour)
+        .chartXAxis {
+            AxisMarks(values: Array(stride(from: 0, through: 23, by: 3))) { value in
+                AxisValueLabel {
+                    if let h = value.as(Int.self) {
+                        Text("\(h == 0 ? 12 : (h > 12 ? h - 12 : h))\(h < 12 ? "a" : "p")").font(.caption2)
+                    }
+                }
+                AxisGridLine()
+            }
+        }
+        .chartYAxis {
+            AxisMarks(values: [0, 25, 50, 75, 100]) { value in
+                AxisValueLabel {
+                    if let v = value.as(Int.self) { Text("\(v)%").font(.caption2) }
+                }
+                AxisGridLine()
+            }
+        }
+        .frame(height: 180)
+    }
 
-                if let sel = selectedFlowHour, sel == item.hour {
-                    PointMark(
-                        x: .value("Hour", item.hour),
-                        y: .value("Score", item.score)
-                    )
-                    .foregroundStyle(.green)
-                    .symbolSize(60)
-                }
+    private func periodicFlowChart(data: [DayScore], domain: ClosedRange<Int>) -> some View {
+        let filtered = data.filter { $0.hasData }
+        return Chart(filtered) { item in
+            AreaMark(x: .value("X", item.x), y: .value("Score", item.score))
+                .foregroundStyle(LinearGradient(colors: [.green.opacity(0.3), .green.opacity(0.05)],
+                                               startPoint: .top, endPoint: .bottom))
+                .interpolationMethod(.catmullRom)
+            LineMark(x: .value("X", item.x), y: .value("Score", item.score))
+                .foregroundStyle(.green)
+                .interpolationMethod(.catmullRom)
+                .lineStyle(StrokeStyle(lineWidth: 2))
+            if let sel = selectedFlowHour, sel == item.x {
+                PointMark(x: .value("X", item.x), y: .value("Score", item.score))
+                    .foregroundStyle(.green).symbolSize(60)
             }
-            .chartXScale(domain: 0...23)
-            .chartYScale(domain: 0...100)
-            .chartXSelection(value: $selectedFlowHour)
-            .chartXAxis {
-                AxisMarks(values: Array(stride(from: 0, through: 23, by: 3))) { value in
+        }
+        .chartXScale(domain: domain)
+        .chartYScale(domain: 0...100)
+        .chartXSelection(value: $selectedFlowHour)
+        .chartXAxis {
+            if period == .week {
+                let names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+                AxisMarks(values: Array(0...6)) { value in
                     AxisValueLabel {
-                        if let h = value.as(Int.self) {
-                            Text("\(h == 0 ? 12 : (h > 12 ? h - 12 : h))\(h < 12 ? "a" : "p")")
-                                .font(.caption2)
-                        }
+                        if let v = value.as(Int.self) { Text(names[v]).font(.caption2) }
+                    }
+                    AxisGridLine()
+                }
+            } else {
+                AxisMarks(values: Array(stride(from: 1, through: domain.upperBound, by: 5))) { value in
+                    AxisValueLabel {
+                        if let v = value.as(Int.self) { Text("\(v)").font(.caption2) }
                     }
                     AxisGridLine()
                 }
             }
-            .chartYAxis {
-                AxisMarks(values: [0, 25, 50, 75, 100]) { value in
-                    AxisValueLabel {
-                        if let v = value.as(Int.self) {
-                            Text("\(v)%").font(.caption2)
-                        }
+        }
+        .chartYAxis {
+            AxisMarks(values: [0, 25, 50, 75, 100]) { value in
+                AxisValueLabel {
+                    if let v = value.as(Int.self) { Text("\(v)%").font(.caption2) }
+                }
+                AxisGridLine()
+            }
+        }
+        .frame(height: 180)
+    }
+
+    private func flowSelectionLabel(_ x: Int) -> String {
+        switch period {
+        case .day:
+            let item = productivityByHour.first(where: { $0.hour == x })
+            let h = x == 0 ? 12 : (x > 12 ? x - 12 : x)
+            return "\(h):00 \(x < 12 ? "AM" : "PM") — \(Int(item?.score ?? 0))% focus"
+        case .week:
+            let names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            let item = productivityByDay.first(where: { $0.x == x })
+            return "\(names[max(0, min(6, x))]) — \(Int(item?.score ?? 0))% focus"
+        case .month:
+            let item = productivityByDay.first(where: { $0.x == x })
+            return "Day \(x) — \(Int(item?.score ?? 0))% focus"
+        }
+    }
+
+    // MARK: - Distraction Section
+    private var distractionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Distraction Breakdown", systemImage: "eye.slash.fill")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Spacer()
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(Theme.formatDuration(distractionSeconds))
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.red)
+                    if totalActiveSeconds > 0 {
+                        Text("\(Int(distractionSeconds / totalActiveSeconds * 100))% of active time")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
-                    AxisGridLine()
                 }
             }
-            .frame(height: 180)
+
+            if distractionApps.isEmpty {
+                Text("No distraction time recorded for this period")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity)
+            } else {
+                ForEach(distractionApps.prefix(6)) { app in
+                    HStack(spacing: 10) {
+                        AppIconImage(bundleID: app.bundleID, size: 20)
+                        Text(app.appName)
+                            .font(.caption.bold())
+                            .lineLimit(1)
+                        Spacer()
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Color.red.opacity(0.12))
+                                    .frame(height: 6)
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Color.red.opacity(0.5))
+                                    .frame(width: max(4, geo.size.width * CGFloat(app.duration / max(distractionSeconds, 1))), height: 6)
+                            }
+                        }
+                        .frame(width: 100, height: 6)
+                        Text(Theme.formatDuration(app.duration))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 52, alignment: .trailing)
+                    }
+                }
+            }
         }
         .padding()
         .background(theme.cardBg)
@@ -586,6 +822,75 @@ struct StatsView: View {
         }
     }
 
+    private var distractionSeconds: Double {
+        allActivities.filter { $0.category.rawValue == "Distraction" }.reduce(0) { $0 + $1.duration }
+    }
+
+    private var distractionApps: [AppUsageInfo] {
+        appUsages.filter { $0.category.rawValue == "Distraction" }
+    }
+
+    private var daysInCurrentMonth: Int {
+        Calendar.current.range(of: .day, in: .month, for: selectedDate)?.count ?? 31
+    }
+
+    private var dailyActivityStats: [DayStat] {
+        guard period != .day else { return [] }
+        let cal = Calendar.current
+        let (from, _) = dateRange
+        var dayCats: [Int: [String: Double]] = [:]
+        for a in allActivities where !a.isIdle {
+            let x: Int
+            switch period {
+            case .week:
+                let diff = cal.dateComponents([.day], from: cal.startOfDay(for: from), to: cal.startOfDay(for: a.timestamp)).day ?? 0
+                x = max(0, min(6, diff))
+            case .month:
+                x = cal.component(.day, from: a.timestamp)
+            default: continue
+            }
+            dayCats[x, default: [:]][a.category.rawValue, default: 0] += a.duration / 60
+        }
+        let allCatNames = Set(dayCats.values.flatMap(\.keys)).sorted()
+        var result: [DayStat] = []
+        let (start, count) = period == .week ? (0, 7) : (1, daysInCurrentMonth)
+        for x in start..<(start + count) {
+            for catName in allCatNames {
+                let mins = dayCats[x]?[catName] ?? 0
+                if mins > 0 { result.append(DayStat(x: x, category: Category(rawValue: catName), minutes: mins)) }
+            }
+        }
+        return result
+    }
+
+    private var productivityByDay: [DayScore] {
+        guard period != .day else { return [] }
+        let cal = Calendar.current
+        let (from, _) = dateRange
+        var dayData: [Int: (prod: Double, total: Double)] = [:]
+        for a in allActivities where !a.isIdle {
+            let x: Int
+            switch period {
+            case .week:
+                let diff = cal.dateComponents([.day], from: cal.startOfDay(for: from), to: cal.startOfDay(for: a.timestamp)).day ?? 0
+                x = max(0, min(6, diff))
+            case .month:
+                x = cal.component(.day, from: a.timestamp)
+            default: continue
+            }
+            var e = dayData[x] ?? (0, 0)
+            e.total += a.duration
+            if a.category.isProductive { e.prod += a.duration }
+            dayData[x] = e
+        }
+        let (start, count) = period == .week ? (0, 7) : (1, daysInCurrentMonth)
+        return (start..<(start + count)).map { x in
+            let e = dayData[x]
+            let score = e.map { $0.total > 0 ? $0.prod / $0.total * 100 : 0 } ?? 0
+            return DayScore(x: x, score: score, hasData: e != nil)
+        }
+    }
+
     private var totalActiveSeconds: Double {
         allActivities.filter { !$0.isIdle }.reduce(0) { $0 + $1.duration }
     }
@@ -594,12 +899,6 @@ struct StatsView: View {
         let total = totalActiveSeconds
         guard total > 0 else { return 0 }
         return allActivities.filter { $0.category.isProductive }.reduce(0) { $0 + $1.duration } / total * 100
-    }
-
-    private var distractionPercent: Double {
-        let total = totalActiveSeconds
-        guard total > 0 else { return 0 }
-        return allActivities.filter { $0.category.rawValue == "Distraction" }.reduce(0) { $0 + $1.duration } / total * 100
     }
 
     private var topAppName: String {
@@ -632,6 +931,20 @@ struct StatsView: View {
 }
 
 // MARK: - Supporting Types
+struct DayStat: Identifiable {
+    let x: Int               // 0-6 (week) or 1-31 (month)
+    let category: Category
+    let minutes: Double
+    var id: String { "\(x)-\(category.rawValue)" }
+}
+
+struct DayScore: Identifiable {
+    let x: Int
+    let score: Double
+    let hasData: Bool
+    var id: Int { x }
+}
+
 struct HourScore: Identifiable {
     let id = UUID()
     let hour: Int
@@ -670,11 +983,12 @@ struct SummaryCard: View {
                 .font(.headline)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
+                .frame(height: 20) // stable height regardless of content
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, minHeight: 80)
         .padding(.vertical, 12)
         .background(AppSettings.shared.appTheme.cardBg)
         .cornerRadius(10)

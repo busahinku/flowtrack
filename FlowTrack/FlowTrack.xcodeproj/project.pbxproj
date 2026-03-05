@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		7A918CE62F5A12B1007FA75D /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = AA000001AAAA0001AAAAAAAA /* GRDB */; };
+		7A918CF02F5A1400007FA75E /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 7A918CF12F5A1400007FA75E /* KeychainSwift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -57,6 +58,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				7A918CE62F5A12B1007FA75D /* GRDB in Frameworks */,
+				7A918CF02F5A1400007FA75E /* KeychainSwift in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -118,6 +120,7 @@
 			name = FlowTrack;
 			packageProductDependencies = (
 				AA000001AAAA0001AAAAAAAA /* GRDB */,
+				7A918CF12F5A1400007FA75E /* KeychainSwift */,
 			);
 			productName = FlowTrack;
 			productReference = 7A918BDE2F59C8A2007FA75D /* FlowTrack.app */;
@@ -604,6 +607,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AA000001AAAA0000AAAAAAAA /* XCRemoteSwiftPackageReference "GRDB.swift" */;
 			productName = GRDB;
+		};
+		7A918CF12F5A1400007FA75E /* KeychainSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7A918D732F5A12F4007FA75D /* XCRemoteSwiftPackageReference "keychain-swift" */;
+			productName = KeychainSwift;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -24,7 +24,9 @@ struct HeatmapView: View {
             .padding()
         }
         .background(theme.timelineBg)
+        .toolbarBackground(theme.timelineBg, for: .windowToolbar)
         .onAppear { loadData() }
+        .navigationTitle("")
     }
 
     // MARK: - Weekly Heatmap (rows = days, columns = hours)
@@ -138,10 +140,10 @@ struct HeatmapView: View {
             .background(theme.cardBg)
             .cornerRadius(12)
 
-            // Tooltip for hovered cell
-            if let hovered = hoveredCell {
-                let focusVal = weeklyData.isEmpty ? 0 : weeklyData[hovered.day][hovered.hour]
-                HStack(spacing: 6) {
+            // Tooltip — always reserve the row height to prevent layout shift
+            HStack(spacing: 6) {
+                if let hovered = hoveredCell {
+                    let focusVal = weeklyData.isEmpty ? 0 : weeklyData[hovered.day][hovered.hour]
                     Text("\(shortDayLabel(weekDays[hovered.day])) \(hourLabel24(hovered.hour))")
                         .font(.caption.bold())
                     Text("—")
@@ -150,12 +152,14 @@ struct HeatmapView: View {
                     Text(focusVal > 0 ? "\(Int(focusVal))m productive" : "No activity")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                } else {
+                    Text(" ").font(.caption) // invisible placeholder
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
-                .background(theme.cardBg)
-                .cornerRadius(6)
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .background(hoveredCell != nil ? theme.cardBg : Color.clear)
+            .cornerRadius(6)
 
             // Legend
             HStack(spacing: 8) {

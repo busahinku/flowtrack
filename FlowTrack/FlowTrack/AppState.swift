@@ -1,5 +1,8 @@
 import Foundation
 import SwiftUI
+import OSLog
+
+private let appStateLogger = Logger(subsystem: "com.flowtrack", category: "AppState")
 
 @MainActor @Observable
 final class AppState {
@@ -18,7 +21,12 @@ final class AppState {
     let settings = AppSettings.shared
 
     // AI category cache: bundleID → category (prevents same app getting different categories)
+    // Capped at 500 entries to bound memory usage
     private var aiCategoryCache: [String: Category] = [:]
+
+    // Session rebuild cache — skip expensive rebuild when nothing changed
+    private var cachedSessionDate: Date?
+    private var cachedActivityCount: Int = -1
 
     private init() {
         loadPersistedAIData()
@@ -30,7 +38,7 @@ final class AppState {
     }
 
     private func startTimers() {
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 await self?.refreshData()
             }
@@ -50,12 +58,21 @@ final class AppState {
         }
     }
 
-    func refreshData() async {
+    func refreshData(force: Bool = false) async {
         do {
+            let count = try Database.shared.activityCount(for: selectedDate)
+            let dateChanged = cachedSessionDate.map {
+                !Calendar.current.isDate($0, inSameDayAs: selectedDate)
+            } ?? true
+
+            guard force || count != cachedActivityCount || dateChanged else { return }
+
             timeSlots = try Database.shared.sessionsForDate(selectedDate)
             categoryStats = try Database.shared.categoryStatsForDate(selectedDate)
+            cachedActivityCount = count
+            cachedSessionDate = selectedDate
         } catch {
-            print("[AppState] Refresh error: \(error)")
+            appStateLogger.error("Refresh error: \(error.localizedDescription)")
         }
     }
 
@@ -83,10 +100,10 @@ final class AppState {
 
             if !updates.isEmpty {
                 try Database.shared.updateCategoriesBatch(updates)
-                print("[AppState] Re-categorized \(updates.count) activities with rules")
+                appStateLogger.info("Re-categorized \(updates.count) activities with rules")
             }
         } catch {
-            print("[AppState] Re-categorize error: \(error)")
+            appStateLogger.error("Re-categorize error: \(error.localizedDescription)")
         }
     }
 
@@ -103,7 +120,7 @@ final class AppState {
         // Then AI for the rest
         await categorizeBatch(limit: 500)
         await generateAllSessionContent(maxTitles: 50, maxSummaries: 20)
-        await refreshData()
+        await refreshData(force: true)
     }
 
     /// Timer-based AI batch — smaller limits
@@ -115,40 +132,56 @@ final class AppState {
         await reCategorizeWithRules()
         await categorizeBatch(limit: settings.aiBatchSize)
         await generateAllSessionContent(maxTitles: 8, maxSummaries: 5)
-        await refreshData()
+        await refreshData(force: true)
     }
 
     func generateAllSessionContent(maxTitles: Int = 50, maxSummaries: Int = 20) async {
-        let slotsWithoutTitles = timeSlots.filter { !$0.isIdle && sessionTitles[$0.id] == nil }
-        let slotsWithoutSummaries = timeSlots.filter { !$0.isIdle && sessionSummaries[$0.id] == nil && settings.aiSummariesEnabled }
+        let slotsWithoutTitles = Array(timeSlots.filter { !$0.isIdle && sessionTitles[$0.id] == nil }.prefix(maxTitles))
+        let slotsWithoutSummaries = Array(timeSlots.filter { !$0.isIdle && sessionSummaries[$0.id] == nil && settings.aiSummariesEnabled }.prefix(maxSummaries))
 
-        var titleCount = 0
-        for slot in slotsWithoutTitles {
-            guard titleCount < maxTitles else { break }
-            do {
-                let title = try await withFallback { provider in
-                    try await provider.generateTitle(activities: slot.activities, category: slot.category)
+        // Parallel title generation
+        await withTaskGroup(of: (String, String)?.self) { group in
+            for slot in slotsWithoutTitles {
+                group.addTask {
+                    do {
+                        let title = try await self.withFallback { provider in
+                            try await provider.generateTitle(activities: slot.activities, category: slot.category)
+                        }
+                        return (slot.id, title)
+                    } catch {
+                        appStateLogger.error("Title generation failed for \(slot.id): \(error.localizedDescription)")
+                        return nil
+                    }
                 }
-                sessionTitles[slot.id] = title
-                try? Database.shared.saveSessionAI(sessionId: slot.id, title: title, summary: sessionSummaries[slot.id])
-                titleCount += 1
-            } catch {
-                print("[AI] Title generation failed for \(slot.id): \(error)")
+            }
+            for await result in group {
+                if let (id, title) = result {
+                    sessionTitles[id] = title
+                    try? Database.shared.saveSessionAI(sessionId: id, title: title, summary: sessionSummaries[id])
+                }
             }
         }
 
-        var summaryCount = 0
-        for slot in slotsWithoutSummaries {
-            guard summaryCount < maxSummaries else { break }
-            do {
-                let summary = try await withFallback { provider in
-                    try await provider.summarize(activities: slot.activities)
+        // Parallel summary generation
+        await withTaskGroup(of: (String, String)?.self) { group in
+            for slot in slotsWithoutSummaries {
+                group.addTask {
+                    do {
+                        let summary = try await self.withFallback { provider in
+                            try await provider.summarize(activities: slot.activities)
+                        }
+                        return (slot.id, summary)
+                    } catch {
+                        appStateLogger.error("Summary generation failed for \(slot.id): \(error.localizedDescription)")
+                        return nil
+                    }
                 }
-                sessionSummaries[slot.id] = summary
-                try? Database.shared.saveSessionAI(sessionId: slot.id, title: sessionTitles[slot.id], summary: summary)
-                summaryCount += 1
-            } catch {
-                print("[AI] Summary generation failed for \(slot.id): \(error)")
+            }
+            for await result in group {
+                if let (id, summary) = result {
+                    sessionSummaries[id] = summary
+                    try? Database.shared.saveSessionAI(sessionId: id, title: sessionTitles[id], summary: summary)
+                }
             }
         }
     }
@@ -201,7 +234,7 @@ final class AppState {
                         }
                     }
                 } catch {
-                    print("[AI] Batch categorization failed, falling back to individual: \(error)")
+                    appStateLogger.warning("Batch categorization failed, falling back to individual: \(error.localizedDescription)")
                     for record in batchRecords {
                         guard let id = record.id else { continue }
                         do {
@@ -216,7 +249,7 @@ final class AppState {
                             allUpdates.append((id: id, category: category))
                             learnCategory(category, for: record)
                         } catch {
-                            print("[AI] Individual categorization failed for \(record.appName): \(error)")
+                            appStateLogger.warning("Individual categorization failed for \(record.appName): \(error.localizedDescription)")
                         }
                     }
                 }
@@ -224,10 +257,10 @@ final class AppState {
 
             if !allUpdates.isEmpty {
                 try Database.shared.updateCategoriesBatch(allUpdates)
-                print("[AI] Categorized \(allUpdates.count) activities")
+                appStateLogger.info("Categorized \(allUpdates.count) activities")
             }
         } catch {
-            print("[AI] Batch error: \(error)")
+            appStateLogger.error("Batch error: \(error.localizedDescription)")
         }
     }
 
@@ -239,6 +272,8 @@ final class AppState {
         let browserBIDs = ["safari", "chrome", "firefox", "arc", "brave", "edge", "opera", "vivaldi", "browser"]
         let isBrowser = browserBIDs.contains(where: { bid.contains($0) })
         if !isBrowser {
+            // Evict cache if it grows too large
+            if aiCategoryCache.count >= 500 { aiCategoryCache.removeAll() }
             aiCategoryCache[bid] = category
             RuleEngine.shared.learnFromAI(appName: record.appName, bundleID: record.bundleID, category: category)
         }
@@ -258,7 +293,7 @@ final class AppState {
             if providerType.needsAPIKey {
                 let key = SecureStore.shared.loadKey(for: providerType.rawValue)
                 if key == nil || key?.isEmpty == true {
-                    print("[AI] Skipping \(providerType.rawValue): no API key")
+                    appStateLogger.debug("Skipping \(providerType.rawValue, privacy: .public): no API key")
                     continue
                 }
             }
@@ -268,7 +303,7 @@ final class AppState {
                 do {
                     return try await operation(provider)
                 } catch {
-                    print("[AI] \(providerType.rawValue) attempt \(attempt) failed: \(error.localizedDescription)")
+                    appStateLogger.warning("\(providerType.rawValue) attempt \(attempt) failed: \(error.localizedDescription)")
                     lastError = error
                     // Don't retry on noAPIKey or cliNotFound
                     if case AIError.noAPIKey = error { break }
@@ -316,7 +351,7 @@ final class AppState {
                 if let summary = item.summary { sessionSummaries[item.sessionId] = summary }
             }
         } catch {
-            print("[AppState] Failed to load persisted AI data: \(error)")
+            appStateLogger.error("Failed to load persisted AI data: \(error.localizedDescription)")
         }
     }
 }

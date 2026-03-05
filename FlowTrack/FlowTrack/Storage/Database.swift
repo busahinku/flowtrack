@@ -1,9 +1,16 @@
 import Foundation
 import GRDB
+import OSLog
+
+private let dbLogger = Logger(subsystem: "com.flowtrack", category: "Database")
 
 final class Database: Sendable {
     static let shared: Database = {
-        try! Database()
+        do {
+            return try Database()
+        } catch {
+            fatalError("FlowTrack: Database init failed — \(error.localizedDescription)\nCheck ~/Library/Application Support/FlowTrack/")
+        }
     }()
 
     let dbQueue: DatabaseQueue
@@ -45,14 +52,33 @@ final class Database: Sendable {
             }
         }
 
+        migrator.registerMigration("v3_indexes") { db in
+            try db.create(index: "activities_timestamp_idx", on: "activities", columns: ["timestamp"])
+            try db.create(index: "activities_category_idx", on: "activities", columns: ["category"])
+            try db.create(index: "activities_bundleid_idx", on: "activities", columns: ["bundleID"])
+        }
+
+        migrator.registerMigration("v4_merge_productivity_into_work") { db in
+            try db.execute(sql: "UPDATE activities SET category = 'Work' WHERE category = 'Productivity'")
+        }
+
         try migrator.migrate(dbQueue)
     }
 
     // MARK: - Save Activity
     func saveActivity(_ record: ActivityRecord) throws {
         try dbQueue.write { db in
-            var r = record
-            try r.insert(db)
+            _ = try record.inserted(db)
+        }
+    }
+
+    // MARK: - Activity Count (cheap check for cache invalidation)
+    func activityCount(for date: Date) throws -> Int {
+        let (start, end) = dayBounds(for: date)
+        return try dbQueue.read { db in
+            try ActivityRecord
+                .filter(ActivityRecord.Columns.timestamp >= start && ActivityRecord.Columns.timestamp < end)
+                .fetchCount(db)
         }
     }
 
@@ -88,58 +114,65 @@ final class Database: Sendable {
     }
 
     // MARK: - Session Building (shared logic)
+    // Sessions are split only on idle gaps > gapThreshold.
+    // Category is determined by whichever category had the most total active time in the session.
     private func buildSessions(from activities: [ActivityRecord], gapThreshold: TimeInterval = 300) -> [TimeSlot] {
         guard !activities.isEmpty else { return [] }
 
         var sessions: [TimeSlot] = []
         var currentActivities: [ActivityRecord] = []
-        var currentCategory: Category?
-        var sessionStart: Date?
+        var sessionStart: Date = activities[0].timestamp
 
         for record in activities {
-            if let cat = currentCategory, let start = sessionStart, let lastActivity = currentActivities.last {
+            if let lastActivity = currentActivities.last {
                 let lastEnd = lastActivity.timestamp.addingTimeInterval(lastActivity.duration)
                 let gap = record.timestamp.timeIntervalSince(lastEnd)
-                if record.category.rawValue != cat.rawValue || gap > gapThreshold {
+                if gap > gapThreshold {
+                    // Flush current session
                     let endTime = lastEnd
+                    let dominantCategory = dominantCategory(in: currentActivities)
                     let summaries = buildSummaries(from: currentActivities)
-                    let slot = TimeSlot(
-                        id: "\(Int(start.timeIntervalSince1970))-\(Int(endTime.timeIntervalSince1970))",
-                        startTime: start,
+                    sessions.append(TimeSlot(
+                        id: "\(Int(sessionStart.timeIntervalSince1970))-\(Int(endTime.timeIntervalSince1970))",
+                        startTime: sessionStart,
                         endTime: endTime,
-                        category: cat,
+                        category: dominantCategory,
                         activities: summaries,
-                        isIdle: cat == .idle
-                    )
-                    sessions.append(slot)
+                        isIdle: false
+                    ))
                     currentActivities = []
                     sessionStart = record.timestamp
-                    currentCategory = record.category
                 }
-            } else {
-                sessionStart = record.timestamp
-                currentCategory = record.category
             }
             currentActivities.append(record)
         }
 
         // Final session
-        if let cat = currentCategory, let start = sessionStart, !currentActivities.isEmpty {
-            let endTime = currentActivities.last.map { $0.timestamp.addingTimeInterval($0.duration) } ?? start
+        if !currentActivities.isEmpty {
+            let endTime = currentActivities.last.map { $0.timestamp.addingTimeInterval($0.duration) } ?? sessionStart
+            let dominantCategory = dominantCategory(in: currentActivities)
             let summaries = buildSummaries(from: currentActivities)
-            let slot = TimeSlot(
-                id: "\(Int(start.timeIntervalSince1970))-\(Int(endTime.timeIntervalSince1970))",
-                startTime: start,
+            sessions.append(TimeSlot(
+                id: "\(Int(sessionStart.timeIntervalSince1970))-\(Int(endTime.timeIntervalSince1970))",
+                startTime: sessionStart,
                 endTime: endTime,
-                category: cat,
+                category: dominantCategory,
                 activities: summaries,
-                isIdle: cat == .idle
-            )
-            sessions.append(slot)
+                isIdle: false
+            ))
         }
 
-        // Merge adjacent sessions with the same category
-        return mergeAdjacentSameCategory(sessions)
+        return sessions
+    }
+
+    /// Returns the category with the highest total activity duration in a set of records.
+    private func dominantCategory(in activities: [ActivityRecord]) -> Category {
+        var totals: [String: TimeInterval] = [:]
+        for a in activities {
+            totals[a.category.rawValue, default: 0] += a.duration
+        }
+        let best = totals.max { $0.value < $1.value }
+        return Category(rawValue: best?.key ?? Category.work.rawValue)
     }
 
     /// Combines consecutive TimeSlots that share the same category into one.
@@ -151,14 +184,13 @@ final class Database: Sendable {
         for i in 1..<slots.count {
             let next = slots[i]
             if next.category == current.category && next.isIdle == current.isIdle {
-                // Combine: extend end time, merge activities
-                var combined = Set(current.activities.map { $0.appName })
+                // Combine: extend end time, merge activities — O(n) with index dictionary
+                var indexByName: [String: Int] = Dictionary(
+                    uniqueKeysWithValues: current.activities.enumerated().map { ($0.element.appName, $0.offset) }
+                )
                 var allActivities = current.activities
                 for a in next.activities {
-                    if !combined.contains(a.appName) {
-                        allActivities.append(a)
-                        combined.insert(a.appName)
-                    } else if let idx = allActivities.firstIndex(where: { $0.appName == a.appName }) {
+                    if let idx = indexByName[a.appName] {
                         // Merge duration
                         allActivities[idx] = ActivitySummary(
                             appName: a.appName, bundleID: a.bundleID,
@@ -166,6 +198,9 @@ final class Database: Sendable {
                             duration: allActivities[idx].duration + a.duration,
                             timestamps: allActivities[idx].timestamps + a.timestamps
                         )
+                    } else {
+                        indexByName[a.appName] = allActivities.count
+                        allActivities.append(a)
                     }
                 }
                 current = TimeSlot(
@@ -296,13 +331,18 @@ final class Database: Sendable {
         let cal = Calendar.current
         let weekday = cal.component(.weekday, from: date)
         let startOfWeek = cal.date(byAdding: .day, value: -(weekday - 1), to: cal.startOfDay(for: date))!
-        var result: [Date: Double] = [:]
+        let endOfWeek = cal.date(byAdding: .day, value: 7, to: startOfWeek)!
 
+        // Single range query instead of 7 separate queries
+        let activities = try activitiesForRange(from: startOfWeek, to: endOfWeek)
+        var result: [Date: Double] = [:]
         for i in 0..<7 {
             let day = cal.date(byAdding: .day, value: i, to: startOfWeek)!
-            let activities = try activitiesForDate(day)
-            let productive = activities.filter { $0.category.isProductive }
-            result[cal.startOfDay(for: day)] = productive.reduce(0) { $0 + $1.duration }
+            result[cal.startOfDay(for: day)] = 0
+        }
+        for activity in activities where activity.category.isProductive {
+            let day = cal.startOfDay(for: activity.timestamp)
+            result[day, default: 0] += activity.duration
         }
         return result
     }
@@ -397,6 +437,6 @@ final class Database: Sendable {
             try db.execute(sql: "DELETE FROM activities WHERE timestamp < ?", arguments: [cutoff])
             try db.execute(sql: "VACUUM")
         }
-        print("[Database] Auto-cleanup: removed data older than \(keepDays) days (DB was \(sizeMB) MB)")
+        dbLogger.info("Auto-cleanup: removed data older than \(keepDays) days (DB was \(sizeMB) MB)")
     }
 }

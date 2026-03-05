@@ -112,12 +112,27 @@ struct CLIProvider: AIProvider, Sendable {
                 return
             }
 
+            // Terminate the process if it hasn't finished in 30 seconds
+            var didTimeout = false
+            let timeoutItem = DispatchWorkItem {
+                if process.isRunning {
+                    didTimeout = true
+                    process.terminate()
+                }
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 30, execute: timeoutItem)
             process.waitUntilExit()
+            timeoutItem.cancel()
 
             let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
             let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
             let stdout = String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let stderr = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+            if didTimeout {
+                continuation.resume(throwing: AIError.cliError("\(command) timed out after 30s"))
+                return
+            }
 
             if process.terminationStatus != 0 {
                 let errorMsg = !stderr.isEmpty ? stderr : (!stdout.isEmpty ? stdout : "CLI exited with code \(process.terminationStatus)")

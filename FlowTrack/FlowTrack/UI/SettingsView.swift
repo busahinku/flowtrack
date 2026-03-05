@@ -76,6 +76,25 @@ struct GeneralTab: View {
                 Toggle("AI Summaries", isOn: $settings.aiSummariesEnabled)
             }
 
+            Section("Tracking") {
+                Picker("Idle after", selection: $settings.idleThresholdSeconds) {
+                    Text("30 sec").tag(30)
+                    Text("1 min").tag(60)
+                    Text("2 min").tag(120)
+                    Text("5 min").tag(300)
+                    Text("10 min").tag(600)
+                }
+                Picker("Distraction alert after", selection: $settings.distractionAlertMinutes) {
+                    Text("Off").tag(0)
+                    Text("15 min").tag(15)
+                    Text("30 min").tag(30)
+                    Text("45 min").tag(45)
+                    Text("60 min").tag(60)
+                }
+                Text("Alert fires when you've spent this long in a distraction category continuously.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("Data Storage") {
                 HStack {
                     Text("Location")
@@ -500,7 +519,7 @@ struct CategoriesTab: View {
     @State private var categories: [CategoryDefinition] = CategoryManager.shared.allCategories
 
     // Protected categories that cannot be deleted
-    private let protectedNames: Set<String> = ["Idle", "Uncategorized", "Work", "Distraction", "Productivity"]
+    private let protectedNames: Set<String> = ["Idle", "Uncategorized", "Work", "Distraction"]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -979,20 +998,58 @@ struct AppearanceTab: View {
 
 // MARK: - Privacy Tab
 struct PrivacyTab: View {
+    @Bindable var settings = AppSettings.shared
     @State private var showClearConfirm = false
     @State private var showClearAIConfirm = false
     @State private var clearResult: String?
+    @State private var newBundleID = ""
 
     var body: some View {
         Form {
             Section("Data Collection") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("FlowTrack tracks which apps you use and their window titles.", systemImage: "info.circle")
-                        .font(.callout)
-                    Text("All data is stored locally on your Mac. Nothing is sent to any server unless you configure an API-based AI provider.")
+                Toggle("Capture Window Titles", isOn: $settings.captureWindowTitles)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("FlowTrack tracks which apps you use. Window titles add context but may contain sensitive info.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("All data is stored locally. Nothing is sent to a server unless you use an API-based AI provider.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            }
+
+            Section("Excluded Apps") {
+                if settings.excludedBundleIDs.isEmpty {
+                    Text("No apps excluded")
+                        .foregroundStyle(.secondary)
+                        .font(.callout)
+                } else {
+                    ForEach(settings.excludedBundleIDs, id: \.self) { bundle in
+                        HStack {
+                            Text(bundle).font(.callout)
+                            Spacer()
+                            Button(action: {
+                                settings.excludedBundleIDs.removeAll { $0 == bundle }
+                            }) {
+                                Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                }
+                HStack {
+                    TextField("com.example.app", text: $newBundleID)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Add") {
+                        let trimmed = newBundleID.trimmingCharacters(in: .whitespaces)
+                        if !trimmed.isEmpty && !settings.excludedBundleIDs.contains(trimmed) {
+                            settings.excludedBundleIDs.append(trimmed)
+                        }
+                        newBundleID = ""
+                    }
+                    .disabled(newBundleID.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                Text("Excluded apps are never tracked or stored.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("AI Provider Privacy") {
@@ -1025,10 +1082,10 @@ struct PrivacyTab: View {
 
             Section("API Keys") {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("API keys are stored in a local file with restricted permissions (0600).")
+                    Text("API keys are stored securely in the macOS Keychain.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text("Location: ~/Library/Application Support/FlowTrack/.apikeys")
+                    Text("Keys never touch disk and are protected by your login credentials.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }

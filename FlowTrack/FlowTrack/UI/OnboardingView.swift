@@ -43,9 +43,7 @@ struct OnboardingView: View {
 
     private var welcomeStep: some View {
         VStack(spacing: 16) {
-            Image(systemName: "bolt.fill")
-                .font(.system(size: 60))
-                .foregroundStyle(.blue)
+            ThemeAwareMenuIcon(size: 60)
             Text("Welcome to FlowTrack")
                 .font(.title.bold())
             Text("FlowTrack runs in your menu bar and automatically tracks how you spend time on your Mac.")
@@ -69,6 +67,14 @@ struct OnboardingView: View {
                 PermissionChecker.requestAccessibility()
             }
             .buttonStyle(.borderedProminent)
+
+            Button("Open Accessibility Settings") {
+                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+            .buttonStyle(.bordered)
+            .font(.callout)
 
             if PermissionChecker.hasAccessibility {
                 Label("Permission Granted", systemImage: "checkmark.circle.fill")

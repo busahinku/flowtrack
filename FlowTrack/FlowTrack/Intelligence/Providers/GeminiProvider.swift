@@ -26,7 +26,7 @@ struct GeminiProvider: AIProvider, Sendable {
         guard let key = SecureStore.shared.loadKey(for: AIProviderType.gemini.rawValue), !key.isEmpty else {
             throw AIError.noAPIKey
         }
-        var request = URLRequest(url: URL(string: "https://generativelanguage.googleapis.com/v1/models?key=\(key)")!)
+        let request = URLRequest(url: URL(string: "https://generativelanguage.googleapis.com/v1/models?key=\(key)")!)
         let (_, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw AIError.networkError("Health check failed")

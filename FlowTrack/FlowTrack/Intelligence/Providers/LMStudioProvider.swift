@@ -23,7 +23,7 @@ struct LMStudioProvider: AIProvider, Sendable {
     }
 
     func checkHealth() async throws -> Bool {
-        var request = URLRequest(url: URL(string: "http://localhost:1234/v1/models")!)
+        let request = URLRequest(url: URL(string: "http://localhost:1234/v1/models")!)
         let (_, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw AIError.networkError("LM Studio not running")

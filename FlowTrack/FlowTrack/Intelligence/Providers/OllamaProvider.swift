@@ -23,7 +23,7 @@ struct OllamaProvider: AIProvider, Sendable {
     }
 
     func checkHealth() async throws -> Bool {
-        var request = URLRequest(url: URL(string: "http://localhost:11434/api/tags")!)
+        let request = URLRequest(url: URL(string: "http://localhost:11434/api/tags")!)
         let (_, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw AIError.networkError("Ollama not running")

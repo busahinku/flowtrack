@@ -107,11 +107,11 @@ final class RuleEngine: @unchecked Sendable {
             }
             // Communication
             if ["mail", "messages", "facetime"].contains(where: { suffix.hasPrefix($0) }) {
-                return .communication
+                return .work
             }
             // Productivity
             if ["notes", "reminders", "calendar", "pages", "numbers", "keynote", "iwork", "shortcuts"].contains(where: { suffix.hasPrefix($0) }) {
-                return .productivity
+                return .work
             }
             // Creative
             if ["garageband", "imovie", "photos", "preview"].contains(where: { suffix.hasPrefix($0) }) {
@@ -132,17 +132,17 @@ final class RuleEngine: @unchecked Sendable {
 
         // Microsoft apps
         if bid.hasPrefix("com.microsoft.") {
-            if bid.contains("teams") { return .communication }
-            if bid.contains("outlook") { return .communication }
-            if bid.contains("word") || bid.contains("excel") || bid.contains("powerpoint") || bid.contains("onenote") { return .productivity }
+            if bid.contains("teams") { return .work }
+            if bid.contains("outlook") { return .work }
+            if bid.contains("word") || bid.contains("excel") || bid.contains("powerpoint") || bid.contains("onenote") { return .work }
             if bid.contains("vscode") || bid.contains("visual-studio") { return .work }
-            return .productivity
+            return .work
         }
 
         // Google apps
         if bid.hasPrefix("com.google.") {
             if bid.contains("chrome") { return nil } // Let browser URL rules handle it
-            return .productivity
+            return .work
         }
 
         // Common development tools by bundle ID
@@ -161,7 +161,7 @@ final class RuleEngine: @unchecked Sendable {
             return .work
         }
         if name.contains("chat") || name.contains("messenger") || name.contains("meet") {
-            return .communication
+            return .work
         }
 
         return nil
