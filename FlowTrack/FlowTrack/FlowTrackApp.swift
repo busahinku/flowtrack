@@ -23,8 +23,18 @@ struct FlowTrackApp: App {
                 }
                 .onAppear {
                     ActivityTracker.shared.startTracking()
+                    // Make title bar transparent
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        for window in NSApp.windows where window.identifier?.rawValue == "dashboard" || window.title == "FlowTrack" {
+                            window.titlebarAppearsTransparent = true
+                            window.titleVisibility = .visible
+                            window.isMovableByWindowBackground = true
+                        }
+                    }
                 }
         }
+        .windowStyle(.titleBar)
+        .windowToolbarStyle(.unified(showsTitle: true))
 
         // Settings
         Settings {
