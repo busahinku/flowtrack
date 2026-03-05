@@ -562,16 +562,39 @@ struct EditCategorySheet: View {
     let isProtected: Bool
     let onDismiss: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var pickedColor: Color
+    @State private var showIconPicker = false
+
+    init(category: CategoryDefinition, isProtected: Bool, onDismiss: @escaping () -> Void) {
+        self._category = State(initialValue: category)
+        self.isProtected = isProtected
+        self.onDismiss = onDismiss
+        self._pickedColor = State(initialValue: Color(hex: category.colorHex))
+    }
+
+    static let popularIcons = [
+        "briefcase.fill", "chart.bar.fill", "person.fill", "eye.slash.fill",
+        "bubble.left.and.bubble.right.fill", "book.fill", "paintbrush.fill",
+        "heart.fill", "play.circle.fill", "moon.fill", "questionmark.circle",
+        "star.fill", "flag.fill", "bolt.fill", "globe", "doc.fill",
+        "folder.fill", "envelope.fill", "phone.fill", "camera.fill",
+        "music.note", "gamecontroller.fill", "cart.fill", "house.fill",
+        "wrench.fill", "lock.fill", "shield.fill", "leaf.fill",
+        "lightbulb.fill", "graduationcap.fill", "desktopcomputer", "terminal.fill",
+        "tag.fill", "bookmark.fill", "clock.fill", "calendar",
+        "map.fill", "airplane", "gift.fill", "bell.fill"
+    ]
 
     var body: some View {
         VStack(spacing: 16) {
             Text("Edit Category")
                 .font(.headline)
 
+            // Preview
             HStack(spacing: 12) {
                 ZStack {
                     Circle()
-                        .fill(Color(hex: category.colorHex))
+                        .fill(pickedColor)
                         .frame(width: 44, height: 44)
                     Image(systemName: category.icon)
                         .font(.title3)
@@ -582,17 +605,43 @@ struct EditCategorySheet: View {
             }
 
             Form {
-                TextField("SF Symbol icon name", text: $category.icon)
-                HStack {
-                    TextField("Color Hex", text: $category.colorHex)
-                    Circle()
-                        .fill(Color(hex: category.colorHex))
-                        .frame(width: 20, height: 20)
+                // AI Prompt
+                Section("AI Description") {
+                    TextField("Describe what this category includes for AI", text: $category.aiPrompt, axis: .vertical)
+                        .lineLimit(2...4)
                 }
+
+                // Color picker
+                Section("Color") {
+                    ColorPicker("Pick a color", selection: $pickedColor, supportsOpacity: false)
+                        .onChange(of: pickedColor) {
+                            category.colorHex = pickedColor.hexString
+                        }
+                }
+
+                // Icon picker
+                Section("Icon") {
+                    LazyVGrid(columns: Array(repeating: GridItem(.fixed(36), spacing: 8), count: 8), spacing: 8) {
+                        ForEach(Self.popularIcons, id: \.self) { icon in
+                            Button(action: { category.icon = icon }) {
+                                Image(systemName: icon)
+                                    .font(.body)
+                                    .frame(width: 32, height: 32)
+                                    .foregroundStyle(category.icon == icon ? .white : .primary)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(category.icon == icon ? pickedColor : Color.gray.opacity(0.1))
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
                 Toggle("Productive", isOn: $category.isProductive)
             }
             .formStyle(.grouped)
-            .frame(height: 160)
+            .frame(height: 380)
 
             HStack {
                 if !isProtected {
@@ -614,27 +663,31 @@ struct EditCategorySheet: View {
             }
         }
         .padding()
-        .frame(width: 400)
+        .frame(width: 440)
     }
 }
 
 struct AddCategorySheet: View {
     @State private var name = ""
-    @State private var icon = "tag"
-    @State private var colorHex = "#3B82F6"
+    @State private var icon = "tag.fill"
+    @State private var pickedColor = Color.blue
     @State private var isProductive = false
+    @State private var aiPrompt = ""
     let onDismiss: () -> Void
     @Environment(\.dismiss) private var dismiss
+
+    private static let popularIcons = EditCategorySheet.popularIcons
 
     var body: some View {
         VStack(spacing: 16) {
             Text("Add Category")
                 .font(.headline)
 
+            // Preview
             HStack(spacing: 12) {
                 ZStack {
                     Circle()
-                        .fill(Color(hex: colorHex))
+                        .fill(pickedColor)
                         .frame(width: 40, height: 40)
                     Image(systemName: icon)
                         .foregroundStyle(.white)
@@ -645,23 +698,44 @@ struct AddCategorySheet: View {
 
             Form {
                 TextField("Name", text: $name)
-                TextField("SF Symbol icon", text: $icon)
-                HStack {
-                    TextField("Color Hex", text: $colorHex)
-                    Circle()
-                        .fill(Color(hex: colorHex))
-                        .frame(width: 20, height: 20)
+
+                Section("AI Description") {
+                    TextField("Describe what this category includes for AI", text: $aiPrompt, axis: .vertical)
+                        .lineLimit(2...4)
                 }
+
+                Section("Color") {
+                    ColorPicker("Pick a color", selection: $pickedColor, supportsOpacity: false)
+                }
+
+                Section("Icon") {
+                    LazyVGrid(columns: Array(repeating: GridItem(.fixed(36), spacing: 8), count: 8), spacing: 8) {
+                        ForEach(Self.popularIcons, id: \.self) { ic in
+                            Button(action: { icon = ic }) {
+                                Image(systemName: ic)
+                                    .font(.body)
+                                    .frame(width: 32, height: 32)
+                                    .foregroundStyle(icon == ic ? .white : .primary)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(icon == ic ? pickedColor : Color.gray.opacity(0.1))
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
                 Toggle("Productive", isOn: $isProductive)
             }
             .formStyle(.grouped)
-            .frame(height: 200)
+            .frame(height: 400)
 
             HStack {
                 Button("Cancel") { dismiss() }
                 Spacer()
                 Button("Add") {
-                    let def = CategoryDefinition(name: name, colorHex: colorHex, icon: icon, isProductive: isProductive, isSystem: false)
+                    let def = CategoryDefinition(name: name, colorHex: pickedColor.hexString, icon: icon, isProductive: isProductive, isSystem: false, aiPrompt: aiPrompt)
                     CategoryManager.shared.addCategory(def)
                     onDismiss()
                     dismiss()
@@ -671,7 +745,7 @@ struct AddCategorySheet: View {
             }
         }
         .padding()
-        .frame(width: 380)
+        .frame(width: 440)
     }
 }
 
@@ -715,9 +789,9 @@ struct RulesTab: View {
                             Spacer()
                             HStack(spacing: 4) {
                                 if let def = CategoryManager.shared.definition(for: Category(rawValue: rule.category)) {
-                                    Circle()
-                                        .fill(def.color)
-                                        .frame(width: 8, height: 8)
+                                    Image(systemName: def.icon)
+                                        .font(.caption)
+                                        .foregroundStyle(def.color)
                                 }
                                 Text(rule.category)
                                     .font(.caption)
@@ -805,10 +879,11 @@ struct AddRuleSheet: View {
                 TextField("Pattern (e.g., Safari, com.apple.*, reddit.com)", text: $pattern)
                 Picker("Category", selection: $category) {
                     ForEach(CategoryManager.shared.selectableCategories, id: \.name) { cat in
-                        HStack {
+                        Label {
+                            Text(cat.name)
+                        } icon: {
                             Image(systemName: cat.icon)
                                 .foregroundStyle(cat.color)
-                            Text(cat.name)
                         }
                         .tag(cat.name)
                     }

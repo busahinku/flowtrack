@@ -55,7 +55,7 @@ struct MenuBarView: View {
             }
             .buttonStyle(.plain)
 
-            Button(action: openSettingsAction) {
+            SettingsLink {
                 HStack {
                     Image(systemName: "gear")
                     Text("Settings")
@@ -108,20 +108,6 @@ struct MenuBarView: View {
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
             openWindow(id: "dashboard")
-        }
-    }
-
-    private func openSettingsAction() {
-        dismiss()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate(ignoringOtherApps: true)
-            // openSettings() doesn't work reliably from MenuBarExtra — use sendAction
-            if #available(macOS 14, *) {
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-            } else {
-                NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-            }
         }
     }
 

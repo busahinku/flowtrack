@@ -33,15 +33,6 @@ struct DashboardView: View {
     private var sidebar: some View {
         VStack(spacing: 0) {
             VStack(spacing: 8) {
-                HStack {
-                    Image(systemName: "bolt.fill")
-                        .font(.title2)
-                        .foregroundStyle(theme.accentColor)
-                    Text("FlowTrack")
-                        .font(.title3.bold())
-                    Spacer()
-                }
-
                 ZStack {
                     Circle()
                         .stroke(Color.gray.opacity(0.15), lineWidth: 8)
@@ -131,6 +122,25 @@ struct DashboardView: View {
             .padding(.top, 8)
 
             Spacer()
+
+            // Settings button
+            VStack(spacing: 4) {
+                Divider()
+                SettingsLink {
+                    HStack(spacing: 8) {
+                        Image(systemName: "gear")
+                            .foregroundStyle(.secondary)
+                        Text("Settings")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                    .padding(.horizontal)
+                    .padding(.vertical, 6)
+                }
+                .buttonStyle(.plain)
+            }
 
             // AI Status
             VStack(spacing: 4) {

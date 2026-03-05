@@ -62,10 +62,16 @@ struct AIProviderFactory {
 struct AIPromptBuilder {
     static func categorizationPrompt(appName: String, bundleID: String, windowTitle: String, url: String?) -> String {
         let categories = CategoryManager.shared.allCategories
-        let catList = categories.map { "\($0.name): \($0.isProductive ? "productive" : "non-productive")" }.joined(separator: ", ")
+        let catList = categories.map { cat in
+            var desc = "\(cat.name) (\(cat.isProductive ? "productive" : "non-productive"))"
+            if !cat.aiPrompt.isEmpty { desc += ": \(cat.aiPrompt)" }
+            return desc
+        }.joined(separator: "\n")
         var prompt = """
         Categorize this macOS app activity into exactly ONE category.
-        Categories: \(catList)
+        
+        Categories:
+        \(catList)
 
         App: \(appName)
         Bundle ID: \(bundleID)

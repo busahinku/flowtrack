@@ -18,10 +18,10 @@ enum AppTheme: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    // System uses adaptive colors that respond to macOS appearance
+    // System uses the Light or Dark values depending on macOS appearance
     var cardBg: Color {
         switch self {
-        case .system: return Color(nsColor: .controlBackgroundColor)
+        case .system: return Color(nsColor: .textBackgroundColor)
         case .light: return .white
         case .dark: return Color(red: 0.15, green: 0.15, blue: 0.17)
         case .pastel: return Color(red: 0.96, green: 0.95, blue: 0.98)
@@ -31,7 +31,7 @@ enum AppTheme: String, CaseIterable, Identifiable, Sendable {
 
     var timelineBg: Color {
         switch self {
-        case .system: return Color(nsColor: .windowBackgroundColor)
+        case .system: return Color(nsColor: .textBackgroundColor).opacity(0.95)
         case .light: return Color(red: 0.97, green: 0.97, blue: 0.98)
         case .dark: return Color(red: 0.10, green: 0.10, blue: 0.12)
         case .pastel: return Color(red: 0.98, green: 0.97, blue: 1.0)
@@ -41,7 +41,7 @@ enum AppTheme: String, CaseIterable, Identifiable, Sendable {
 
     var sidebarBg: Color {
         switch self {
-        case .system: return Color(nsColor: .underPageBackgroundColor)
+        case .system: return Color(nsColor: .windowBackgroundColor)
         case .light: return Color(red: 0.95, green: 0.95, blue: 0.97)
         case .dark: return Color(red: 0.12, green: 0.12, blue: 0.14)
         case .pastel: return Color(red: 0.94, green: 0.93, blue: 0.97)
