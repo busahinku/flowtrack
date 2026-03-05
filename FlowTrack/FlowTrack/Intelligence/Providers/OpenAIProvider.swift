@@ -36,14 +36,28 @@ struct OpenAIProvider: AIProvider, Sendable {
     }
 
     private func sendRequest(prompt: String) async throws -> String {
+        try await sendChat(messages: [ChatTurn(role: "user", content: prompt)], systemPrompt: nil)
+    }
+
+    func chat(messages: [ChatTurn], systemPrompt: String) async throws -> String {
+        try await sendChat(messages: messages, systemPrompt: systemPrompt)
+    }
+
+    private func sendChat(messages: [ChatTurn], systemPrompt: String?) async throws -> String {
         guard let key = SecureStore.shared.loadKey(for: AIProviderType.openai.rawValue), !key.isEmpty else {
             throw AIError.noAPIKey
         }
         let url = URL(string: "https://api.openai.com/v1/chat/completions")!
+        let isChat = messages.count > 1 || systemPrompt != nil
+        var apiMessages: [[String: Any]] = []
+        if let sys = systemPrompt {
+            apiMessages.append(["role": "system", "content": sys])
+        }
+        apiMessages += messages.map { ["role": $0.role, "content": $0.content] }
         let body: [String: Any] = [
             "model": model,
-            "max_tokens": 200,
-            "messages": [["role": "user", "content": prompt]]
+            "max_tokens": isChat ? 1500 : 200,
+            "messages": apiMessages
         ]
         let jsonData = try JSONSerialization.data(withJSONObject: body)
         let (data, _) = try await AIHTTPHelper.sendRequest(url: url, headers: [
@@ -55,7 +69,6 @@ struct OpenAIProvider: AIProvider, Sendable {
             throw AIError.invalidResponse("Could not parse OpenAI response")
         }
 
-        // Check for API error
         if let error = json["error"] as? [String: Any], let message = error["message"] as? String {
             throw AIError.invalidResponse("OpenAI: \(String(message.prefix(200)))")
         }

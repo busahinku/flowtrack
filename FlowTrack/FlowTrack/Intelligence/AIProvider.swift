@@ -35,6 +35,12 @@ struct BatchCategorizeItem: Sendable {
     let url: String?
 }
 
+// MARK: - Chat Turn
+struct ChatTurn: Sendable {
+    let role: String   // "user" or "assistant"
+    let content: String
+}
+
 // MARK: - AIProvider Protocol
 protocol AIProvider: Sendable {
     func categorize(appName: String, bundleID: String, windowTitle: String, url: String?) async throws -> Category
@@ -42,6 +48,8 @@ protocol AIProvider: Sendable {
     func summarize(activities: [ActivitySummary]) async throws -> String
     func generateTitle(activities: [ActivitySummary], category: Category) async throws -> String
     func checkHealth() async throws -> Bool
+    /// Multi-turn chat with a system prompt providing activity context.
+    func chat(messages: [ChatTurn], systemPrompt: String) async throws -> String
 }
 
 extension AIProvider {
@@ -52,6 +60,16 @@ extension AIProvider {
         throw AIError.invalidResponse("Not implemented")
     }
     func checkHealth() async throws -> Bool { true }
+
+    /// Default chat: flatten history into last user message (for providers without native multi-turn)
+    func chat(messages: [ChatTurn], systemPrompt: String) async throws -> String {
+        guard let last = messages.last(where: { $0.role == "user" }) else {
+            throw AIError.invalidResponse("No user message")
+        }
+        let fullPrompt = systemPrompt + "\n\n---\n\n" + last.content
+        // Providers that don't override this will use their single-message path via summarize
+        throw AIError.invalidResponse("chat() not implemented for this provider — last message: \(fullPrompt.prefix(50))")
+    }
 
     // Default: fall back to individual calls
     func categorizeBatch(items: [BatchCategorizeItem]) async throws -> [Int: Category] {

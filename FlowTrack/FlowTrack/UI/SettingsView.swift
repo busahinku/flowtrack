@@ -118,6 +118,15 @@ struct GeneralTab: View {
                 Text("Data older than 90 days is automatically cleaned when DB exceeds 3 GB.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+
+                Picker("Keep data for", selection: $settings.retentionDays) {
+                    Text("30 days").tag(30)
+                    Text("60 days").tag(60)
+                    Text("90 days").tag(90)
+                    Text("180 days").tag(180)
+                    Text("1 year").tag(365)
+                    Text("Forever").tag(0)
+                }
             }
         }
         .formStyle(.grouped)

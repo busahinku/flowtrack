@@ -16,6 +16,11 @@ struct MenuBarView: View {
                 Text("FlowTrack")
                     .font(.headline)
                 Spacer()
+                if appState.isInDeepWork {
+                    Label("Deep Work", systemImage: "brain.head.profile")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.green)
+                }
                 Circle()
                     .fill(ActivityTracker.shared.isTracking ? .green : .red)
                     .frame(width: 8, height: 8)
@@ -43,10 +48,13 @@ struct MenuBarView: View {
             }
 
             // Quick stats
-            HStack(spacing: 16) {
+            HStack(spacing: 8) {
                 StatPill(label: "Focus", value: "\(Int(focusScore))%")
                 StatPill(label: "Sessions", value: "\(appState.timeSlots.filter { !$0.isIdle }.count)")
                 StatPill(label: "Active", value: activeTime)
+                if appState.streakDays > 0 {
+                    StatPill(label: "Streak", value: "\(appState.streakDays)🔥")
+                }
             }
 
             Divider()

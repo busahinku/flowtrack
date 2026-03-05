@@ -116,7 +116,6 @@ struct TimelineView: View {
         .background(theme.timelineBg)
         .toolbarBackground(theme.timelineBg, for: .windowToolbar)
         .toolbar {
-            // Run AI — always shows icon + text
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     Task { await appState.runAINow() }
@@ -133,8 +132,6 @@ struct TimelineView: View {
                 }
                 .disabled(appState.isRunningAI)
             }
-
-            // Date navigation — center
             ToolbarItemGroup(placement: .principal) {
                 dateNavToolbar
             }
@@ -161,10 +158,11 @@ struct TimelineView: View {
             }
             .buttonStyle(.plain)
             .popover(isPresented: $showDatePicker) {
-                DatePicker("Select Date", selection: $appState.selectedDate, displayedComponents: .date)
+                DatePicker("", selection: $appState.selectedDate, displayedComponents: .date)
+                    .labelsHidden()
                     .datePickerStyle(.graphical)
-                    .padding()
-                    .frame(width: 320)
+                    .padding(8)
+                    .frame(width: 300, height: 320)
             }
 
             Button {

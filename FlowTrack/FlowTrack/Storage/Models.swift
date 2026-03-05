@@ -274,6 +274,9 @@ final class AppSettings {
     var distractionAlertMinutes: Int {
         didSet { UserDefaults.standard.set(distractionAlertMinutes, forKey: "distractionAlertMinutes") }
     }
+    var retentionDays: Int {
+        didSet { UserDefaults.standard.set(retentionDays, forKey: "retentionDays") }
+    }
 
     private init() {
         let defaults = UserDefaults.standard
@@ -292,6 +295,7 @@ final class AppSettings {
         self.excludedBundleIDs = defaults.stringArray(forKey: "excludedBundleIDs") ?? []
         self.idleThresholdSeconds = defaults.object(forKey: "idleThresholdSeconds") as? Int ?? 120
         self.distractionAlertMinutes = defaults.object(forKey: "distractionAlertMinutes") as? Int ?? 0
+        self.retentionDays = defaults.object(forKey: "retentionDays") as? Int ?? 90
     }
 
     func modelName(for provider: AIProviderType) -> String {

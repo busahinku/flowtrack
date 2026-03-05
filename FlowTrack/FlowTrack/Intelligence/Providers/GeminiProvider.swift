@@ -35,13 +35,32 @@ struct GeminiProvider: AIProvider, Sendable {
     }
 
     private func sendRequest(prompt: String) async throws -> String {
+        try await sendChat(messages: [ChatTurn(role: "user", content: prompt)], systemPrompt: nil)
+    }
+
+    func chat(messages: [ChatTurn], systemPrompt: String) async throws -> String {
+        try await sendChat(messages: messages, systemPrompt: systemPrompt)
+    }
+
+    private func sendChat(messages: [ChatTurn], systemPrompt: String?) async throws -> String {
         guard let key = SecureStore.shared.loadKey(for: AIProviderType.gemini.rawValue), !key.isEmpty else {
             throw AIError.noAPIKey
         }
+        let isChat = messages.count > 1 || systemPrompt != nil
         let url = URL(string: "https://generativelanguage.googleapis.com/v1/models/\(model):generateContent?key=\(key)")!
+        // Gemini uses "contents" array with roles; prepend system as first user turn
+        var contents: [[String: Any]] = []
+        if let sys = systemPrompt {
+            contents.append(["role": "user", "parts": [["text": sys]]])
+            contents.append(["role": "model", "parts": [["text": "Understood. I'll analyze the activity data and help you."]]])
+        }
+        contents += messages.map { turn in
+            let role = turn.role == "assistant" ? "model" : "user"
+            return ["role": role, "parts": [["text": turn.content]]]
+        }
         let body: [String: Any] = [
-            "contents": [["parts": [["text": prompt]]]],
-            "generationConfig": ["maxOutputTokens": 200]
+            "contents": contents,
+            "generationConfig": ["maxOutputTokens": isChat ? 1500 : 200]
         ]
         let jsonData = try JSONSerialization.data(withJSONObject: body)
         let (data, _) = try await AIHTTPHelper.sendRequest(url: url, headers: [

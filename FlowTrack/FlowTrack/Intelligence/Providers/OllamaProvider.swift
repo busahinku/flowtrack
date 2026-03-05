@@ -32,19 +32,32 @@ struct OllamaProvider: AIProvider, Sendable {
     }
 
     private func sendRequest(prompt: String) async throws -> String {
-        let url = URL(string: "http://localhost:11434/api/generate")!
-        let body: [String: Any] = [
-            "model": model,
-            "prompt": prompt,
-            "stream": false
-        ]
+        try await sendChat(messages: [ChatTurn(role: "user", content: prompt)], systemPrompt: nil)
+    }
+
+    func chat(messages: [ChatTurn], systemPrompt: String) async throws -> String {
+        try await sendChat(messages: messages, systemPrompt: systemPrompt)
+    }
+
+    private func sendChat(messages: [ChatTurn], systemPrompt: String?) async throws -> String {
+        let url = URL(string: "http://localhost:11434/api/chat")!
+        var apiMessages: [[String: Any]] = []
+        if let sys = systemPrompt {
+            apiMessages.append(["role": "system", "content": sys])
+        }
+        apiMessages += messages.map { ["role": $0.role, "content": $0.content] }
+        let body: [String: Any] = ["model": model, "messages": apiMessages, "stream": false]
         let jsonData = try JSONSerialization.data(withJSONObject: body)
         let (data, _) = try await AIHTTPHelper.sendRequest(url: url, headers: [
             "Content-Type": "application/json"
         ], body: jsonData)
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let text = json["response"] as? String else {
+              let message = json["message"] as? [String: Any],
+              let text = message["content"] as? String else {
+            // Fallback to old /api/generate response format
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let text = json["response"] as? String { return text }
             throw AIError.invalidResponse("Unexpected Ollama response format")
         }
         return text

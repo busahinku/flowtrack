@@ -95,43 +95,35 @@ enum AppTheme: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-// MARK: - Menu bar icon: follows macOS menu bar appearance (not app theme)
-// Light menu bar → DarkLogo. Dark menu bar → WhiteLogo. So it matches other menu bar icons.
+// MARK: - Menu bar icon: template image so macOS auto-colors it like all other menu bar icons
 struct MenuBarIconView: View {
-    @State private var isMenuBarDark: Bool = {
-        NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-    }()
     var size: CGFloat = 18
 
     var body: some View {
-        Group {
-            if let nsImage = loadIcon(name: isMenuBarDark ? "WhiteLogo" : "DarkLogo", side: size) {
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-            } else {
-                Image(systemName: "bolt.fill")
-                    .font(.system(size: size))
-            }
-        }
-        .frame(width: size, height: size)
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            isMenuBarDark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        }
+        Image(nsImage: templateIcon(size: size))
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: size, height: size)
     }
 
-    private func loadIcon(name: String, side: CGFloat) -> NSImage? {
-        guard let img = NSImage(named: name) else { return nil }
-        let targetSize = NSSize(width: side, height: side)
-        let newImage = NSImage(size: targetSize)
-        newImage.lockFocus()
+    /// Loads DarkLogo and marks it as a template image.
+    /// macOS then renders it in the correct menu bar foreground color automatically.
+    private func templateIcon(size: CGFloat) -> NSImage {
+        guard let source = NSImage(named: "DarkLogo") else {
+            let fallback = NSImage(systemSymbolName: "bolt.fill", accessibilityDescription: nil) ?? NSImage()
+            fallback.isTemplate = true
+            return fallback
+        }
+        let targetSize = NSSize(width: size, height: size)
+        let scaled = NSImage(size: targetSize)
+        scaled.lockFocus()
         NSGraphicsContext.current?.imageInterpolation = .high
-        img.draw(in: NSRect(origin: .zero, size: targetSize),
-                 from: NSRect(origin: .zero, size: img.size),
-                 operation: .copy,
-                 fraction: 1)
-        newImage.unlockFocus()
-        return newImage
+        source.draw(in: NSRect(origin: .zero, size: targetSize),
+                    from: NSRect(origin: .zero, size: source.size),
+                    operation: .copy, fraction: 1)
+        scaled.unlockFocus()
+        scaled.isTemplate = true   // ← macOS handles dark/light automatically
+        return scaled
     }
 }
 

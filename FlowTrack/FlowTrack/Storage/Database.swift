@@ -439,4 +439,53 @@ final class Database: Sendable {
         }
         dbLogger.info("Auto-cleanup: removed data older than \(keepDays) days (DB was \(sizeMB) MB)")
     }
+
+    /// Scheduled data retention — call on startup, runs at most once per week.
+    func pruneOldActivitiesIfScheduled() {
+        let retentionDays = AppSettings.shared.retentionDays
+        guard retentionDays > 0 else { return }
+        let lastPruneKey = "lastPruneDate"
+        let lastPrune = UserDefaults.standard.object(forKey: lastPruneKey) as? Date ?? .distantPast
+        guard Date().timeIntervalSince(lastPrune) > 7 * 86400 else { return } // once per week
+
+        Task(priority: .background) {
+            let cutoff = Calendar.current.date(byAdding: .day, value: -retentionDays, to: Date())!
+            try? self.dbQueue.write { db in
+                try db.execute(sql: "DELETE FROM activities WHERE timestamp < ?", arguments: [cutoff])
+                try db.execute(sql: "DELETE FROM session_ai WHERE session_id NOT IN (SELECT DISTINCT id FROM activities)")
+            }
+            UserDefaults.standard.set(Date(), forKey: lastPruneKey)
+            dbLogger.info("Scheduled retention: pruned data older than \(retentionDays) days")
+        }
+    }
+
+    // MARK: - Streak & Weekly Insights
+
+    /// Count of consecutive days (ending today) where productive time >= 50% of active time.
+    func focusStreakDays() throws -> Int {
+        var streak = 0
+        var checkDate = Calendar.current.startOfDay(for: Date())
+        let cal = Calendar.current
+        for _ in 0..<365 {
+            let nextDay = cal.date(byAdding: .day, value: 1, to: checkDate)!
+            let stats = try categoryStatsForRange(from: checkDate, to: nextDay)
+            let total = stats.reduce(0.0) { $0 + $1.totalSeconds }
+            guard total > 60 else { break } // no data = streak broken
+            let productive = stats.filter { $0.category.isProductive }.reduce(0.0) { $0 + $1.totalSeconds }
+            guard productive / total >= 0.5 else { break }
+            streak += 1
+            checkDate = cal.date(byAdding: .day, value: -1, to: checkDate)!
+        }
+        return streak
+    }
+
+    /// App switch count per day (stored as a simple daily metric).
+    func appSwitchesForDate(_ date: Date) throws -> Int {
+        let start = Calendar.current.startOfDay(for: date)
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: start)!
+        return try dbQueue.read { db in
+            let count = try Int.fetchOne(db, sql: "SELECT COUNT(DISTINCT appName) FROM activities WHERE timestamp >= ? AND timestamp < ? AND isIdle = 0", arguments: [start, end]) ?? 0
+            return count
+        }
+    }
 }

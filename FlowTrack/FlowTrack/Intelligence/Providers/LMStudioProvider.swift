@@ -32,11 +32,22 @@ struct LMStudioProvider: AIProvider, Sendable {
     }
 
     private func sendRequest(prompt: String) async throws -> String {
+        try await sendChat(messages: [ChatTurn(role: "user", content: prompt)], systemPrompt: nil)
+    }
+
+    func chat(messages: [ChatTurn], systemPrompt: String) async throws -> String {
+        try await sendChat(messages: messages, systemPrompt: systemPrompt)
+    }
+
+    private func sendChat(messages: [ChatTurn], systemPrompt: String?) async throws -> String {
         let url = URL(string: "http://localhost:1234/v1/chat/completions")!
-        var body: [String: Any] = [
-            "messages": [["role": "user", "content": prompt]],
-            "max_tokens": 200
-        ]
+        let isChat = messages.count > 1 || systemPrompt != nil
+        var apiMessages: [[String: Any]] = []
+        if let sys = systemPrompt {
+            apiMessages.append(["role": "system", "content": sys])
+        }
+        apiMessages += messages.map { ["role": $0.role, "content": $0.content] }
+        var body: [String: Any] = ["messages": apiMessages, "max_tokens": isChat ? 1500 : 200]
         if model != "default" { body["model"] = model }
         let jsonData = try JSONSerialization.data(withJSONObject: body)
         let (data, _) = try await AIHTTPHelper.sendRequest(url: url, headers: [

@@ -15,6 +15,12 @@ final class AppState {
     var aiNextRunTime: Date?
     var sessionTitles: [String: String] = [:]
     var sessionSummaries: [String: String] = [:]
+    /// Consecutive productive days (≥50% focus) ending today
+    var streakDays: Int = 0
+    /// Today's app switch count (context-switching metric)
+    var todaySwitchCount: Int { ActivityTracker.shared.todaySwitchCount }
+    /// True when user has been in a productive app for >20 min continuously
+    var isInDeepWork: Bool = false
 
     private var aiTimer: Timer?
     private var refreshTimer: Timer?
@@ -34,6 +40,7 @@ final class AppState {
         Task {
             await reCategorizeWithRules()
             await refreshData()
+            Database.shared.pruneOldActivitiesIfScheduled()
         }
     }
 
@@ -71,8 +78,33 @@ final class AppState {
             categoryStats = try Database.shared.categoryStatsForDate(selectedDate)
             cachedActivityCount = count
             cachedSessionDate = selectedDate
+
+            // Detect deep work sessions
+            updateDeepWorkState()
+
+            // Refresh streak (cheap query, run async)
+            Task(priority: .background) {
+                if let days = try? Database.shared.focusStreakDays() {
+                    await MainActor.run { self.streakDays = days }
+                }
+            }
+
+            // Memory caps: keep only last 200 entries in AI caches
+            enforceAICacheLimit()
         } catch {
             appStateLogger.error("Refresh error: \(error.localizedDescription)")
+        }
+    }
+
+    private func enforceAICacheLimit() {
+        let limit = 200
+        if sessionTitles.count > limit {
+            let keys = Array(sessionTitles.keys.prefix(sessionTitles.count - limit))
+            keys.forEach { sessionTitles.removeValue(forKey: $0) }
+        }
+        if sessionSummaries.count > limit {
+            let keys = Array(sessionSummaries.keys.prefix(sessionSummaries.count - limit))
+            keys.forEach { sessionSummaries.removeValue(forKey: $0) }
         }
     }
 
@@ -352,6 +384,23 @@ final class AppState {
             }
         } catch {
             appStateLogger.error("Failed to load persisted AI data: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Deep Work Detection
+
+    /// Updates isInDeepWork based on today's session data.
+    /// A "deep work" session is a single productive TimeSlot lasting ≥20 min.
+    private func updateDeepWorkState() {
+        let deepWorkThreshold: TimeInterval = 20 * 60
+        let hasDeepWork = timeSlots.contains {
+            !$0.isIdle && $0.category.isProductive && $0.duration >= deepWorkThreshold
+        }
+        if hasDeepWork != isInDeepWork {
+            isInDeepWork = hasDeepWork
+            if hasDeepWork {
+                appStateLogger.info("Deep work session detected")
+            }
         }
     }
 }

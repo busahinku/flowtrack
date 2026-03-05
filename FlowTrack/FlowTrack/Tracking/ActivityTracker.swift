@@ -3,6 +3,9 @@ import AppKit
 import Combine
 import IOKit.ps
 import UserNotifications
+import OSLog
+
+private let trackerLogger = Logger(subsystem: "com.flowtrack", category: "ActivityTracker")
 
 @MainActor
 final class ActivityTracker: ObservableObject {
@@ -14,36 +17,291 @@ final class ActivityTracker: ObservableObject {
     }
     @Published var currentTitle: String = ""
     private(set) var currentAppSince: Date = Date()
+    /// App switches today — a proxy for context-switching / fragmentation
+    private(set) var todaySwitchCount: Int = 0
 
-    private var timer: Timer?
+    // MARK: - Private State
+    private var heartbeatTimer: Timer?
     private var batteryMonitorTimer: Timer?
     private var lastActivity: Date = Date()
     private var idleThreshold: TimeInterval { TimeInterval(AppSettings.shared.idleThresholdSeconds) }
     private var consecutiveIdleCount = 0
-    // Cached battery state — refreshed every 60s to avoid IOKit overhead on every poll
     private var cachedOnBattery: Bool = false
+    private var isScreenAsleep = false
+
+    // Deduplication state — skip redundant DB writes
+    private var lastSavedBundleID: String = ""
+    private var lastSavedTitle: String = ""
+    private var lastSavedURL: String? = nil
+    private var lastSavedIsIdle: Bool = false
+
+    // Browser URL cache — only re-fetch AppleScript when title actually changes
+    private var lastBrowserTitle: String = ""
+    private var cachedBrowserURL: String? = nil
+
+    // App Nap exemption token
+    private var activityToken: NSObjectProtocol?
+
+    // NSWorkspace notification observers
+    private var appSwitchObserver: Any?
+    private var screenSleepObserver: Any?
+    private var screenWakeObserver: Any?
+    private var systemSleepObserver: Any?
+    private var systemWakeObserver: Any?
+
+    // Switch count reset
+    private var lastSwitchResetDate: Date = Calendar.current.startOfDay(for: Date())
+
     // Distraction alert tracking
     private var distractionStartTime: Date?
     private var lastDistractionAlertFired: Date?
 
+    private let knownBrowsers = ["Safari", "Google Chrome", "Firefox", "Arc", "Brave Browser", "Microsoft Edge", "Opera"]
+
     private init() {}
+
+    // MARK: - Start / Stop
 
     func startTracking() {
         guard !isTracking else { return }
         isTracking = true
         cachedOnBattery = isOnBattery()
-        scheduleTimer()
+
+        // Prevent App Nap from throttling background timers
+        activityToken = ProcessInfo.processInfo.beginActivity(
+            options: .background,
+            reason: "FlowTrack background activity tracking"
+        )
+
+        // Event-driven app switch detection — zero CPU between switches
+        appSwitchObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil, queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor [weak self] in self?.handleAppSwitch(notification) }
+        }
+
+        // Screen sleep/wake — pause tracking when display is off
+        screenSleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.screensDidSleepNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.handleScreenSleep() }
+        }
+        screenWakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.screensDidWakeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.handleScreenWake() }
+        }
+        systemSleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.handleScreenSleep() }
+        }
+        systemWakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.handleScreenWake() }
+        }
+
+        scheduleHeartbeat()
         scheduleBatteryMonitor()
-        poll()
+        captureCurrentApp()
         Database.shared.autoCleanupIfNeeded()
     }
 
     func stopTracking() {
         isTracking = false
-        timer?.invalidate()
-        timer = nil
-        batteryMonitorTimer?.invalidate()
-        batteryMonitorTimer = nil
+        heartbeatTimer?.invalidate(); heartbeatTimer = nil
+        batteryMonitorTimer?.invalidate(); batteryMonitorTimer = nil
+        if let token = activityToken { ProcessInfo.processInfo.endActivity(token) }
+        activityToken = nil
+        if let obs = appSwitchObserver { NSWorkspace.shared.notificationCenter.removeObserver(obs) }
+        if let obs = screenSleepObserver { NSWorkspace.shared.notificationCenter.removeObserver(obs) }
+        if let obs = screenWakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(obs) }
+        if let obs = systemSleepObserver { NSWorkspace.shared.notificationCenter.removeObserver(obs) }
+        if let obs = systemWakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(obs) }
+        appSwitchObserver = nil; screenSleepObserver = nil; screenWakeObserver = nil
+        systemSleepObserver = nil; systemWakeObserver = nil
+    }
+
+    // MARK: - Heartbeat (30s interval for duration + title change detection)
+
+    private func scheduleHeartbeat() {
+        heartbeatTimer?.invalidate()
+        let interval: TimeInterval = cachedOnBattery ? 45 : 30
+        heartbeatTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+            Task { @MainActor [weak self] in self?.heartbeat() }
+        }
+    }
+
+    private func heartbeat() {
+        guard !isScreenAsleep else { return }
+        guard let frontApp = NSWorkspace.shared.frontmostApplication else { return }
+        let appName = frontApp.localizedName ?? "Unknown"
+        let bundleID = frontApp.bundleIdentifier ?? ""
+
+        if AppSettings.shared.excludedBundleIDs.contains(bundleID) { return }
+
+        let isIdle = checkIdle()
+        if isIdle { consecutiveIdleCount += 1 } else { consecutiveIdleCount = 0; lastActivity = Date() }
+
+        let idleDuration = Date().timeIntervalSince(lastActivity)
+        let recordIsIdle = idleDuration > idleThreshold
+
+        if recordIsIdle && consecutiveIdleCount > 3 { return }
+
+        // Title change detection (AX API — lightweight, no AppleScript)
+        let newTitle = AppSettings.shared.captureWindowTitles ? getWindowTitle(for: frontApp) : ""
+        let titleChanged = newTitle != lastSavedTitle
+        if titleChanged { currentTitle = newTitle }
+
+        let duration: TimeInterval = cachedOnBattery ? 45 : 30
+        let isBrowser = knownBrowsers.contains(where: { appName.contains($0) })
+
+        // Deduplication: skip write if nothing changed
+        let stateChanged = bundleID != lastSavedBundleID || titleChanged || recordIsIdle != lastSavedIsIdle
+
+        if isBrowser {
+            let urlFetchNeeded = titleChanged || cachedBrowserURL == nil
+            if urlFetchNeeded {
+                let capturedTitle = newTitle
+                Task.detached(priority: .utility) {
+                    let url = ActivityTracker.fetchBrowserURL(appName: appName)
+                    await MainActor.run { [weak self] in
+                        guard let self else { return }
+                        self.cachedBrowserURL = url
+                        self.lastBrowserTitle = capturedTitle
+                        let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: capturedTitle, url: url, isIdle: recordIsIdle)
+                        self.checkDistractionAlert(category: cat)
+                        self.writeRecord(appName: appName, bundleID: bundleID, title: capturedTitle, url: url, category: cat, isIdle: recordIsIdle, duration: duration)
+                        self.lastSavedBundleID = bundleID; self.lastSavedTitle = capturedTitle
+                        self.lastSavedURL = url; self.lastSavedIsIdle = recordIsIdle
+                    }
+                }
+            } else {
+                // Same tab — write heartbeat with cached URL (proves presence), skip AppleScript
+                let cat = resolveCategory(appName: appName, bundleID: bundleID, title: newTitle, url: cachedBrowserURL, isIdle: recordIsIdle)
+                checkDistractionAlert(category: cat)
+                writeRecord(appName: appName, bundleID: bundleID, title: newTitle, url: cachedBrowserURL, category: cat, isIdle: recordIsIdle, duration: duration)
+                lastSavedBundleID = bundleID; lastSavedTitle = newTitle; lastSavedIsIdle = recordIsIdle
+            }
+        } else {
+            cachedBrowserURL = nil
+            let cat = resolveCategory(appName: appName, bundleID: bundleID, title: newTitle, url: nil, isIdle: recordIsIdle)
+            checkDistractionAlert(category: cat)
+            if stateChanged {
+                writeRecord(appName: appName, bundleID: bundleID, title: newTitle, url: nil, category: cat, isIdle: recordIsIdle, duration: duration)
+                lastSavedBundleID = bundleID; lastSavedTitle = newTitle; lastSavedIsIdle = recordIsIdle
+            } else {
+                // Same state — just write heartbeat (proves presence)
+                writeRecord(appName: appName, bundleID: bundleID, title: newTitle, url: nil, category: cat, isIdle: recordIsIdle, duration: duration)
+            }
+        }
+    }
+
+    // MARK: - App Switch Handler (event-driven, instant)
+
+    private func handleAppSwitch(_ notification: Notification) {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+        let bundleID = app.bundleIdentifier ?? ""
+        let appName = app.localizedName ?? "Unknown"
+
+        if AppSettings.shared.excludedBundleIDs.contains(bundleID) { return }
+        guard bundleID != lastSavedBundleID else { return } // same app, skip
+
+        // Track app switches for context-switching metric
+        resetSwitchCountIfNewDay()
+        todaySwitchCount += 1
+        trackerLogger.debug("App switch: \(appName, privacy: .public) (#\(self.todaySwitchCount))")
+
+        currentApp = appName
+        consecutiveIdleCount = 0
+        cachedBrowserURL = nil
+        lastBrowserTitle = ""
+
+        let title = AppSettings.shared.captureWindowTitles ? getWindowTitle(for: app) : ""
+        currentTitle = title
+
+        let isBrowser = knownBrowsers.contains(where: { appName.contains($0) })
+        if isBrowser {
+            Task.detached(priority: .utility) {
+                let url = ActivityTracker.fetchBrowserURL(appName: appName)
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.cachedBrowserURL = url
+                    self.lastBrowserTitle = title
+                    let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: title, url: url, isIdle: false)
+                    self.checkDistractionAlert(category: cat)
+                    self.writeRecord(appName: appName, bundleID: bundleID, title: title, url: url, category: cat, isIdle: false, duration: 0)
+                    self.lastSavedBundleID = bundleID; self.lastSavedTitle = title
+                    self.lastSavedURL = url; self.lastSavedIsIdle = false
+                }
+            }
+        } else {
+            let cat = resolveCategory(appName: appName, bundleID: bundleID, title: title, url: nil, isIdle: false)
+            checkDistractionAlert(category: cat)
+            writeRecord(appName: appName, bundleID: bundleID, title: title, url: nil, category: cat, isIdle: false, duration: 0)
+            lastSavedBundleID = bundleID; lastSavedTitle = title
+            lastSavedURL = nil; lastSavedIsIdle = false
+        }
+    }
+
+    // MARK: - Screen Sleep / Wake
+
+    private func handleScreenSleep() {
+        isScreenAsleep = true
+        heartbeatTimer?.invalidate(); heartbeatTimer = nil
+        lastSavedBundleID = "" // force fresh write on wake
+        trackerLogger.info("Screen/system sleep — tracking paused")
+    }
+
+    private func handleScreenWake() {
+        isScreenAsleep = false
+        scheduleHeartbeat()
+        captureCurrentApp()
+        trackerLogger.info("Screen/system wake — tracking resumed")
+    }
+
+    // MARK: - Initial capture
+
+    private func captureCurrentApp() {
+        guard let frontApp = NSWorkspace.shared.frontmostApplication else { return }
+        let appName = frontApp.localizedName ?? "Unknown"
+        let bundleID = frontApp.bundleIdentifier ?? ""
+        guard !AppSettings.shared.excludedBundleIDs.contains(bundleID) else { return }
+        currentApp = appName
+        currentTitle = AppSettings.shared.captureWindowTitles ? getWindowTitle(for: frontApp) : ""
+        lastSavedBundleID = "" // will be set after first write
+    }
+
+    // MARK: - Helpers
+
+    private func resolveCategory(appName: String, bundleID: String, title: String, url: String?, isIdle: Bool) -> Category {
+        if isIdle { return .idle }
+        return RuleEngine.shared.categorize(appName: appName, bundleID: bundleID, windowTitle: title, url: url) ?? .uncategorized
+    }
+
+    private func writeRecord(appName: String, bundleID: String, title: String, url: String?, category: Category, isIdle: Bool, duration: TimeInterval) {
+        let record = ActivityRecord(
+            timestamp: Date(), appName: appName, bundleID: bundleID,
+            windowTitle: title, url: url, category: category,
+            isIdle: isIdle, duration: duration
+        )
+        Task(priority: .utility) {
+            try? await Database.shared.saveActivity(record)
+        }
+    }
+
+    private func resetSwitchCountIfNewDay() {
+        let today = Calendar.current.startOfDay(for: Date())
+        if today > lastSwitchResetDate {
+            todaySwitchCount = 0
+            lastSwitchResetDate = today
+        }
     }
 
     private func scheduleBatteryMonitor() {
@@ -53,102 +311,9 @@ final class ActivityTracker: ObservableObject {
                 let newBattery = self.isOnBattery()
                 if newBattery != self.cachedOnBattery {
                     self.cachedOnBattery = newBattery
-                    self.scheduleTimer()
+                    self.scheduleHeartbeat() // re-schedule with new interval
                 }
             }
-        }
-    }
-
-    private func scheduleTimer() {
-        timer?.invalidate()
-        let interval: TimeInterval
-        if consecutiveIdleCount > 6 {
-            interval = 15
-        } else if cachedOnBattery {
-            interval = 10
-        } else {
-            interval = 5
-        }
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
-            Task { @MainActor [weak self] in
-                self?.poll()
-            }
-        }
-    }
-
-    private func poll() {
-        guard let frontApp = NSWorkspace.shared.frontmostApplication else { return }
-        let appName = frontApp.localizedName ?? "Unknown"
-        let bundleID = frontApp.bundleIdentifier ?? ""
-
-        // Skip excluded apps
-        if AppSettings.shared.excludedBundleIDs.contains(bundleID) { return }
-
-        let rawTitle = AppSettings.shared.captureWindowTitles ? getWindowTitle(for: frontApp) : ""
-        let windowTitle = rawTitle
-        let isIdle = checkIdle()
-
-        currentApp = appName
-        currentTitle = windowTitle
-
-        if !isIdle {
-            lastActivity = Date()
-            consecutiveIdleCount = 0
-        } else {
-            consecutiveIdleCount += 1
-        }
-
-        let idleDuration = Date().timeIntervalSince(lastActivity)
-        let recordIsIdle = idleDuration > idleThreshold
-
-        if recordIsIdle && consecutiveIdleCount > 2 {
-            if consecutiveIdleCount == 3 { scheduleTimer() }
-            return
-        }
-
-        let category: Category
-        if recordIsIdle {
-            category = .idle
-        } else if let ruleCat = RuleEngine.shared.categorize(appName: appName, bundleID: bundleID, windowTitle: windowTitle, url: nil) {
-            category = ruleCat
-        } else {
-            category = .uncategorized
-        }
-
-        let duration: TimeInterval = consecutiveIdleCount > 6 ? 15 : (cachedOnBattery ? 10 : 5)
-        let timestamp = Date()
-
-        // Distraction alert tracking
-        checkDistractionAlert(category: category)
-
-        let knownBrowsers = ["Safari", "Google Chrome", "Firefox", "Arc", "Brave Browser", "Microsoft Edge", "Opera"]
-        let isBrowser = knownBrowsers.contains(where: { appName.contains($0) })
-
-        if isBrowser {
-            // Fetch URL off the main actor — AppleScript blocks for 100–300ms
-            Task.detached(priority: .utility) {
-                let url = ActivityTracker.fetchBrowserURL(appName: appName)
-                let finalCategory: Category
-                if !recordIsIdle, let url,
-                   let urlCat = await RuleEngine.shared.categorize(appName: appName, bundleID: bundleID, windowTitle: windowTitle, url: url) {
-                    finalCategory = urlCat
-                } else {
-                    finalCategory = category
-                }
-                let record = ActivityRecord(
-                    timestamp: timestamp, appName: appName, bundleID: bundleID,
-                    windowTitle: windowTitle, url: url, category: finalCategory,
-                    isIdle: recordIsIdle, duration: duration
-                )
-                try? await Database.shared.saveActivity(record)
-            }
-        } else {
-            let record = ActivityRecord(
-                timestamp: timestamp, appName: appName, bundleID: bundleID,
-                windowTitle: windowTitle, url: nil, category: category,
-                isIdle: recordIsIdle, duration: duration
-            )
-            try? Database.shared.saveActivity(record)
         }
     }
 
@@ -157,10 +322,8 @@ final class ActivityTracker: ObservableObject {
         let appElement = AXUIElementCreateApplication(pid)
         var value: AnyObject?
         let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &value)
-        // Nil-check value before force-casting: AXUIElement is a CF type so as? always succeeds
-        // and triggers a compiler error; force-cast after nil/success guard is safe.
         guard result == .success, let rawValue = value else { return "" }
-        let axElement = rawValue as! AXUIElement // safe: kAXFocusedWindowAttribute always yields AXUIElement
+        let axElement = rawValue as! AXUIElement
         var titleValue: AnyObject?
         AXUIElementCopyAttributeValue(axElement, kAXTitleAttribute as CFString, &titleValue)
         return titleValue as? String ?? ""
@@ -207,16 +370,12 @@ final class ActivityTracker: ObservableObject {
 
     private func checkDistractionAlert(category: Category) {
         let alertMinutes = AppSettings.shared.distractionAlertMinutes
-        guard alertMinutes > 0 else {
-            distractionStartTime = nil
-            return
-        }
+        guard alertMinutes > 0 else { distractionStartTime = nil; return }
 
         if category == .distraction || category == .entertainment {
             if distractionStartTime == nil { distractionStartTime = Date() }
             let elapsed = Date().timeIntervalSince(distractionStartTime!)
             let threshold = TimeInterval(alertMinutes * 60)
-            // Only fire once per threshold period
             let canFire = lastDistractionAlertFired.map { Date().timeIntervalSince($0) > threshold } ?? true
             if elapsed >= threshold && canFire {
                 lastDistractionAlertFired = Date()

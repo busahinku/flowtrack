@@ -26,72 +26,79 @@ struct HeatmapView: View {
         .background(theme.timelineBg)
         .toolbarBackground(theme.timelineBg, for: .windowToolbar)
         .onAppear { loadData() }
-        .navigationTitle("")
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                heatmapWeekNav
+            }
+            ToolbarItem(placement: .primaryAction) {
+                weeklyStats
+            }
+        }
+    }
+
+    private var heatmapWeekNav: some View {
+        HStack(spacing: 2) {
+            Button(action: { weekOffset -= 1; loadData() }) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+
+            Button(action: { showWeekDatePicker.toggle() }) {
+                Text(weekLabel)
+                    .font(.headline)
+                    .frame(minWidth: 90)
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showWeekDatePicker) {
+                DatePicker("", selection: $weekPickerDate, displayedComponents: .date)
+                    .labelsHidden()
+                    .datePickerStyle(.graphical)
+                    .padding(8)
+                    .frame(width: 300, height: 320)
+                    .onChange(of: weekPickerDate) {
+                        let cal = Calendar.current
+                        let today = cal.startOfDay(for: Date())
+                        let diff = cal.dateComponents([.weekOfYear], from: today, to: weekPickerDate)
+                        weekOffset = diff.weekOfYear ?? 0
+                        loadData()
+                        showWeekDatePicker = false
+                    }
+            }
+
+            Button(action: { weekOffset += 1; loadData() }) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+
+            if weekOffset != 0 {
+                Button("This Week") { weekOffset = 0; loadData() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var weeklyStats: some View {
+        if !weeklyData.isEmpty {
+            let totalMinutes = weeklyData.flatMap { $0 }.reduce(0, +)
+            Text("\(Theme.formatDuration(totalMinutes * 60)) productive")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
     }
 
     // MARK: - Weekly Heatmap (rows = days, columns = hours)
     private var weeklyHeatmap: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Weekly Activity")
-                        .font(.title2.bold())
-                    if !weeklyData.isEmpty {
-                        let totalMinutes = weeklyData.flatMap { $0 }.reduce(0, +)
-                        Text("\(Theme.formatDuration(totalMinutes * 60)) productive this week")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-
-                HStack(spacing: 4) {
-                    if weekOffset != 0 {
-                        Button("This Week") { weekOffset = 0; loadData() }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                    }
-
-                    Button(action: { weekOffset -= 1; loadData() }) {
-                        Image(systemName: "chevron.left")
-                            .font(.caption.bold())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24, height: 24)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-
-                    Button(action: { showWeekDatePicker.toggle() }) {
-                        Text(weekLabel)
-                            .font(.subheadline.bold())
-                    }
-                    .buttonStyle(.plain)
-                    .popover(isPresented: $showWeekDatePicker) {
-                        DatePicker("Select Week", selection: $weekPickerDate, displayedComponents: .date)
-                            .datePickerStyle(.graphical)
-                            .padding()
-                            .frame(width: 320)
-                            .onChange(of: weekPickerDate) {
-                                let cal = Calendar.current
-                                let today = cal.startOfDay(for: Date())
-                                let diff = cal.dateComponents([.weekOfYear], from: today, to: weekPickerDate)
-                                weekOffset = diff.weekOfYear ?? 0
-                                loadData()
-                                showWeekDatePicker = false
-                            }
-                    }
-
-                    Button(action: { weekOffset += 1; loadData() }) {
-                        Image(systemName: "chevron.right")
-                            .font(.caption.bold())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24, height: 24)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
             // Grid: rows = days (Mon-Sun), columns = hours (0-23)
             ScrollView(.horizontal, showsIndicators: false) {
                 VStack(spacing: 1) {

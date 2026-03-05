@@ -12,6 +12,7 @@ struct StatsView: View {
     @Bindable var appState = AppState.shared
     @State private var period: StatsPeriod = .day
     @State private var selectedDate = Date()
+    @Namespace private var periodNS
     @State private var allActivities: [ActivityRecord] = []
     @State private var periodTimeSlots: [TimeSlot] = []
     @State private var selectedApp: AppUsageInfo?
@@ -57,34 +58,50 @@ struct StatsView: View {
             CategoryDetailSheet(stat: stat, activities: allActivities.filter { $0.category.rawValue == stat.category.rawValue })
         }
         .toolbar {
-            // Period picker — custom capsule style, no system segmented background
             ToolbarItem(placement: .principal) {
                 periodPicker
             }
-
-            // Date navigation — right
             ToolbarItemGroup(placement: .primaryAction) {
                 statsDateNav
             }
         }
     }
 
+    private var statsHeader: some View {
+        HStack(spacing: 8) {
+            periodPicker
+            Spacer()
+            statsDateNav
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(theme.timelineBg)
+    }
+
     private var periodPicker: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 0) {
             ForEach(StatsPeriod.allCases, id: \.self) { p in
-                Button(p.rawValue) { period = p }
-                    .buttonStyle(.plain)
-                    .font(.subheadline.weight(period == p ? .semibold : .regular))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 5)
-                    .background(
-                        period == p ? theme.accentColor : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 6)
-                    )
-                    .foregroundStyle(period == p ? .white : .secondary)
-                    .animation(.easeInOut(duration: 0.15), value: period)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { period = p }
+                } label: {
+                    Text(p.rawValue)
+                        .font(.subheadline.weight(period == p ? .semibold : .regular))
+                        .foregroundStyle(period == p ? .white : .secondary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .background {
+                            if period == p {
+                                RoundedRectangle(cornerRadius: 7)
+                                    .fill(theme.accentColor)
+                                    .matchedGeometryEffect(id: "periodBg", in: periodNS)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
             }
         }
+        .padding(3)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var statsDateNav: some View {
@@ -112,10 +129,11 @@ struct StatsView: View {
             }
             .buttonStyle(.plain)
             .popover(isPresented: $showDatePicker) {
-                DatePicker("Select Date", selection: $selectedDate, displayedComponents: .date)
+                DatePicker("", selection: $selectedDate, displayedComponents: .date)
+                    .labelsHidden()
                     .datePickerStyle(.graphical)
-                    .padding()
-                    .frame(width: 320)
+                    .padding(8)
+                    .frame(width: 300, height: 320)
             }
 
             Button(action: navigateForward) {
@@ -151,6 +169,14 @@ struct StatsView: View {
             SummaryCard(title: "Focus Score",
                        value: totalActiveSeconds > 0 ? "\(Int(productivePercent))%" : "—",
                        icon: "brain", color: theme.accentColor)
+            if appState.streakDays > 0 {
+                SummaryCard(title: "Streak", value: "\(appState.streakDays)d 🔥",
+                           icon: "flame.fill", color: .orange)
+            }
+            if period == .day && appState.todaySwitchCount > 0 {
+                SummaryCard(title: "Switches", value: "\(appState.todaySwitchCount)",
+                           icon: "arrow.left.arrow.right", color: .teal)
+            }
         }
     }
 
