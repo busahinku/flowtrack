@@ -20,7 +20,7 @@ struct SettingsView: View {
             ExportTab()
                 .tabItem { Label("Export", systemImage: "square.and.arrow.up") }
         }
-        .frame(width: 650, height: 520)
+        .frame(width: 660, height: 540)
         .preferredColorScheme(AppSettings.shared.appTheme.colorScheme)
     }
 }
@@ -29,7 +29,7 @@ struct SettingsView: View {
 struct GeneralTab: View {
     @Bindable var settings = AppSettings.shared
     @State private var hasAccessibility = PermissionChecker.hasAccessibility
-    private var accessibilityTimer: Timer? = nil
+    @State private var dbSizeText = "Calculating..."
 
     var body: some View {
         Form {
@@ -88,6 +88,16 @@ struct GeneralTab: View {
                         NSWorkspace.shared.open(folder)
                     }
                 }
+                HStack {
+                    Text("Database size")
+                    Spacer()
+                    Text(dbSizeText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text("Data older than 90 days is automatically cleaned when DB exceeds 3 GB.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
         }
         .formStyle(.grouped)
@@ -97,6 +107,23 @@ struct GeneralTab: View {
                     hasAccessibility = PermissionChecker.hasAccessibility
                 }
             }
+            updateDBSize()
+        }
+    }
+
+    private func updateDBSize() {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dbPath = appSupport.appendingPathComponent("FlowTrack/flowtrack.sqlite").path
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: dbPath),
+           let size = attrs[.size] as? Int64 {
+            let mb = Double(size) / (1024 * 1024)
+            if mb >= 1024 {
+                dbSizeText = String(format: "%.1f GB", mb / 1024)
+            } else {
+                dbSizeText = String(format: "%.1f MB", mb)
+            }
+        } else {
+            dbSizeText = "Unknown"
         }
     }
 }
@@ -111,6 +138,11 @@ struct AITab: View {
     @State private var savedIndicator = false
     @State private var cliDetected: [String: String?] = [:]
     @State private var providerHealth: [String: ProviderHealthStatus] = [:]
+    // Fallback inline config
+    @State private var fb1KeyInput = ""
+    @State private var fb2KeyInput = ""
+    @State private var fb1ModelInput = ""
+    @State private var fb2ModelInput = ""
 
     enum ProviderHealthStatus {
         case unknown, checking, healthy, unhealthy(String)
@@ -134,10 +166,10 @@ struct AITab: View {
                 }
 
                 if settings.aiProvider.needsAPIKey {
-                    apiKeySection(for: settings.aiProvider)
+                    apiKeySection(for: settings.aiProvider, keyBinding: $apiKeyInput, savedBinding: $savedIndicator)
                 }
 
-                modelSection(for: settings.aiProvider)
+                modelSection(for: settings.aiProvider, modelBinding: $modelInput)
             }
 
             Section("Fallback Chain") {
@@ -154,17 +186,7 @@ struct AITab: View {
                 ))
 
                 if let sec = settings.secondaryProvider, sec != settings.aiProvider {
-                    HStack(spacing: 6) {
-                        statusDot(for: sec)
-                        Text(sec.rawValue)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if sec.needsAPIKey && !SecureStore.shared.hasKey(for: sec.rawValue) {
-                            Text("⚠️ No API key")
-                                .font(.caption2)
-                                .foregroundStyle(.orange)
-                        }
-                    }
+                    fallbackProviderConfig(sec, keyBinding: $fb1KeyInput, modelBinding: $fb1ModelInput)
                 }
 
                 fallbackPicker("Fallback 2", selection: Binding(
@@ -178,17 +200,7 @@ struct AITab: View {
                 ))
 
                 if let ter = settings.tertiaryProvider, ter != settings.aiProvider, ter != settings.secondaryProvider {
-                    HStack(spacing: 6) {
-                        statusDot(for: ter)
-                        Text(ter.rawValue)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if ter.needsAPIKey && !SecureStore.shared.hasKey(for: ter.rawValue) {
-                            Text("⚠️ No API key")
-                                .font(.caption2)
-                                .foregroundStyle(.orange)
-                        }
-                    }
+                    fallbackProviderConfig(ter, keyBinding: $fb2KeyInput, modelBinding: $fb2ModelInput)
                 }
             }
 
@@ -270,17 +282,17 @@ struct AITab: View {
     }
 
     @ViewBuilder
-    private func apiKeySection(for provider: AIProviderType) -> some View {
+    private func apiKeySection(for provider: AIProviderType, keyBinding: Binding<String>, savedBinding: Binding<Bool>) -> some View {
         HStack {
-            TextField("API Key", text: $apiKeyInput)
+            SecureField("API Key", text: keyBinding)
                 .textFieldStyle(.roundedBorder)
             Button("Save") {
-                SecureStore.shared.save(key: apiKeyInput, for: provider.rawValue)
-                apiKeyInput = ""
-                savedIndicator = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { savedIndicator = false }
+                SecureStore.shared.save(key: keyBinding.wrappedValue, for: provider.rawValue)
+                keyBinding.wrappedValue = ""
+                savedBinding.wrappedValue = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { savedBinding.wrappedValue = false }
             }
-            if savedIndicator {
+            if savedBinding.wrappedValue {
                 Text("Saved ✓")
                     .font(.caption)
                     .foregroundStyle(.green)
@@ -293,7 +305,7 @@ struct AITab: View {
                     .foregroundStyle(.green)
                 Spacer()
                 Button("Remove Key") {
-                    SecureStore.shared.save(key: "", for: provider.rawValue)
+                    SecureStore.shared.deleteKey(for: provider.rawValue)
                 }
                 .font(.caption)
                 .foregroundStyle(.red)
@@ -306,20 +318,20 @@ struct AITab: View {
     }
 
     @ViewBuilder
-    private func modelSection(for provider: AIProviderType) -> some View {
+    private func modelSection(for provider: AIProviderType, modelBinding: Binding<String>) -> some View {
         let currentModel = settings.modelName(for: provider)
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text("Model:")
                     .font(.caption)
                 TextField("Model", text: Binding(
-                    get: { modelInput.isEmpty ? currentModel : modelInput },
-                    set: { modelInput = $0 }
+                    get: { modelBinding.wrappedValue.isEmpty ? currentModel : modelBinding.wrappedValue },
+                    set: { modelBinding.wrappedValue = $0 }
                 ))
                 .textFieldStyle(.roundedBorder)
                 Button("Set") {
-                    settings.setModelName(modelInput.isEmpty ? currentModel : modelInput, for: provider)
-                    modelInput = ""
+                    settings.setModelName(modelBinding.wrappedValue.isEmpty ? currentModel : modelBinding.wrappedValue, for: provider)
+                    modelBinding.wrappedValue = ""
                 }
             }
             Text(provider.modelHint)
@@ -333,12 +345,75 @@ struct AITab: View {
                 ForEach(provider.suggestedModels, id: \.self) { model in
                     Button(model) {
                         settings.setModelName(model, for: provider)
-                        modelInput = ""
+                        modelBinding.wrappedValue = ""
                     }
                     .font(.caption2)
                     .buttonStyle(.bordered)
                     .tint(currentModel == model ? .blue : nil)
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func fallbackProviderConfig(_ provider: AIProviderType, keyBinding: Binding<String>, modelBinding: Binding<String>) -> some View {
+        HStack(spacing: 6) {
+            statusDot(for: provider)
+            Text(provider.rawValue)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            if provider.needsAPIKey {
+                if SecureStore.shared.hasKey(for: provider.rawValue) {
+                    Label("Key saved", systemImage: "key.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.green)
+                } else {
+                    Text("⚠️ No key")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            }
+            if provider.isCLI {
+                if cliDetected[provider.cliCommand ?? ""] != nil {
+                    Label("Found", systemImage: "checkmark.circle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.green)
+                } else {
+                    Text("Not installed")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+
+        if provider.needsAPIKey && !SecureStore.shared.hasKey(for: provider.rawValue) {
+            HStack {
+                SecureField("API Key for \(provider.rawValue)", text: keyBinding)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.caption)
+                Button("Save") {
+                    SecureStore.shared.save(key: keyBinding.wrappedValue, for: provider.rawValue)
+                    keyBinding.wrappedValue = ""
+                }
+                .font(.caption)
+            }
+        }
+
+        HStack {
+            Text("Model:")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(settings.modelName(for: provider))
+                .font(.caption2)
+            Spacer()
+            ForEach(provider.suggestedModels.prefix(3), id: \.self) { model in
+                Button(model) {
+                    settings.setModelName(model, for: provider)
+                }
+                .font(.caption2)
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
             }
         }
     }
@@ -364,7 +439,6 @@ struct AITab: View {
         testResult = nil
         let providerType = settings.aiProvider
         Task {
-            // Pre-flight checks
             if providerType.needsAPIKey && !SecureStore.shared.hasKey(for: providerType.rawValue) {
                 testResult = "✗ No API key saved for \(providerType.rawValue). Save a key first."
                 isTesting = false
@@ -391,11 +465,9 @@ struct AITab: View {
                 )
                 testResult = "✓ Success! Categorized as: \(result.rawValue)"
                 providerHealth[providerType.rawValue] = .healthy
-                print("[TestAI] Result: \(testResult!)")
             } catch {
                 testResult = "✗ \(error.localizedDescription)"
                 providerHealth[providerType.rawValue] = .unhealthy(error.localizedDescription)
-                print("[TestAI] Result: \(testResult!)")
             }
             isTesting = false
         }
@@ -421,56 +493,74 @@ struct AITab: View {
 struct CategoriesTab: View {
     @State private var editingCategory: CategoryDefinition?
     @State private var showAddSheet = false
+    @State private var categories: [CategoryDefinition] = CategoryManager.shared.allCategories
+
+    // Protected categories that cannot be deleted
+    private let protectedNames: Set<String> = ["Idle", "Uncategorized", "Work", "Distraction"]
 
     var body: some View {
-        VStack {
+        VStack(spacing: 0) {
             List {
-                ForEach(CategoryManager.shared.allCategories, id: \.name) { cat in
-                    HStack {
+                ForEach(categories, id: \.name) { cat in
+                    HStack(spacing: 10) {
                         Circle()
                             .fill(cat.color)
-                            .frame(width: 12, height: 12)
+                            .frame(width: 14, height: 14)
                         Image(systemName: cat.icon)
-                            .frame(width: 20)
+                            .foregroundStyle(cat.color)
+                            .frame(width: 22)
                         Text(cat.name)
+                            .font(.body)
                         Spacer()
                         if cat.isProductive {
                             Text("Productive")
                                 .font(.caption2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.green.opacity(0.15))
                                 .foregroundStyle(.green)
+                                .cornerRadius(4)
                         }
-                        if cat.isSystem {
-                            Text("System")
+                        if protectedNames.contains(cat.name) {
+                            Image(systemName: "lock.fill")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
                     }
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        if !cat.isSystem { editingCategory = cat }
+                        editingCategory = cat
                     }
                 }
             }
             HStack {
-                Text("\(CategoryManager.shared.allCategories.count) categories")
+                Text("\(categories.count) categories • AI uses these to classify your activity")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("Add Category") { showAddSheet = true }
+                Button(action: { showAddSheet = true }) {
+                    Label("Add Category", systemImage: "plus")
+                }
             }
             .padding()
         }
         .sheet(item: $editingCategory) { cat in
-            EditCategorySheet(category: cat)
+            EditCategorySheet(category: cat, isProtected: protectedNames.contains(cat.name)) {
+                categories = CategoryManager.shared.allCategories
+            }
         }
         .sheet(isPresented: $showAddSheet) {
-            AddCategorySheet()
+            AddCategorySheet {
+                categories = CategoryManager.shared.allCategories
+            }
         }
     }
 }
 
 struct EditCategorySheet: View {
     @State var category: CategoryDefinition
+    let isProtected: Bool
+    let onDismiss: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -478,38 +568,53 @@ struct EditCategorySheet: View {
             Text("Edit Category")
                 .font(.headline)
 
-            HStack {
-                Image(systemName: category.icon)
-                    .font(.title2)
-                    .foregroundStyle(Color(hex: category.colorHex))
-                    .frame(width: 40)
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(Color(hex: category.colorHex))
+                        .frame(width: 44, height: 44)
+                    Image(systemName: category.icon)
+                        .font(.title3)
+                        .foregroundStyle(.white)
+                }
                 Text(category.name)
                     .font(.title3.bold())
             }
 
-            TextField("Icon (SF Symbol)", text: $category.icon)
-                .textFieldStyle(.roundedBorder)
-            TextField("Color Hex", text: $category.colorHex)
-                .textFieldStyle(.roundedBorder)
-            Toggle("Productive", isOn: $category.isProductive)
+            Form {
+                TextField("SF Symbol icon name", text: $category.icon)
+                HStack {
+                    TextField("Color Hex", text: $category.colorHex)
+                    Circle()
+                        .fill(Color(hex: category.colorHex))
+                        .frame(width: 20, height: 20)
+                }
+                Toggle("Productive", isOn: $category.isProductive)
+            }
+            .formStyle(.grouped)
+            .frame(height: 160)
 
             HStack {
-                Button("Delete") {
-                    CategoryManager.shared.removeCategory(named: category.name)
-                    dismiss()
+                if !isProtected {
+                    Button("Delete", role: .destructive) {
+                        CategoryManager.shared.removeCategory(named: category.name)
+                        onDismiss()
+                        dismiss()
+                    }
+                    .foregroundStyle(.red)
                 }
-                .foregroundStyle(.red)
                 Spacer()
                 Button("Cancel") { dismiss() }
                 Button("Save") {
                     CategoryManager.shared.updateCategory(category)
+                    onDismiss()
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
             }
         }
         .padding()
-        .frame(width: 380)
+        .frame(width: 400)
     }
 }
 
@@ -518,19 +623,39 @@ struct AddCategorySheet: View {
     @State private var icon = "tag"
     @State private var colorHex = "#3B82F6"
     @State private var isProductive = false
+    let onDismiss: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 16) {
             Text("Add Category")
                 .font(.headline)
-            TextField("Name", text: $name)
-                .textFieldStyle(.roundedBorder)
-            TextField("Icon (SF Symbol)", text: $icon)
-                .textFieldStyle(.roundedBorder)
-            TextField("Color Hex", text: $colorHex)
-                .textFieldStyle(.roundedBorder)
-            Toggle("Productive", isOn: $isProductive)
+
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(Color(hex: colorHex))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: icon)
+                        .foregroundStyle(.white)
+                }
+                Text(name.isEmpty ? "New Category" : name)
+                    .font(.title3)
+            }
+
+            Form {
+                TextField("Name", text: $name)
+                TextField("SF Symbol icon", text: $icon)
+                HStack {
+                    TextField("Color Hex", text: $colorHex)
+                    Circle()
+                        .fill(Color(hex: colorHex))
+                        .frame(width: 20, height: 20)
+                }
+                Toggle("Productive", isOn: $isProductive)
+            }
+            .formStyle(.grouped)
+            .frame(height: 200)
 
             HStack {
                 Button("Cancel") { dismiss() }
@@ -538,6 +663,7 @@ struct AddCategorySheet: View {
                 Button("Add") {
                     let def = CategoryDefinition(name: name, colorHex: colorHex, icon: icon, isProductive: isProductive, isSystem: false)
                     CategoryManager.shared.addCategory(def)
+                    onDismiss()
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -545,64 +671,114 @@ struct AddCategorySheet: View {
             }
         }
         .padding()
-        .frame(width: 350)
+        .frame(width: 380)
     }
 }
 
 // MARK: - Rules Tab
 struct RulesTab: View {
     @State private var showAddSheet = false
+    @State private var customRules: [Rule] = RuleEngine.shared.allCustomRules
 
     var body: some View {
-        VStack {
+        VStack(spacing: 0) {
             List {
-                Section("Custom Rules (\(RuleEngine.shared.allCustomRules.count))") {
-                    if RuleEngine.shared.allCustomRules.isEmpty {
-                        Text("No custom rules yet. Add rules to override default categorization.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                Section {
+                    if customRules.isEmpty {
+                        VStack(spacing: 8) {
+                            Image(systemName: "text.badge.plus")
+                                .font(.title2)
+                                .foregroundStyle(.secondary)
+                            Text("No custom rules yet")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Text("Rules let you override the default categorization for specific apps, websites, or window titles.")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 20)
                     }
-                    ForEach(RuleEngine.shared.allCustomRules, id: \.id) { rule in
-                        HStack {
-                            VStack(alignment: .leading) {
+                    ForEach(customRules, id: \.id) { rule in
+                        HStack(spacing: 10) {
+                            Image(systemName: ruleIcon(for: rule.matchType))
+                                .foregroundStyle(.blue)
+                                .frame(width: 20)
+                            VStack(alignment: .leading, spacing: 2) {
                                 Text(rule.pattern)
-                                    .font(.subheadline)
-                                Text(rule.matchType.rawValue)
+                                    .font(.subheadline.bold())
+                                Text(rule.matchType.rawValue.replacingOccurrences(of: "([a-z])([A-Z])", with: "$1 $2", options: .regularExpression).capitalized)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Text(rule.category)
-                                .font(.caption)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 2)
-                                .background(Color.blue.opacity(0.1))
-                                .cornerRadius(4)
+                            HStack(spacing: 4) {
+                                if let def = CategoryManager.shared.definition(for: Category(rawValue: rule.category)) {
+                                    Circle()
+                                        .fill(def.color)
+                                        .frame(width: 8, height: 8)
+                                }
+                                Text(rule.category)
+                                    .font(.caption)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.blue.opacity(0.08))
+                            .cornerRadius(6)
+
                             Button(action: {
                                 RuleEngine.shared.removeRule(withId: rule.id)
+                                customRules = RuleEngine.shared.allCustomRules
                             }) {
                                 Image(systemName: "trash")
+                                    .font(.caption)
                                     .foregroundStyle(.red)
                             }
                             .buttonStyle(.plain)
                         }
                     }
+                } header: {
+                    Text("Custom Rules (\(customRules.count))")
                 }
 
-                Section("Default Rules") {
-                    Text("Built-in rules are loaded from DefaultRules.json (\(RuleEngine.shared.defaultRuleCount) rules). Custom rules take priority.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Section {
+                    HStack {
+                        Image(systemName: "info.circle")
+                            .foregroundStyle(.blue)
+                        Text("Built-in rules: \(RuleEngine.shared.defaultRuleCount). Custom rules take priority over defaults.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Default Rules")
                 }
             }
+
             HStack {
+                Text("Rules are matched in order: custom first, then defaults")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
                 Spacer()
-                Button("Add Rule") { showAddSheet = true }
+                Button(action: { showAddSheet = true }) {
+                    Label("Add Rule", systemImage: "plus")
+                }
             }
             .padding()
         }
         .sheet(isPresented: $showAddSheet) {
-            AddRuleSheet()
+            AddRuleSheet {
+                customRules = RuleEngine.shared.allCustomRules
+            }
+        }
+    }
+
+    private func ruleIcon(for type: Rule.MatchType) -> String {
+        switch type {
+        case .appName: return "app.badge"
+        case .bundleID: return "shippingbox"
+        case .domain: return "globe"
+        case .titleContains: return "textformat"
         }
     }
 }
@@ -611,25 +787,35 @@ struct AddRuleSheet: View {
     @State private var matchType: Rule.MatchType = .appName
     @State private var pattern = ""
     @State private var category = "Work"
+    let onDismiss: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 16) {
             Text("Add Rule")
                 .font(.headline)
-            Picker("Match Type", selection: $matchType) {
-                Text("App Name").tag(Rule.MatchType.appName)
-                Text("Bundle ID").tag(Rule.MatchType.bundleID)
-                Text("Domain").tag(Rule.MatchType.domain)
-                Text("Title Contains").tag(Rule.MatchType.titleContains)
-            }
-            TextField("Pattern", text: $pattern)
-                .textFieldStyle(.roundedBorder)
-            Picker("Category", selection: $category) {
-                ForEach(CategoryManager.shared.selectableCategories, id: \.name) { cat in
-                    Text(cat.name).tag(cat.name)
+
+            Form {
+                Picker("Match Type", selection: $matchType) {
+                    Label("App Name", systemImage: "app.badge").tag(Rule.MatchType.appName)
+                    Label("Bundle ID", systemImage: "shippingbox").tag(Rule.MatchType.bundleID)
+                    Label("Domain", systemImage: "globe").tag(Rule.MatchType.domain)
+                    Label("Title Contains", systemImage: "textformat").tag(Rule.MatchType.titleContains)
+                }
+                TextField("Pattern (e.g., Safari, com.apple.*, reddit.com)", text: $pattern)
+                Picker("Category", selection: $category) {
+                    ForEach(CategoryManager.shared.selectableCategories, id: \.name) { cat in
+                        HStack {
+                            Image(systemName: cat.icon)
+                                .foregroundStyle(cat.color)
+                            Text(cat.name)
+                        }
+                        .tag(cat.name)
+                    }
                 }
             }
+            .formStyle(.grouped)
+            .frame(height: 200)
 
             HStack {
                 Button("Cancel") { dismiss() }
@@ -637,6 +823,7 @@ struct AddRuleSheet: View {
                 Button("Add") {
                     let rule = Rule(matchType: matchType, pattern: pattern, category: category)
                     RuleEngine.shared.addRule(rule)
+                    onDismiss()
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -644,7 +831,7 @@ struct AddRuleSheet: View {
             }
         }
         .padding()
-        .frame(width: 400)
+        .frame(width: 420)
     }
 }
 
@@ -667,6 +854,10 @@ struct AppearanceTab: View {
                     }
                 }
                 .pickerStyle(.radioGroup)
+
+                Text(themeDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Preview") {
@@ -679,6 +870,16 @@ struct AppearanceTab: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var themeDescription: String {
+        switch settings.appTheme {
+        case .system: return "Follows your macOS appearance (light or dark)"
+        case .light: return "Clean light interface"
+        case .dark: return "Standard dark interface"
+        case .pastel: return "Soft pastel colors with light background"
+        case .midnight: return "Deep dark theme with blue accent"
+        }
     }
 
     private func themePreviewBox(_ label: String, color: Color, textColor: Color = .primary) -> some View {
@@ -755,7 +956,7 @@ struct PrivacyTab: View {
 
                 Button("Remove All API Keys") {
                     for provider in AIProviderType.allCases where provider.needsAPIKey {
-                        SecureStore.shared.save(key: "", for: provider.rawValue)
+                        SecureStore.shared.deleteKey(for: provider.rawValue)
                     }
                     clearResult = "All API keys removed"
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3) { clearResult = nil }
@@ -795,7 +996,6 @@ struct PrivacyTab: View {
 // MARK: - Export Tab
 struct ExportTab: View {
     @State private var exportResult: String?
-    @State private var isExporting = false
 
     var body: some View {
         Form {
@@ -805,30 +1005,18 @@ struct ExportTab: View {
                     .foregroundStyle(.secondary)
 
                 HStack {
-                    Button("Export Today as CSV") {
-                        exportCSV(for: Date())
-                    }
-
-                    Button("Export Today as JSON") {
-                        exportJSON(for: Date())
-                    }
+                    Button("Export Today as CSV") { exportCSV(for: Date()) }
+                    Button("Export Today as JSON") { exportJSON(for: Date()) }
                 }
 
                 HStack {
-                    Button("Export All Data as CSV") {
-                        exportAllCSV()
-                    }
-
-                    Button("Export All Data as JSON") {
-                        exportAllJSON()
-                    }
+                    Button("Export All Data as CSV") { exportAllCSV() }
+                    Button("Export All Data as JSON") { exportAllJSON() }
                 }
             }
 
             Section("Export AI Data") {
-                Button("Export Session Titles & Summaries") {
-                    exportSessionAI()
-                }
+                Button("Export Session Titles & Summaries") { exportSessionAI() }
             }
 
             if let result = exportResult {

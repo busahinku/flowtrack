@@ -4,6 +4,7 @@ struct MenuBarView: View {
     @Bindable var appState = AppState.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(spacing: 12) {
@@ -107,17 +108,7 @@ struct MenuBarView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
-            if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "dashboard" }) {
-                window.makeKeyAndOrderFront(nil)
-            } else {
-                // Open dashboard window
-                for window in NSApp.windows {
-                    if window.title.contains("FlowTrack") || window.contentView != nil {
-                        window.makeKeyAndOrderFront(nil)
-                        break
-                    }
-                }
-            }
+            openWindow(id: "dashboard")
         }
     }
 
@@ -126,7 +117,10 @@ struct MenuBarView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
-            openSettings()
+            // Must use SettingsLink approach — but from code, this is the official way
+            if #available(macOS 14, *) {
+                openSettings()
+            }
         }
     }
 

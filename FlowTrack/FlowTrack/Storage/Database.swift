@@ -325,4 +325,21 @@ final class Database: Sendable {
             try db.execute(sql: "DELETE FROM session_ai")
         }
     }
+
+    // MARK: - Auto Cleanup
+    /// Deletes data older than `days` when DB exceeds `maxSizeMB`
+    func autoCleanupIfNeeded(maxSizeMB: Int = 3072, keepDays: Int = 90) {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dbPath = appSupport.appendingPathComponent("FlowTrack/flowtrack.sqlite").path
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: dbPath),
+              let size = attrs[.size] as? Int64 else { return }
+        let sizeMB = size / (1024 * 1024)
+        guard sizeMB > maxSizeMB else { return }
+        let cutoff = Calendar.current.date(byAdding: .day, value: -keepDays, to: Date())!
+        try? dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM activities WHERE timestamp < ?", arguments: [cutoff])
+            try db.execute(sql: "VACUUM")
+        }
+        print("[Database] Auto-cleanup: removed data older than \(keepDays) days (DB was \(sizeMB) MB)")
+    }
 }
