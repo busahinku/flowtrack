@@ -2,8 +2,8 @@ import SwiftUI
 
 struct TimelineView: View {
     @Bindable var appState = AppState.shared
-    let theme = AppSettings.shared.appTheme
 
+    private var theme: AppTheme { AppSettings.shared.appTheme }
     private let hourHeight: CGFloat = 160
 
     var body: some View {
@@ -16,7 +16,6 @@ struct TimelineView: View {
                         hourGrid
                         sessionOverlay
                         nowIndicator
-                        // Invisible anchor for scrolling to current time
                         Color.clear.frame(height: 1)
                             .id("now-anchor")
                             .padding(.top, currentTimeY)
@@ -24,6 +23,13 @@ struct TimelineView: View {
                     .frame(width: nil, height: 24 * hourHeight)
                 }
                 .onAppear {
+                    Task { await appState.refreshData() }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        withAnimation { proxy.scrollTo("now-anchor", anchor: .center) }
+                    }
+                }
+                .onChange(of: appState.selectedDate) {
+                    Task { await appState.refreshData() }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                         withAnimation { proxy.scrollTo("now-anchor", anchor: .center) }
                     }
@@ -75,30 +81,34 @@ struct TimelineView: View {
             HStack(spacing: 8) {
                 Button(action: {
                     appState.selectedDate = Calendar.current.date(byAdding: .day, value: -1, to: appState.selectedDate)!
-                    Task { await appState.refreshData() }
                 }) {
                     Image(systemName: "chevron.left")
+                        .font(.body.bold())
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bordered)
 
                 Text(dateLabel)
                     .font(.headline)
+                    .frame(minWidth: 100)
 
                 Button(action: {
                     appState.selectedDate = Calendar.current.date(byAdding: .day, value: 1, to: appState.selectedDate)!
-                    Task { await appState.refreshData() }
                 }) {
                     Image(systemName: "chevron.right")
+                        .font(.body.bold())
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bordered)
 
                 if !Calendar.current.isDateInToday(appState.selectedDate) {
                     Button("Today") {
                         appState.selectedDate = Date()
-                        Task { await appState.refreshData() }
                     }
-                    .font(.caption)
                     .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
             }
         }

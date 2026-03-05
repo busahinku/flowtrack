@@ -32,7 +32,6 @@ struct DashboardView: View {
     // MARK: - Sidebar
     private var sidebar: some View {
         VStack(spacing: 0) {
-            // App header with focus score
             VStack(spacing: 8) {
                 HStack {
                     Image(systemName: "bolt.fill")
@@ -43,7 +42,6 @@ struct DashboardView: View {
                     Spacer()
                 }
 
-                // Focus Ring
                 ZStack {
                     Circle()
                         .stroke(Color.gray.opacity(0.15), lineWidth: 8)
@@ -61,7 +59,6 @@ struct DashboardView: View {
                 }
                 .frame(width: 100, height: 100)
 
-                // Stats row
                 HStack(spacing: 16) {
                     VStack {
                         Text("\(appState.timeSlots.filter { !$0.isIdle }.count)")
@@ -83,7 +80,6 @@ struct DashboardView: View {
 
             Divider()
 
-            // Tracking status
             HStack(spacing: 6) {
                 Circle()
                     .fill(ActivityTracker.shared.isTracking ? .green : .red)
@@ -103,25 +99,30 @@ struct DashboardView: View {
 
             Divider()
 
-            // Tab buttons
-            VStack(spacing: 4) {
+            // Tab buttons — entire row clickable
+            VStack(spacing: 2) {
                 ForEach(DashboardTab.allCases, id: \.self) { tab in
                     Button(action: { selectedTab = tab }) {
                         HStack(spacing: 10) {
                             Image(systemName: tab.icon)
-                                .frame(width: 20)
+                                .font(.body)
+                                .frame(width: 22)
                             Text(tab.rawValue)
                                 .font(.subheadline)
                             Spacer()
+                            if selectedTab == tab {
+                                Circle()
+                                    .fill(theme.accentColor)
+                                    .frame(width: 6, height: 6)
+                            }
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
                         .background(
-                            selectedTab == tab
-                            ? theme.accentColor.opacity(0.15)
-                            : Color.clear
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(selectedTab == tab ? theme.accentColor.opacity(0.15) : Color.clear)
                         )
-                        .cornerRadius(8)
                     }
                     .buttonStyle(.plain)
                 }
@@ -153,10 +154,9 @@ struct DashboardView: View {
             }
         }
         .background(theme.sidebarBg)
-        .frame(minWidth: 200)
+        .frame(minWidth: 210)
     }
 
-    // MARK: - Detail View
     @ViewBuilder
     private var detailView: some View {
         switch selectedTab {
@@ -169,7 +169,6 @@ struct DashboardView: View {
         }
     }
 
-    // MARK: - Helpers
     private var focusScorePercent: Double {
         let productive = appState.categoryStats.filter { $0.category.isProductive }.reduce(0) { $0 + $1.totalSeconds }
         let total = appState.categoryStats.reduce(0) { $0 + $1.totalSeconds }

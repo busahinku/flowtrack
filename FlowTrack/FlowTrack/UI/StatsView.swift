@@ -14,7 +14,13 @@ struct StatsView: View {
     @State private var selectedDate = Date()
     @State private var allActivities: [ActivityRecord] = []
     @State private var selectedApp: AppUsageInfo?
+    @State private var selectedCatStat: CategoryStat?
+    @State private var selectedHourStat: Int?
+    @State private var selectedFlowHour: Int?
+    @State private var selectedSessionSlot: TimeSlot?
     @State private var searchText = ""
+    @State private var showAllApps = false
+    @State private var showDatePicker = false
 
     private var theme: AppTheme { AppSettings.shared.appTheme }
 
@@ -23,8 +29,10 @@ struct StatsView: View {
             VStack(spacing: 20) {
                 dateNavigation
                 summaryCards
-                categoryDonut
-                hourlyChart
+                HStack(alignment: .top, spacing: 16) {
+                    categoryDonut
+                    hourlyChart
+                }
                 productivityFlow
                 topApps
                 sessionsSection
@@ -36,42 +44,69 @@ struct StatsView: View {
         .onChange(of: selectedDate) { Task { loadData() } }
         .onChange(of: period) { Task { loadData() } }
         .sheet(item: $selectedApp) { app in
-            AppDetailSheet(app: app)
+            AppDetailSheet(app: app, allActivities: allActivities)
+        }
+        .sheet(item: $selectedSessionSlot) { slot in
+            SessionDetailView(slot: slot)
+        }
+        .sheet(item: $selectedCatStat) { stat in
+            CategoryDetailSheet(stat: stat, activities: allActivities.filter { $0.category.rawValue == stat.category.rawValue })
         }
     }
 
     // MARK: - Date Navigation
     private var dateNavigation: some View {
-        HStack {
+        HStack(spacing: 12) {
+            // Period picker — wider so text doesn't wrap
             Picker("Period", selection: $period) {
                 ForEach(StatsPeriod.allCases, id: \.self) { p in
                     Text(p.rawValue).tag(p)
                 }
             }
             .pickerStyle(.segmented)
-            .frame(width: 200)
+            .frame(width: 240)
+            .labelsHidden()
 
             Spacer()
 
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 Button(action: navigateBack) {
                     Image(systemName: "chevron.left")
+                        .font(.body.bold())
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.bordered)
+
+                Button(action: { showDatePicker.toggle() }) {
+                    Text(dateRangeLabel)
+                        .font(.headline)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(theme.cardBg)
+                        .cornerRadius(8)
                 }
                 .buttonStyle(.plain)
-
-                Text(dateRangeLabel)
-                    .font(.headline)
+                .popover(isPresented: $showDatePicker) {
+                    DatePicker("Select Date", selection: $selectedDate, displayedComponents: .date)
+                        .datePickerStyle(.graphical)
+                        .padding()
+                        .frame(width: 320)
+                }
 
                 Button(action: navigateForward) {
                     Image(systemName: "chevron.right")
+                        .font(.body.bold())
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bordered)
 
                 Button("Today") {
                     selectedDate = Date()
                 }
-                .font(.caption)
                 .buttonStyle(.bordered)
+                .controlSize(.small)
             }
         }
     }
@@ -79,36 +114,16 @@ struct StatsView: View {
     // MARK: - Summary Cards
     private var summaryCards: some View {
         HStack(spacing: 12) {
-            SummaryCard(
-                title: "Total Active",
-                value: Theme.formatDuration(totalActiveSeconds),
-                icon: "clock.fill",
-                color: .blue
-            )
-            SummaryCard(
-                title: "Productive",
-                value: "\(Int(productivePercent))%",
-                icon: "checkmark.circle.fill",
-                color: .green
-            )
-            SummaryCard(
-                title: "Distraction",
-                value: "\(Int(distractionPercent))%",
-                icon: "eye.slash.fill",
-                color: .red
-            )
-            SummaryCard(
-                title: "Sessions",
-                value: "\(appState.timeSlots.filter { !$0.isIdle }.count)",
-                icon: "square.stack.fill",
-                color: .purple
-            )
-            SummaryCard(
-                title: "Top App",
-                value: topAppName,
-                icon: "star.fill",
-                color: .orange
-            )
+            SummaryCard(title: "Total Active", value: Theme.formatDuration(totalActiveSeconds),
+                       icon: "clock.fill", color: .blue)
+            SummaryCard(title: "Productive", value: "\(Int(productivePercent))%",
+                       icon: "checkmark.circle.fill", color: .green)
+            SummaryCard(title: "Distraction", value: "\(Int(distractionPercent))%",
+                       icon: "eye.slash.fill", color: .red)
+            SummaryCard(title: "Sessions", value: "\(appState.timeSlots.filter { !$0.isIdle }.count)",
+                       icon: "square.stack.fill", color: .purple)
+            SummaryCard(title: "Top App", value: topAppName,
+                       icon: "star.fill", color: .orange)
         }
     }
 
@@ -117,80 +132,119 @@ struct StatsView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Category Breakdown")
                 .font(.headline)
-            HStack(spacing: 20) {
+
+            if catStats.isEmpty {
+                Text("No data for this period")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(height: 200)
+            } else {
                 Chart(catStats) { stat in
                     SectorMark(
                         angle: .value("Time", stat.totalSeconds),
                         innerRadius: .ratio(0.6),
-                        angularInset: 1
+                        angularInset: 1.5
                     )
                     .foregroundStyle(Theme.color(for: stat.category))
+                    .opacity(selectedCatStat?.id == stat.id ? 0.7 : 1.0)
                 }
-                .frame(width: 180, height: 180)
+                .chartAngleSelection(value: $chartAngleSelection)
+                .frame(height: 200)
                 .overlay {
                     VStack(spacing: 2) {
-                        if let top = catStats.first {
-                            Image(systemName: top.category.icon)
-                                .font(.title2)
-                                .foregroundStyle(Theme.color(for: top.category))
-                            Text(top.category.rawValue)
+                        if let selected = selectedCatStat ?? catStats.first {
+                            Image(systemName: selected.category.icon)
+                                .font(.title3)
+                                .foregroundStyle(Theme.color(for: selected.category))
+                            Text(selected.category.rawValue)
                                 .font(.caption.bold())
+                            Text("\(Int(selected.percentage))%")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 5) {
                     ForEach(catStats) { stat in
-                        HStack(spacing: 8) {
-                            Circle()
-                                .fill(Theme.color(for: stat.category))
-                                .frame(width: 10, height: 10)
-                            Image(systemName: stat.category.icon)
-                                .frame(width: 16)
-                            Text(stat.category.rawValue)
-                                .font(.caption)
-                            Spacer()
-                            Text(Theme.formatDuration(stat.totalSeconds))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("\(Int(stat.percentage))%")
-                                .font(.caption.bold())
-                                .frame(width: 35, alignment: .trailing)
+                        Button(action: { selectedCatStat = stat }) {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(Theme.color(for: stat.category))
+                                    .frame(width: 10, height: 10)
+                                Image(systemName: stat.category.icon)
+                                    .font(.caption)
+                                    .frame(width: 16)
+                                Text(stat.category.rawValue)
+                                    .font(.caption)
+                                Spacer()
+                                Text(Theme.formatDuration(stat.totalSeconds))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("\(Int(stat.percentage))%")
+                                    .font(.caption.bold())
+                                    .frame(width: 35, alignment: .trailing)
+                            }
+                            .contentShape(Rectangle())
+                            .padding(.vertical, 2)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             }
         }
+        .frame(maxWidth: .infinity)
         .padding()
         .background(theme.cardBg)
         .cornerRadius(12)
     }
 
+    @State private var chartAngleSelection: Double?
+
     // MARK: - Hourly Chart
     private var hourlyChart: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Hourly Activity")
-                .font(.headline)
+            HStack {
+                Text("Hourly Activity")
+                    .font(.headline)
+                Spacer()
+                if let h = selectedHourStat {
+                    let total = hourlyStats.filter { $0.hour == h }.reduce(0.0) { $0 + $1.minutes }
+                    Text("\(h == 0 ? 12 : (h > 12 ? h - 12 : h)):00 \(h < 12 ? "AM" : "PM") — \(Int(total))m")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(theme.accentColor.opacity(0.1))
+                        .cornerRadius(6)
+                }
+            }
+
             Chart(hourlyStats) { stat in
                 BarMark(
                     x: .value("Hour", stat.hour),
-                    y: .value("Minutes", stat.minutes)
+                    y: .value("Minutes", stat.minutes),
+                    width: .fixed(max(8, 400.0 / 24.0 - 2))
                 )
                 .foregroundStyle(Theme.color(for: stat.category))
+                .opacity(selectedHourStat == stat.hour ? 0.7 : 1.0)
             }
             .chartXScale(domain: 0...23)
+            .chartXSelection(value: $selectedHourStat)
             .chartXAxis {
-                AxisMarks(values: [0, 3, 6, 9, 12, 15, 18, 21]) { value in
+                AxisMarks(values: Array(stride(from: 0, through: 23, by: 3))) { value in
                     AxisValueLabel {
                         if let h = value.as(Int.self) {
                             Text("\(h == 0 ? 12 : (h > 12 ? h - 12 : h))\(h < 12 ? "a" : "p")")
                                 .font(.caption2)
                         }
                     }
+                    AxisGridLine()
                 }
             }
             .frame(height: 200)
         }
+        .frame(maxWidth: .infinity)
         .padding()
         .background(theme.cardBg)
         .cornerRadius(12)
@@ -199,25 +253,75 @@ struct StatsView: View {
     // MARK: - Productivity Flow
     private var productivityFlow: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Productivity Flow")
-                .font(.headline)
+            HStack {
+                Text("Productivity Flow")
+                    .font(.headline)
+                Spacer()
+                if let h = selectedFlowHour {
+                    let item = productivityByHour.first(where: { $0.hour == h })
+                    Text("\(h == 0 ? 12 : (h > 12 ? h - 12 : h)):00 \(h < 12 ? "AM" : "PM") — \(Int(item?.score ?? 0))% focus")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.green.opacity(0.1))
+                        .cornerRadius(6)
+                }
+            }
+
             Chart(productivityByHour) { item in
                 AreaMark(
                     x: .value("Hour", item.hour),
                     y: .value("Score", item.score)
                 )
-                .foregroundStyle(.green.opacity(0.3))
+                .foregroundStyle(
+                    LinearGradient(colors: [.green.opacity(0.3), .green.opacity(0.05)],
+                                  startPoint: .top, endPoint: .bottom)
+                )
                 .interpolationMethod(.catmullRom)
+
                 LineMark(
                     x: .value("Hour", item.hour),
                     y: .value("Score", item.score)
                 )
                 .foregroundStyle(.green)
                 .interpolationMethod(.catmullRom)
+                .lineStyle(StrokeStyle(lineWidth: 2))
+
+                if let sel = selectedFlowHour, sel == item.hour {
+                    PointMark(
+                        x: .value("Hour", item.hour),
+                        y: .value("Score", item.score)
+                    )
+                    .foregroundStyle(.green)
+                    .symbolSize(60)
+                }
             }
             .chartXScale(domain: 0...23)
             .chartYScale(domain: 0...100)
-            .frame(height: 150)
+            .chartXSelection(value: $selectedFlowHour)
+            .chartXAxis {
+                AxisMarks(values: Array(stride(from: 0, through: 23, by: 3))) { value in
+                    AxisValueLabel {
+                        if let h = value.as(Int.self) {
+                            Text("\(h == 0 ? 12 : (h > 12 ? h - 12 : h))\(h < 12 ? "a" : "p")")
+                                .font(.caption2)
+                        }
+                    }
+                    AxisGridLine()
+                }
+            }
+            .chartYAxis {
+                AxisMarks(values: [0, 25, 50, 75, 100]) { value in
+                    AxisValueLabel {
+                        if let v = value.as(Int.self) {
+                            Text("\(v)%").font(.caption2)
+                        }
+                    }
+                    AxisGridLine()
+                }
+            }
+            .frame(height: 180)
         }
         .padding()
         .background(theme.cardBg)
@@ -227,13 +331,22 @@ struct StatsView: View {
     // MARK: - Top Apps
     private var topApps: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Top Apps")
-                .font(.headline)
-            ForEach(appUsages.prefix(10)) { app in
+            HStack {
+                Text("Top Apps")
+                    .font(.headline)
+                Spacer()
+                Text("\(appUsages.count) apps")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            let displayApps = showAllApps ? appUsages : Array(appUsages.prefix(10))
+
+            ForEach(displayApps) { app in
                 Button(action: { selectedApp = app }) {
-                    HStack {
+                    HStack(spacing: 10) {
                         AppIconImage(bundleID: app.bundleID, size: 24)
-                        VStack(alignment: .leading) {
+                        VStack(alignment: .leading, spacing: 1) {
                             Text(app.appName)
                                 .font(.subheadline.bold())
                             Text(app.category.rawValue)
@@ -243,18 +356,38 @@ struct StatsView: View {
                         Spacer()
                         Text(Theme.formatDuration(app.duration))
                             .font(.caption)
+                            .monospacedDigit()
                             .foregroundStyle(.secondary)
+
                         // Usage bar
-                        GeometryReader { geo in
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(Theme.color(for: app.category))
-                                .frame(width: geo.size.width * CGFloat(app.duration / max(totalActiveSeconds, 1)))
-                        }
-                        .frame(width: 80, height: 6)
+                        let fraction = CGFloat(app.duration / max(totalActiveSeconds, 1))
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Theme.color(for: app.category))
+                            .frame(width: 80 * fraction, height: 8)
+                            .frame(width: 80, alignment: .leading)
                     }
+                    .contentShape(Rectangle())
                     .padding(.vertical, 4)
+                    .padding(.horizontal, 4)
                 }
                 .buttonStyle(.plain)
+            }
+
+            if appUsages.count > 10 {
+                Button(action: { showAllApps.toggle() }) {
+                    HStack {
+                        Spacer()
+                        Text(showAllApps ? "Show less" : "Show all \(appUsages.count) apps")
+                            .font(.caption)
+                        Image(systemName: showAllApps ? "chevron.up" : "chevron.down")
+                            .font(.caption)
+                        Spacer()
+                    }
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.accentColor)
             }
         }
         .padding()
@@ -268,41 +401,63 @@ struct StatsView: View {
             HStack {
                 Text("Sessions")
                     .font(.headline)
+                Text("(\(filteredSessions.count))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Spacer()
-                HStack {
+                HStack(spacing: 4) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
                     TextField("Search", text: $searchText)
                         .textFieldStyle(.roundedBorder)
-                        .frame(width: 200)
+                        .frame(width: 180)
                 }
             }
 
+            if filteredSessions.isEmpty {
+                Text("No sessions found")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 20)
+                    .frame(maxWidth: .infinity)
+            }
+
             ForEach(filteredSessions) { slot in
-                HStack {
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Theme.color(for: slot.category))
-                        .frame(width: 4, height: 36)
-                    VStack(alignment: .leading) {
-                        Text(appState.sessionTitle(for: slot))
-                            .font(.subheadline)
-                            .lineLimit(1)
-                        Text(Theme.formatTimeRange(slot.startTime, slot.endTime))
-                            .font(.caption2)
+                Button(action: { selectedSessionSlot = slot }) {
+                    HStack(spacing: 8) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Theme.color(for: slot.category))
+                            .frame(width: 4, height: 40)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(appState.sessionTitle(for: slot))
+                                .font(.subheadline.bold())
+                                .lineLimit(1)
+                            Text(Theme.formatTimeRange(slot.startTime, slot.endTime))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        HStack(spacing: 4) {
+                            Image(systemName: slot.category.icon)
+                                .font(.caption2)
+                            Text(slot.category.rawValue)
+                                .font(.caption2)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Theme.color(for: slot.category).opacity(0.12))
+                        .cornerRadius(6)
+
+                        Text(Theme.formatDuration(slot.duration))
+                            .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
+                            .frame(width: 50, alignment: .trailing)
                     }
-                    Spacer()
-                    Text(slot.category.rawValue)
-                        .font(.caption2)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Theme.color(for: slot.category).opacity(0.15))
-                        .cornerRadius(4)
-                    Text(Theme.formatDuration(slot.duration))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    .contentShape(Rectangle())
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 4)
                 }
-                .padding(.vertical, 2)
+                .buttonStyle(.plain)
             }
         }
         .padding()
@@ -422,15 +577,13 @@ struct StatsView: View {
     private var productivePercent: Double {
         let total = totalActiveSeconds
         guard total > 0 else { return 0 }
-        let prod = allActivities.filter { $0.category.isProductive }.reduce(0) { $0 + $1.duration }
-        return prod / total * 100
+        return allActivities.filter { $0.category.isProductive }.reduce(0) { $0 + $1.duration } / total * 100
     }
 
     private var distractionPercent: Double {
         let total = totalActiveSeconds
         guard total > 0 else { return 0 }
-        let dist = allActivities.filter { $0.category.rawValue == "Distraction" }.reduce(0) { $0 + $1.duration }
-        return dist / total * 100
+        return allActivities.filter { $0.category.rawValue == "Distraction" }.reduce(0) { $0 + $1.duration } / total * 100
     }
 
     private var topAppName: String {
@@ -493,7 +646,7 @@ struct SummaryCard: View {
             Text(value)
                 .font(.headline)
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
+                .minimumScaleFactor(0.6)
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -508,16 +661,148 @@ struct SummaryCard: View {
 // MARK: - App Detail Sheet
 struct AppDetailSheet: View {
     let app: AppUsageInfo
+    let allActivities: [ActivityRecord]
     @Environment(\.dismiss) private var dismiss
+
+    private var appActivities: [ActivityRecord] {
+        allActivities.filter { $0.appName == app.appName && !$0.isIdle }
+    }
+
+    private var uniqueTitles: [(title: String, duration: Double, count: Int)] {
+        var dict: [String: (duration: Double, count: Int)] = [:]
+        for a in appActivities {
+            let title = a.windowTitle.isEmpty ? "(no title)" : a.windowTitle
+            var entry = dict[title] ?? (0, 0)
+            entry.duration += a.duration
+            entry.count += 1
+            dict[title] = entry
+        }
+        return dict.map { ($0.key, $0.value.duration, $0.value.count) }
+            .sorted { $0.duration > $1.duration }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Header
+            HStack {
+                AppIconImage(bundleID: app.bundleID, size: 40)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(app.appName)
+                        .font(.title2.bold())
+                    HStack(spacing: 6) {
+                        Image(systemName: app.category.icon)
+                            .foregroundStyle(Theme.color(for: app.category))
+                        Text(app.category.rawValue)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Button(action: { dismiss() }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Divider()
+
+            // Stats
+            HStack(spacing: 24) {
+                VStack {
+                    Text(Theme.formatDuration(app.duration))
+                        .font(.title3.bold())
+                    Text("Total Time")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                VStack {
+                    Text("\(uniqueTitles.count)")
+                        .font(.title3.bold())
+                    Text("Windows")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                VStack {
+                    Text("\(appActivities.count)")
+                        .font(.title3.bold())
+                    Text("Records")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            // Window Titles
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Windows & Pages")
+                    .font(.headline)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(uniqueTitles.prefix(30), id: \.title) { item in
+                            HStack {
+                                Text(item.title)
+                                    .font(.caption)
+                                    .lineLimit(2)
+                                Spacer()
+                                Text(Theme.formatDuration(item.duration))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                            }
+                            .padding(.vertical, 3)
+                            Divider().opacity(0.3)
+                        }
+                    }
+                }
+                .frame(maxHeight: 250)
+            }
+
+            // Activity Timeline
+            if !app.timestamps.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Activity Timeline")
+                        .font(.headline)
+                    let firstTime = app.timestamps.first!
+                    let lastTime = app.timestamps.last!
+                    Text("\(Theme.formatTime(firstTime)) – \(Theme.formatTime(lastTime))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding()
+        .frame(minWidth: 500, minHeight: 400)
+    }
+}
+
+// MARK: - Category Detail Sheet
+struct CategoryDetailSheet: View {
+    let stat: CategoryStat
+    let activities: [ActivityRecord]
+    @Environment(\.dismiss) private var dismiss
+
+    private var appBreakdown: [(name: String, bundleID: String, duration: Double)] {
+        var dict: [String: (bundleID: String, duration: Double)] = [:]
+        for a in activities {
+            var entry = dict[a.appName] ?? (a.bundleID, 0)
+            entry.duration += a.duration
+            dict[a.appName] = entry
+        }
+        return dict.map { ($0.key, $0.value.bundleID, $0.value.duration) }
+            .sorted { $0.duration > $1.duration }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                AppIconImage(bundleID: app.bundleID, size: 32)
+                Image(systemName: stat.category.icon)
+                    .font(.title2)
+                    .foregroundStyle(Theme.color(for: stat.category))
                 VStack(alignment: .leading) {
-                    Text(app.appName)
+                    Text(stat.category.rawValue)
                         .font(.title2.bold())
-                    Text(app.category.rawValue)
+                    Text("\(Int(stat.percentage))% of total • \(Theme.formatDuration(stat.totalSeconds))")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -532,47 +817,33 @@ struct AppDetailSheet: View {
 
             Divider()
 
-            HStack(spacing: 20) {
-                VStack {
-                    Text(Theme.formatDuration(app.duration))
-                        .font(.title3.bold())
-                    Text("Total Time")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                VStack {
-                    Text("\(app.timestamps.count)")
-                        .font(.title3.bold())
-                    Text("Activities")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            Text("Apps in this category")
+                .font(.headline)
 
-            // Activity timeline
-            if !app.timestamps.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Activity Timeline")
-                        .font(.headline)
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(app.timestamps, id: \.self) { ts in
-                                HStack(spacing: 8) {
-                                    Circle()
-                                        .fill(.blue)
-                                        .frame(width: 6, height: 6)
-                                    Text(Theme.formatTime(ts))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(appBreakdown, id: \.name) { item in
+                        HStack(spacing: 10) {
+                            AppIconImage(bundleID: item.bundleID, size: 24)
+                            Text(item.name)
+                                .font(.subheadline)
+                            Spacer()
+                            Text(Theme.formatDuration(item.duration))
+                                .font(.caption)
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                            let frac = CGFloat(item.duration / max(stat.totalSeconds, 1))
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(Theme.color(for: stat.category))
+                                .frame(width: 60 * frac, height: 8)
+                                .frame(width: 60, alignment: .leading)
                         }
                     }
-                    .frame(maxHeight: 200)
                 }
             }
+            .frame(maxHeight: 300)
         }
         .padding()
-        .frame(minWidth: 400, minHeight: 300)
+        .frame(minWidth: 450, minHeight: 350)
     }
 }
