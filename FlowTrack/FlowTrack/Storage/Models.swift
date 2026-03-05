@@ -10,6 +10,7 @@ struct Category: RawRepresentable, Codable, Hashable, Sendable {
     static let idle = Category(rawValue: "Idle")
     static let uncategorized = Category(rawValue: "Uncategorized")
     static let work = Category(rawValue: "Work")
+    static let productivity = Category(rawValue: "Productivity")
     static let personal = Category(rawValue: "Personal")
     static let distraction = Category(rawValue: "Distraction")
     static let communication = Category(rawValue: "Communication")

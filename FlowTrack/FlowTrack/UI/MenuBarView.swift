@@ -3,7 +3,6 @@ import SwiftUI
 struct MenuBarView: View {
     @Bindable var appState = AppState.shared
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -117,9 +116,11 @@ struct MenuBarView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
-            // Must use SettingsLink approach — but from code, this is the official way
+            // openSettings() doesn't work reliably from MenuBarExtra — use sendAction
             if #available(macOS 14, *) {
-                openSettings()
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            } else {
+                NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
             }
         }
     }

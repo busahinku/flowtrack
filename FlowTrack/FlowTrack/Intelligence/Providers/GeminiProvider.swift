@@ -26,7 +26,7 @@ struct GeminiProvider: AIProvider, Sendable {
         guard let key = SecureStore.shared.loadKey(for: AIProviderType.gemini.rawValue), !key.isEmpty else {
             throw AIError.noAPIKey
         }
-        var request = URLRequest(url: URL(string: "https://generativelanguage.googleapis.com/v1beta/models?key=\(key)")!)
+        var request = URLRequest(url: URL(string: "https://generativelanguage.googleapis.com/v1/models?key=\(key)")!)
         let (_, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw AIError.networkError("Health check failed")
@@ -38,7 +38,7 @@ struct GeminiProvider: AIProvider, Sendable {
         guard let key = SecureStore.shared.loadKey(for: AIProviderType.gemini.rawValue), !key.isEmpty else {
             throw AIError.noAPIKey
         }
-        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(key)")!
+        let url = URL(string: "https://generativelanguage.googleapis.com/v1/models/\(model):generateContent?key=\(key)")!
         let body: [String: Any] = [
             "contents": [["parts": [["text": prompt]]]],
             "generationConfig": ["maxOutputTokens": 200]
@@ -48,12 +48,20 @@ struct GeminiProvider: AIProvider, Sendable {
             "Content-Type": "application/json"
         ], body: jsonData)
 
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let candidates = json["candidates"] as? [[String: Any]],
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AIError.invalidResponse("Could not parse Gemini response")
+        }
+
+        if let error = json["error"] as? [String: Any], let message = error["message"] as? String {
+            throw AIError.invalidResponse("Gemini: \(String(message.prefix(200)))")
+        }
+
+        guard let candidates = json["candidates"] as? [[String: Any]],
               let content = candidates.first?["content"] as? [String: Any],
               let parts = content["parts"] as? [[String: Any]],
               let text = parts.first?["text"] as? String else {
-            throw AIError.invalidResponse("Unexpected Gemini response format")
+            let raw = String(data: data.prefix(300), encoding: .utf8) ?? "(non-utf8)"
+            throw AIError.invalidResponse("Unexpected Gemini format: \(String(raw.prefix(200)))")
         }
         return text
     }

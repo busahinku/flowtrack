@@ -58,10 +58,18 @@ struct ClaudeProvider: AIProvider, Sendable {
             "anthropic-version": "2023-06-01"
         ], body: jsonData)
 
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let content = json["content"] as? [[String: Any]],
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AIError.invalidResponse("Could not parse Claude response")
+        }
+
+        if let error = json["error"] as? [String: Any], let message = error["message"] as? String {
+            throw AIError.invalidResponse("Claude: \(String(message.prefix(200)))")
+        }
+
+        guard let content = json["content"] as? [[String: Any]],
               let text = content.first?["text"] as? String else {
-            throw AIError.invalidResponse("Unexpected Claude response format")
+            let raw = String(data: data.prefix(300), encoding: .utf8) ?? "(non-utf8)"
+            throw AIError.invalidResponse("Unexpected Claude format: \(String(raw.prefix(200)))")
         }
         return text
     }

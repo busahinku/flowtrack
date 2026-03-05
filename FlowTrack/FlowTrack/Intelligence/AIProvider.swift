@@ -142,7 +142,7 @@ struct AIHTTPHelper {
         }
 
         if httpResponse.statusCode == 404 {
-            let bodyStr = String(data: data, encoding: .utf8) ?? ""
+            let bodyStr = String(data: data.prefix(500), encoding: .utf8) ?? "(non-utf8)"
             print("[AI HTTP] 404 from \(url.host ?? ""): \(bodyStr)")
             throw AIError.modelNotFound(url.absoluteString)
         }
@@ -152,9 +152,9 @@ struct AIHTTPHelper {
         }
 
         if httpResponse.statusCode >= 400 {
-            let bodyStr = String(data: data, encoding: .utf8) ?? ""
+            let bodyStr = String(data: data.prefix(500), encoding: .utf8) ?? "(non-utf8)"
             print("[AI HTTP] \(httpResponse.statusCode) from \(url.host ?? ""): \(bodyStr)")
-            throw AIError.networkError("HTTP \(httpResponse.statusCode): \(bodyStr.prefix(200))")
+            throw AIError.networkError("HTTP \(httpResponse.statusCode): \(String(bodyStr.prefix(200)))")
         }
 
         return (data, httpResponse)

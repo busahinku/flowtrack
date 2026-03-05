@@ -496,7 +496,7 @@ struct CategoriesTab: View {
     @State private var categories: [CategoryDefinition] = CategoryManager.shared.allCategories
 
     // Protected categories that cannot be deleted
-    private let protectedNames: Set<String> = ["Idle", "Uncategorized", "Work", "Distraction"]
+    private let protectedNames: Set<String> = ["Idle", "Uncategorized", "Work", "Distraction", "Productivity"]
 
     var body: some View {
         VStack(spacing: 0) {

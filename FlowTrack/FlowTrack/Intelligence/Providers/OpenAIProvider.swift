@@ -51,11 +51,20 @@ struct OpenAIProvider: AIProvider, Sendable {
             "Authorization": "Bearer \(key)"
         ], body: jsonData)
 
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = json["choices"] as? [[String: Any]],
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AIError.invalidResponse("Could not parse OpenAI response")
+        }
+
+        // Check for API error
+        if let error = json["error"] as? [String: Any], let message = error["message"] as? String {
+            throw AIError.invalidResponse("OpenAI: \(String(message.prefix(200)))")
+        }
+
+        guard let choices = json["choices"] as? [[String: Any]],
               let message = choices.first?["message"] as? [String: Any],
               let text = message["content"] as? String else {
-            throw AIError.invalidResponse("Unexpected OpenAI response format")
+            let raw = String(data: data.prefix(300), encoding: .utf8) ?? "(non-utf8)"
+            throw AIError.invalidResponse("Unexpected OpenAI format: \(String(raw.prefix(200)))")
         }
         return text
     }

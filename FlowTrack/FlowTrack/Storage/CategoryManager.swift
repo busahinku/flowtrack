@@ -38,6 +38,7 @@ final class CategoryManager: @unchecked Sendable {
 
     static let defaultDefinitions: [CategoryDefinition] = [
         CategoryDefinition(name: "Work", colorHex: "#3B82F6", icon: "briefcase.fill", isProductive: true, isSystem: false),
+        CategoryDefinition(name: "Productivity", colorHex: "#10B981", icon: "chart.bar.fill", isProductive: true, isSystem: false),
         CategoryDefinition(name: "Personal", colorHex: "#22C55E", icon: "person.fill", isProductive: false, isSystem: false),
         CategoryDefinition(name: "Distraction", colorHex: "#EF4444", icon: "eye.slash.fill", isProductive: false, isSystem: false),
         CategoryDefinition(name: "Communication", colorHex: "#06B6D4", icon: "bubble.left.and.bubble.right.fill", isProductive: true, isSystem: false),
