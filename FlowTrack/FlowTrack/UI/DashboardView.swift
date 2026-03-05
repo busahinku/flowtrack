@@ -172,10 +172,16 @@ struct DashboardView: View {
         switch selectedTab {
         case .timeline:
             TimelineView()
+                .navigationTitle("")
+                .toolbar(.hidden, for: .automatic)
         case .stats:
             StatsView()
+                .navigationTitle("")
+                .toolbar(.hidden, for: .automatic)
         case .heatmap:
             HeatmapView()
+                .navigationTitle("")
+                .toolbar(.hidden, for: .automatic)
         }
     }
 

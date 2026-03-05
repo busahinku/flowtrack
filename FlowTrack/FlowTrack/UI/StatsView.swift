@@ -58,7 +58,7 @@ struct StatsView: View {
     // MARK: - Date Navigation
     private var dateNavigation: some View {
         HStack(spacing: 12) {
-            // Period picker — wider so text doesn't wrap
+            // Period picker
             Picker("Period", selection: $period) {
                 ForEach(StatsPeriod.allCases, id: \.self) { p in
                     Text(p.rawValue).tag(p)
@@ -70,22 +70,27 @@ struct StatsView: View {
 
             Spacer()
 
-            HStack(spacing: 8) {
+            HStack(spacing: 4) {
+                if !Calendar.current.isDateInToday(selectedDate) {
+                    Button("Today") {
+                        selectedDate = Date()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
                 Button(action: navigateBack) {
                     Image(systemName: "chevron.left")
-                        .font(.body.bold())
-                        .frame(width: 32, height: 32)
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
 
                 Button(action: { showDatePicker.toggle() }) {
                     Text(dateRangeLabel)
                         .font(.headline)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                        .background(theme.cardBg)
-                        .cornerRadius(8)
                 }
                 .buttonStyle(.plain)
                 .popover(isPresented: $showDatePicker) {
@@ -97,17 +102,12 @@ struct StatsView: View {
 
                 Button(action: navigateForward) {
                     Image(systemName: "chevron.right")
-                        .font(.body.bold())
-                        .frame(width: 32, height: 32)
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.bordered)
-
-                Button("Today") {
-                    selectedDate = Date()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.plain)
             }
         }
     }

@@ -8,8 +8,11 @@ struct HeatmapView: View {
     @State private var yearOffset = 0
     @State private var hoveredCell: (day: Int, hour: Int)?
     @State private var hoveredYearDay: Date?
+    @State private var showWeekDatePicker = false
+    @State private var weekPickerDate = Date()
 
     private var theme: AppTheme { AppSettings.shared.appTheme }
+    private let cellSize: CGFloat = 18
 
     var body: some View {
         ScrollView {
@@ -24,7 +27,7 @@ struct HeatmapView: View {
         .onAppear { loadData() }
     }
 
-    // MARK: - Weekly 24x7 Heatmap
+    // MARK: - Weekly Heatmap (rows = days, columns = hours)
     private var weeklyHeatmap: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -39,76 +42,99 @@ struct HeatmapView: View {
                     }
                 }
                 Spacer()
-                HStack(spacing: 12) {
-                    Button(action: { weekOffset -= 1; loadData() }) {
-                        Image(systemName: "chevron.left")
-                            .frame(width: 28, height: 28)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.bordered)
 
-                    Text(weekLabel)
-                        .font(.subheadline.bold())
-                        .frame(minWidth: 160)
-
-                    Button(action: { weekOffset += 1; loadData() }) {
-                        Image(systemName: "chevron.right")
-                            .frame(width: 28, height: 28)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.bordered)
-
+                HStack(spacing: 4) {
                     if weekOffset != 0 {
                         Button("This Week") { weekOffset = 0; loadData() }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                     }
+
+                    Button(action: { weekOffset -= 1; loadData() }) {
+                        Image(systemName: "chevron.left")
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: { showWeekDatePicker.toggle() }) {
+                        Text(weekLabel)
+                            .font(.subheadline.bold())
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showWeekDatePicker) {
+                        DatePicker("Select Week", selection: $weekPickerDate, displayedComponents: .date)
+                            .datePickerStyle(.graphical)
+                            .padding()
+                            .frame(width: 320)
+                            .onChange(of: weekPickerDate) {
+                                let cal = Calendar.current
+                                let today = cal.startOfDay(for: Date())
+                                let diff = cal.dateComponents([.weekOfYear], from: today, to: weekPickerDate)
+                                weekOffset = diff.weekOfYear ?? 0
+                                loadData()
+                                showWeekDatePicker = false
+                            }
+                    }
+
+                    Button(action: { weekOffset += 1; loadData() }) {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
 
-            // Grid: rows = hours (0-23), columns = days (Mon-Sun)
-            VStack(spacing: 1) {
-                // Day headers
-                HStack(spacing: 1) {
-                    Text("")
-                        .frame(width: 44)
-                    ForEach(weekDays, id: \.self) { day in
-                        Text(shortDayLabel(day))
-                            .font(.caption2.bold())
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .padding(.bottom, 4)
-
-                ForEach(0..<24, id: \.self) { hour in
+            // Grid: rows = days (Mon-Sun), columns = hours (0-23)
+            ScrollView(.horizontal, showsIndicators: false) {
+                VStack(spacing: 1) {
+                    // Hour headers
                     HStack(spacing: 1) {
-                        Text(hourLabel24(hour))
-                            .font(.system(size: 9))
-                            .foregroundStyle(theme.hourLabelColor)
-                            .frame(width: 44, alignment: .trailing)
+                        Text("")
+                            .frame(width: 36)
+                        ForEach(0..<24, id: \.self) { hour in
+                            Text(hour % 3 == 0 ? hourLabel24(hour) : "")
+                                .font(.system(size: 8))
+                                .foregroundStyle(theme.hourLabelColor)
+                                .frame(width: cellSize, alignment: .leading)
+                        }
+                    }
+                    .padding(.bottom, 2)
 
-                        ForEach(0..<7, id: \.self) { dayIndex in
-                            let focusVal = weeklyData.isEmpty ? 0 : weeklyData[dayIndex][hour]
-                            let intensity = min(focusVal / 60.0, 1.0)
+                    ForEach(0..<7, id: \.self) { dayIndex in
+                        HStack(spacing: 1) {
+                            Text(shortDayLabel(weekDays[dayIndex]))
+                                .font(.system(size: 9).bold())
+                                .foregroundStyle(.secondary)
+                                .frame(width: 36, alignment: .trailing)
 
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(cellColor(intensity: intensity, value: focusVal))
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 18)
-                                .overlay {
-                                    if hoveredCell?.day == dayIndex && hoveredCell?.hour == hour {
-                                        RoundedRectangle(cornerRadius: 2)
-                                            .stroke(Color.primary, lineWidth: 1)
+                            ForEach(0..<24, id: \.self) { hour in
+                                let focusVal = weeklyData.isEmpty ? 0 : weeklyData[dayIndex][hour]
+                                let intensity = min(focusVal / 60.0, 1.0)
+
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(cellColor(intensity: intensity, value: focusVal))
+                                    .frame(width: cellSize, height: cellSize)
+                                    .overlay {
+                                        if hoveredCell?.day == dayIndex && hoveredCell?.hour == hour {
+                                            RoundedRectangle(cornerRadius: 2)
+                                                .stroke(Color.primary, lineWidth: 1)
+                                        }
                                     }
-                                }
-                                .onHover { isHovering in
-                                    hoveredCell = isHovering ? (day: dayIndex, hour: hour) : nil
-                                }
+                                    .onHover { isHovering in
+                                        hoveredCell = isHovering ? (day: dayIndex, hour: hour) : nil
+                                    }
+                            }
                         }
                     }
                 }
+                .padding()
             }
-            .padding()
             .background(theme.cardBg)
             .cornerRadius(12)
 
@@ -155,30 +181,34 @@ struct HeatmapView: View {
                 Text("Yearly Focus")
                     .font(.title2.bold())
                 Spacer()
-                HStack(spacing: 12) {
-                    Button(action: { yearOffset -= 1; loadYearlyData() }) {
-                        Image(systemName: "chevron.left")
-                            .frame(width: 28, height: 28)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.bordered)
 
-                    Text(String(displayYear))
-                        .font(.subheadline.bold())
-                        .frame(minWidth: 60)
-
-                    Button(action: { yearOffset += 1; loadYearlyData() }) {
-                        Image(systemName: "chevron.right")
-                            .frame(width: 28, height: 28)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.bordered)
-
+                HStack(spacing: 4) {
                     if yearOffset != 0 {
                         Button("This Year") { yearOffset = 0; loadYearlyData() }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                     }
+
+                    Button(action: { yearOffset -= 1; loadYearlyData() }) {
+                        Image(systemName: "chevron.left")
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    Text(String(displayYear))
+                        .font(.subheadline.bold())
+
+                    Button(action: { yearOffset += 1; loadYearlyData() }) {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
 
@@ -223,60 +253,66 @@ struct HeatmapView: View {
             }
             .padding(.vertical, 4)
 
-            VStack(alignment: .leading, spacing: 2) {
-                // Month labels
-                HStack(spacing: 2) {
-                    Text("").frame(width: 28)
-                    ForEach(monthLabels, id: \.offset) { m in
-                        Text(m.label)
-                            .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
-                            .frame(width: CGFloat(m.weeks) * 15, alignment: .leading)
-                    }
-                }
-
-                // Day labels + grid
-                let weeks = yearWeeks
-                HStack(alignment: .top, spacing: 0) {
-                    // Day-of-week labels
-                    VStack(spacing: 2) {
-                        ForEach(0..<7, id: \.self) { dow in
-                            Text(dow % 2 == 1 ? ["", "Mon", "", "Wed", "", "Fri", ""][dow] : "")
+            ScrollView(.horizontal, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 2) {
+                    // Month labels
+                    HStack(spacing: 2) {
+                        Text("").frame(width: 28)
+                        ForEach(monthLabels, id: \.offset) { m in
+                            Text(m.label)
                                 .font(.system(size: 9))
                                 .foregroundStyle(.secondary)
-                                .frame(width: 28, height: 13, alignment: .trailing)
+                                .frame(width: CGFloat(m.weeks) * 15, alignment: .leading)
                         }
                     }
 
-                    // The grid
-                    HStack(spacing: 2) {
-                        ForEach(0..<weeks.count, id: \.self) { weekIdx in
-                            VStack(spacing: 2) {
-                                // Pad short weeks at TOP (like GitHub)
-                                if weeks[weekIdx].count < 7 {
-                                    ForEach(0..<(7 - weeks[weekIdx].count), id: \.self) { _ in
-                                        Color.clear.frame(width: 13, height: 13)
-                                    }
-                                }
+                    // Day labels + grid
+                    let weeks = yearWeeks
+                    HStack(alignment: .top, spacing: 0) {
+                        // Day-of-week labels
+                        VStack(spacing: 2) {
+                            ForEach(0..<7, id: \.self) { dow in
+                                Text(dow % 2 == 1 ? ["", "Mon", "", "Wed", "", "Fri", ""][dow] : "")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 28, height: 13, alignment: .trailing)
+                            }
+                        }
 
-                                ForEach(0..<weeks[weekIdx].count, id: \.self) { dayIdx in
-                                    let day = weeks[weekIdx][dayIdx]
-                                    let hours = yearlyData[Calendar.current.startOfDay(for: day)] ?? 0
-                                    let intensity = min(hours / 28800, 1.0) // 8h max
-
-                                    RoundedRectangle(cornerRadius: 2)
-                                        .fill(yearCellColor(intensity: intensity, date: day))
-                                        .frame(width: 13, height: 13)
-                                        .onHover { isHovering in
-                                            hoveredYearDay = isHovering ? day : nil
+                        // The grid
+                        HStack(spacing: 2) {
+                            ForEach(0..<weeks.count, id: \.self) { weekIdx in
+                                VStack(spacing: 2) {
+                                    // Pad short weeks at TOP (like GitHub)
+                                    if weeks[weekIdx].count < 7 {
+                                        ForEach(0..<(7 - weeks[weekIdx].count), id: \.self) { _ in
+                                            Color.clear.frame(width: 13, height: 13)
                                         }
+                                    }
+
+                                    ForEach(0..<weeks[weekIdx].count, id: \.self) { dayIdx in
+                                        let day = weeks[weekIdx][dayIdx]
+                                        let dayStart = Calendar.current.startOfDay(for: day)
+                                        let isFuture = dayStart > Calendar.current.startOfDay(for: Date())
+                                        let hours = yearlyData[dayStart] ?? 0
+                                        let intensity = isFuture ? -1 : min(hours / 28800, 1.0)
+
+                                        RoundedRectangle(cornerRadius: 2)
+                                            .fill(intensity < 0 ? theme.gridLineColor.opacity(0.15) : yearCellColor(intensity: intensity, date: day))
+                                            .frame(width: 13, height: 13)
+                                            .onHover { isHovering in
+                                                if !isFuture {
+                                                    hoveredYearDay = isHovering ? day : nil
+                                                }
+                                            }
+                                    }
                                 }
                             }
                         }
                     }
                 }
+                .padding()
             }
-            .padding()
             .background(theme.cardBg)
             .cornerRadius(12)
 
@@ -336,13 +372,11 @@ struct HeatmapView: View {
         let dayCount = max(activeDays, 1)
         let avgPerDay = totalHours / Double(dayCount)
 
-        // Best day
         let best = yearlyData.max(by: { $0.value < $1.value })
         let f = DateFormatter()
         f.dateFormat = "EEE"
         let bestDay = best.map { f.string(from: $0.key) } ?? "—"
 
-        // Longest streak
         let sortedDays = yearlyData.filter { $0.value > 0 }.keys.sorted()
         var maxStreak = 0
         var currentStreak = 0
@@ -370,7 +404,6 @@ struct HeatmapView: View {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
         let baseDate = cal.date(byAdding: .weekOfYear, value: weekOffset, to: today)!
-        // Start on Monday (weekday 2 in gregorian)
         let weekday = cal.component(.weekday, from: baseDate)
         let mondayOffset = (weekday == 1) ? -6 : (2 - weekday)
         let startOfWeek = cal.date(byAdding: .day, value: mondayOffset, to: baseDate)!
@@ -399,6 +432,7 @@ struct HeatmapView: View {
         let endOfYear = cal.date(from: DateComponents(year: year + 1))!
         let today = cal.startOfDay(for: Date())
 
+        // Only load data up to today (no future data exists)
         let end = min(endOfYear, cal.date(byAdding: .day, value: 1, to: today)!)
 
         var result: [Date: Double] = [:]
@@ -442,7 +476,7 @@ struct HeatmapView: View {
     }
 
     private func hourLabel24(_ hour: Int) -> String {
-        String(format: "%02d:00", hour)
+        String(format: "%02d", hour)
     }
 
     private func fullDateLabel(_ date: Date) -> String {
@@ -461,15 +495,13 @@ struct HeatmapView: View {
         return theme.accentColor.opacity(max(0.15, intensity * 0.85))
     }
 
-    // MARK: - Yearly Grid Computation
+    // MARK: - Yearly Grid Computation (full year Jan 1 - Dec 31)
     private var yearWeeks: [[Date]] {
         let cal = Calendar.current
         let year = displayYear
         let startOfYear = cal.date(from: DateComponents(year: year))!
-        let now = Date()
-        let today = cal.startOfDay(for: now)
         let endOfYear = cal.date(from: DateComponents(year: year + 1))!
-        let lastDay = year == cal.component(.year, from: now) ? today : cal.date(byAdding: .day, value: -1, to: endOfYear)!
+        let lastDay = cal.date(byAdding: .day, value: -1, to: endOfYear)!
 
         var weeks: [[Date]] = []
         var currentWeek: [Date] = []
@@ -521,7 +553,6 @@ struct HeatmapView: View {
             weeksInMonth += 1
             weekIdx += 1
         }
-        // Last month
         if weeksInMonth > 0 {
             let f = DateFormatter()
             f.dateFormat = "MMM"

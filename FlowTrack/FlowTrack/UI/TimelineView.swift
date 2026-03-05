@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TimelineView: View {
     @Bindable var appState = AppState.shared
+    @State private var showDatePicker = false
 
     private var theme: AppTheme { AppSettings.shared.appTheme }
     private let hourHeight: CGFloat = 160
@@ -24,7 +25,6 @@ struct TimelineView: View {
                 }
                 .onAppear {
                     Task { await appState.refreshData() }
-                    // Scroll instantly — no animation from top
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         proxy.scrollTo("now-anchor", anchor: .center)
                     }
@@ -79,31 +79,7 @@ struct TimelineView: View {
 
             Spacer()
 
-            HStack(spacing: 8) {
-                Button(action: {
-                    appState.selectedDate = Calendar.current.date(byAdding: .day, value: -1, to: appState.selectedDate)!
-                }) {
-                    Image(systemName: "chevron.left")
-                        .font(.body.bold())
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.bordered)
-
-                Text(dateLabel)
-                    .font(.headline)
-                    .frame(minWidth: 100)
-
-                Button(action: {
-                    appState.selectedDate = Calendar.current.date(byAdding: .day, value: 1, to: appState.selectedDate)!
-                }) {
-                    Image(systemName: "chevron.right")
-                        .font(.body.bold())
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.bordered)
-
+            HStack(spacing: 4) {
                 if !Calendar.current.isDateInToday(appState.selectedDate) {
                     Button("Today") {
                         appState.selectedDate = Date()
@@ -111,6 +87,40 @@ struct TimelineView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
+
+                Button(action: {
+                    appState.selectedDate = Calendar.current.date(byAdding: .day, value: -1, to: appState.selectedDate)!
+                }) {
+                    Image(systemName: "chevron.left")
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                Button(action: { showDatePicker.toggle() }) {
+                    Text(dateLabel)
+                        .font(.headline)
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showDatePicker) {
+                    DatePicker("Select Date", selection: $appState.selectedDate, displayedComponents: .date)
+                        .datePickerStyle(.graphical)
+                        .padding()
+                        .frame(width: 320)
+                }
+
+                Button(action: {
+                    appState.selectedDate = Calendar.current.date(byAdding: .day, value: 1, to: appState.selectedDate)!
+                }) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding()
