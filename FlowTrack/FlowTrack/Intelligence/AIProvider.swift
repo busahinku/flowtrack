@@ -61,14 +61,15 @@ extension AIProvider {
     }
     func checkHealth() async throws -> Bool { true }
 
-    /// Default chat: flatten history into last user message (for providers without native multi-turn)
+    /// Default chat: flatten history + system prompt and forward to `categorize`-style call.
+    /// Providers that support native multi-turn chat should override this method.
     func chat(messages: [ChatTurn], systemPrompt: String) async throws -> String {
         guard let last = messages.last(where: { $0.role == "user" }) else {
-            throw AIError.invalidResponse("No user message")
+            throw AIError.invalidResponse("No user message in chat history")
         }
-        let fullPrompt = systemPrompt + "\n\n---\n\n" + last.content
-        // Providers that don't override this will use their single-message path via summarize
-        throw AIError.invalidResponse("chat() not implemented for this provider — last message: \(fullPrompt.prefix(50))")
+        // Fall back to a single-shot prompt combining system context and the last user message.
+        let combined = systemPrompt.isEmpty ? last.content : systemPrompt + "\n\n---\n" + last.content
+        return try await categorize(appName: "chat", bundleID: "chat", windowTitle: combined, url: nil).rawValue
     }
 
     // Default: fall back to individual calls
@@ -106,41 +107,51 @@ struct AIPromptBuilder {
     /// Strips URL to domain only before sending to external AI providers (avoids leaking tokens/query params).
     static func domainOnly(from urlString: String) -> String {
         guard let components = URLComponents(string: urlString), let host = components.host else {
-            return urlString
+            return "unknown"  // never leak full URL with tokens/params to AI
         }
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
     static func categorizationPrompt(appName: String, bundleID: String, windowTitle: String, url: String?) -> String {
-        let categories = CategoryManager.shared.allCategories
-        let catList = categories.map { cat in
-            "\(cat.name) (\(cat.isProductive ? "productive" : "non-productive"))"
-        }.joined(separator: ", ")
         var prompt = """
-        Categorize this app activity. Categories: \(catList)
+        You are a productivity tracker AI. Categorize this computer activity into EXACTLY one category.
 
+        Categories and what they mean:
+        - Work: coding, writing code, terminal/shell, professional tools, databases, APIs, project management (Jira/Linear/Notion for work), documentation, business communication (Slack, Teams, email), cloud consoles, deployment tools
+        - Distraction: social media (LinkedIn, Twitter, Instagram, Reddit, Facebook), news sites (HackerNews, TechCrunch, CNN, BBC), forums, random browsing, entertainment browsing
+        - Entertainment: video streaming (Netflix, YouTube for fun, Disney+, Twitch), music (Spotify, Apple Music), gaming, podcasts
+        - Personal: banking, shopping, maps, travel, food ordering, personal email, health apps, personal errands
+        - Creative: design tools (Figma, Sketch, Photoshop, Illustrator), video editing, music production, art creation
+        - Learning: educational courses (Coursera, Udemy, Khan Academy), studying, reading documentation to learn, tutorials
+        - Uncategorized: cannot determine from available information
+
+        Activity to categorize:
         App: \(appName) (\(bundleID))
-        Title: \(windowTitle)
+        Window Title: \(windowTitle)
         """
-        if let url = url { prompt += "\nURL: \(domainOnly(from: url))" }
-        prompt += "\n\nRespond with ONLY the category name."
+        if let url = url { prompt += "\nURL/Domain: \(domainOnly(from: url))" }
+        prompt += "\n\nRespond with ONLY the category name, nothing else."
         return prompt
     }
 
     static func batchCategorizationPrompt(items: [BatchCategorizeItem]) -> String {
-        let categories = CategoryManager.shared.allCategories
-        let catList = categories.map { cat in
-            "\(cat.name) (\(cat.isProductive ? "productive" : "non-productive"))"
-        }.joined(separator: ", ")
-
         var prompt = """
-        Categorize each activity. Categories: \(catList)
+        You are a productivity tracker AI. Categorize each computer activity into EXACTLY one category.
 
-        Activities:
+        Categories:
+        - Work: coding, professional tools, project management, business communication, cloud/deployment
+        - Distraction: social media, news sites, forums, random browsing
+        - Entertainment: video/music streaming, gaming
+        - Personal: banking, shopping, maps, food delivery, personal errands
+        - Creative: design, video editing, music production, art tools
+        - Learning: educational courses, studying, tutorials
+        - Uncategorized: cannot determine
+
+        Activities to categorize:
         """
         for item in items {
-            var line = "\n\(item.index). \(item.appName) (\(item.bundleID)) — \(item.windowTitle)"
-            if let url = item.url { line += " [\(domainOnly(from: url))]" }
+            var line = "\n\(item.index). App:\(item.appName) | Title:\(item.windowTitle)"
+            if let url = item.url { line += " | Domain:\(domainOnly(from: url))" }
             prompt += line
         }
         prompt += "\n\nRespond with ONLY numbered categories, one per line: \"1. CategoryName\""

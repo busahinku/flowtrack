@@ -45,7 +45,7 @@ struct HeatmapView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(theme.secondaryText)
 
             Button(action: { showWeekDatePicker.toggle() }) {
                 Text(weekLabel)
@@ -76,7 +76,7 @@ struct HeatmapView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(theme.secondaryText)
 
             if weekOffset != 0 {
                 Button("This Week") { weekOffset = 0; loadData() }
@@ -92,7 +92,7 @@ struct HeatmapView: View {
             let totalMinutes = weeklyData.flatMap { $0 }.reduce(0, +)
             Text("\(Theme.formatDuration(totalMinutes * 60)) productive")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.secondaryText)
         }
     }
 
@@ -119,7 +119,7 @@ struct HeatmapView: View {
                         HStack(spacing: 1) {
                             Text(shortDayLabel(weekDays[dayIndex]))
                                 .font(.system(size: 9).bold())
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(theme.secondaryText)
                                 .frame(width: 36, alignment: .trailing)
 
                             ForEach(0..<24, id: \.self) { hour in
@@ -132,7 +132,7 @@ struct HeatmapView: View {
                                     .overlay {
                                         if hoveredCell?.day == dayIndex && hoveredCell?.hour == hour {
                                             RoundedRectangle(cornerRadius: 2)
-                                                .stroke(Color.primary, lineWidth: 1)
+                                                .stroke(theme.dividerColor, lineWidth: 1)
                                         }
                                     }
                                     .onHover { isHovering in
@@ -158,7 +158,7 @@ struct HeatmapView: View {
                         .foregroundStyle(.tertiary)
                     Text(focusVal > 0 ? "\(Int(focusVal))m productive" : "No activity")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryText)
                 } else {
                     Text(" ").font(.caption) // invisible placeholder
                 }
@@ -172,7 +172,7 @@ struct HeatmapView: View {
             HStack(spacing: 8) {
                 Text("Less")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.secondaryText)
                 ForEach([0.0, 0.25, 0.5, 0.75, 1.0], id: \.self) { level in
                     RoundedRectangle(cornerRadius: 2)
                         .fill(cellColor(intensity: level, value: level * 60))
@@ -180,7 +180,7 @@ struct HeatmapView: View {
                 }
                 Text("More")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.secondaryText)
             }
         }
     }
@@ -203,7 +203,7 @@ struct HeatmapView: View {
                     Button(action: { yearOffset -= 1; loadYearlyData() }) {
                         Image(systemName: "chevron.left")
                             .font(.caption.bold())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.secondaryText)
                             .frame(width: 24, height: 24)
                             .contentShape(Rectangle())
                     }
@@ -215,7 +215,7 @@ struct HeatmapView: View {
                     Button(action: { yearOffset += 1; loadYearlyData() }) {
                         Image(systemName: "chevron.right")
                             .font(.caption.bold())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.secondaryText)
                             .frame(width: 24, height: 24)
                             .contentShape(Rectangle())
                     }
@@ -231,35 +231,35 @@ struct HeatmapView: View {
                         .font(.headline.bold())
                     Text("Total")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryText)
                 }
                 VStack(spacing: 2) {
                     Text(String(format: "%.1fh", yearStats.avgPerDay))
                         .font(.headline.bold())
                     Text("Avg/Day")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryText)
                 }
                 VStack(spacing: 2) {
                     Text("\(yearStats.streak)d")
                         .font(.headline.bold())
                     Text("Streak")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryText)
                 }
                 VStack(spacing: 2) {
                     Text(yearStats.bestDay)
                         .font(.headline.bold())
                     Text("Best Day")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryText)
                 }
                 VStack(spacing: 2) {
                     Text("\(yearStats.activeDays)")
                         .font(.headline.bold())
                     Text("Active Days")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryText)
                 }
             }
             .padding(.vertical, 4)
@@ -272,7 +272,7 @@ struct HeatmapView: View {
                         ForEach(monthLabels, id: \.offset) { m in
                             Text(m.label)
                                 .font(.system(size: 9))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(theme.secondaryText)
                                 .frame(width: CGFloat(m.weeks) * 15, alignment: .leading)
                         }
                     }
@@ -285,7 +285,7 @@ struct HeatmapView: View {
                             ForEach(0..<7, id: \.self) { dow in
                                 Text(dow % 2 == 1 ? ["", "Mon", "", "Wed", "", "Fri", ""][dow] : "")
                                     .font(.system(size: 9))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(theme.secondaryText)
                                     .frame(width: 28, height: 13, alignment: .trailing)
                             }
                         }
@@ -338,7 +338,7 @@ struct HeatmapView: View {
                         .foregroundStyle(.tertiary)
                     Text(hours > 0 ? Theme.formatDuration(hours) + " productive" : "No activity")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryText)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 4)
@@ -350,7 +350,7 @@ struct HeatmapView: View {
             HStack(spacing: 8) {
                 Text("Less")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.secondaryText)
                 ForEach([0.0, 0.25, 0.5, 0.75, 1.0], id: \.self) { level in
                     RoundedRectangle(cornerRadius: 2)
                         .fill(yearCellColor(intensity: level, date: Date()))
@@ -358,11 +358,11 @@ struct HeatmapView: View {
                 }
                 Text("More")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.secondaryText)
                 Spacer()
                 Text("\(Int(yearlyData.values.reduce(0, +) / 3600))h of productive work in \(displayYear)")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.secondaryText)
             }
         }
     }

@@ -80,6 +80,100 @@ enum AppTheme: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    var primaryText: Color {
+        switch self {
+        case .system: return Color(nsColor: .labelColor)
+        case .light: return Color(white: 0.10)
+        case .dark: return Color(white: 0.92)
+        case .pastel: return Color(red: 0.22, green: 0.18, blue: 0.32)
+        case .midnight: return Color(red: 0.82, green: 0.86, blue: 1.0)
+        }
+    }
+
+    var secondaryText: Color {
+        switch self {
+        case .system: return Color(nsColor: .secondaryLabelColor)
+        case .light: return Color(white: 0.45)
+        case .dark: return Color(white: 0.50)
+        case .pastel: return Color(red: 0.50, green: 0.42, blue: 0.62)
+        case .midnight: return Color(red: 0.45, green: 0.50, blue: 0.72)
+        }
+    }
+
+    /// Positive / success state (green family)
+    var successColor: Color {
+        switch self {
+        case .system: return .green
+        case .light: return Color(red: 0.18, green: 0.65, blue: 0.32)
+        case .dark: return Color(red: 0.25, green: 0.82, blue: 0.45)
+        case .pastel: return Color(red: 0.28, green: 0.68, blue: 0.52)
+        case .midnight: return Color(red: 0.18, green: 0.88, blue: 0.62)
+        }
+    }
+
+    /// Negative / error / stop state (red family)
+    var errorColor: Color {
+        switch self {
+        case .system: return .red
+        case .light: return Color(red: 0.85, green: 0.20, blue: 0.20)
+        case .dark: return Color(red: 1.0, green: 0.40, blue: 0.40)
+        case .pastel: return Color(red: 0.88, green: 0.40, blue: 0.55)
+        case .midnight: return Color(red: 1.0, green: 0.32, blue: 0.48)
+        }
+    }
+
+    /// Warning / caution state (orange/amber family)
+    var warningColor: Color {
+        switch self {
+        case .system: return .orange
+        case .light: return Color(red: 0.92, green: 0.55, blue: 0.10)
+        case .dark: return Color(red: 1.0, green: 0.72, blue: 0.28)
+        case .pastel: return Color(red: 0.93, green: 0.62, blue: 0.38)
+        case .midnight: return Color(red: 1.0, green: 0.76, blue: 0.28)
+        }
+    }
+
+    /// Informational / decorative highlight (blue/violet family)
+    var infoColor: Color {
+        switch self {
+        case .system: return .blue
+        case .light: return Color(red: 0.20, green: 0.45, blue: 0.95)
+        case .dark: return Color(red: 0.40, green: 0.67, blue: 1.0)
+        case .pastel: return Color(red: 0.55, green: 0.40, blue: 0.88)
+        case .midnight: return Color(red: 0.38, green: 0.58, blue: 1.0)
+        }
+    }
+
+    /// Current-time indicator line in the timeline
+    var nowLineColor: Color { errorColor }
+
+    /// Foreground text/icon colour used on top of accent-filled or selected backgrounds
+    var selectedForeground: Color {
+        switch self {
+        case .system, .light, .dark, .pastel: return .white
+        case .midnight: return Color(red: 0.88, green: 0.92, blue: 1.0)
+        }
+    }
+
+    /// Base colour for drop-shadows — apply `.opacity()` at the call-site
+    var shadowColor: Color {
+        switch self {
+        case .system, .light, .dark, .midnight: return .black
+        case .pastel: return Color(red: 0.40, green: 0.20, blue: 0.60)
+        }
+    }
+
+    /// Subtle separator / divider colour — apply `.opacity()` at the call-site
+    var dividerColor: Color {
+        switch self {
+        case .system: return Color(nsColor: .separatorColor)
+        case .light: return Color(white: 0.70)
+        case .dark: return Color(white: 0.40)
+        case .pastel: return Color(red: 0.60, green: 0.40, blue: 0.80)
+        case .midnight: return Color(red: 0.25, green: 0.30, blue: 0.65)
+        }
+    }
+
     /// Asset name for menu bar / in-app logo by theme. For .system, pass current colorScheme.
     func menuBarIconName(under colorScheme: ColorScheme?) -> String {
         switch self {
@@ -169,6 +263,13 @@ enum Theme {
         AppSettings.shared.appTheme
     }
 
+    private static let formatterAMPM: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "h:mm a"; return f
+    }()
+    private static let formatter24h: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f
+    }()
+
     static func color(for category: Category) -> Color {
         CategoryManager.shared.color(for: category)
     }
@@ -182,8 +283,7 @@ enum Theme {
     }
 
     static func formatTime(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "h:mm a"
+        let f = AppSettings.shared.use24HourClock ? formatter24h : formatterAMPM
         return f.string(from: date)
     }
 

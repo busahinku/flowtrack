@@ -239,7 +239,10 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(aiSummariesEnabled, forKey: "aiSummariesEnabled") }
     }
     var aiBatchIntervalMinutes: Int {
-        didSet { UserDefaults.standard.set(aiBatchIntervalMinutes, forKey: "aiBatchIntervalMinutes") }
+        didSet {
+            UserDefaults.standard.set(aiBatchIntervalMinutes, forKey: "aiBatchIntervalMinutes")
+            AppState.shared.resetAITimer()
+        }
     }
     var aiBatchSize: Int {
         didSet { UserDefaults.standard.set(aiBatchSize, forKey: "aiBatchSize") }
@@ -277,6 +280,30 @@ final class AppSettings {
     var retentionDays: Int {
         didSet { UserDefaults.standard.set(retentionDays, forKey: "retentionDays") }
     }
+    var pomodoroWorkMinutes: Int {
+        didSet { UserDefaults.standard.set(pomodoroWorkMinutes, forKey: "pomodoroWorkMinutes") }
+    }
+    var pomodoroBreakMinutes: Int {
+        didSet { UserDefaults.standard.set(pomodoroBreakMinutes, forKey: "pomodoroBreakMinutes") }
+    }
+    var pomodoroLongBreakMinutes: Int {
+        didSet { UserDefaults.standard.set(pomodoroLongBreakMinutes, forKey: "pomodoroLongBreakMinutes") }
+    }
+    var pomodoroSessionsBeforeLong: Int {
+        didSet { UserDefaults.standard.set(pomodoroSessionsBeforeLong, forKey: "pomodoroSessionsBeforeLong") }
+    }
+    var countdownMinutes: Int {
+        didSet { UserDefaults.standard.set(countdownMinutes, forKey: "countdownMinutes") }
+    }
+    var use24HourClock: Bool {
+        didSet { UserDefaults.standard.set(use24HourClock, forKey: "use24HourClock") }
+    }
+    var defaultTimerMode: TimerMode {
+        didSet { UserDefaults.standard.set(defaultTimerMode.rawValue, forKey: "defaultTimerMode") }
+    }
+    var sessionGapSeconds: Int {
+        didSet { UserDefaults.standard.set(sessionGapSeconds, forKey: "sessionGapSeconds") }
+    }
 
     private init() {
         let defaults = UserDefaults.standard
@@ -296,6 +323,14 @@ final class AppSettings {
         self.idleThresholdSeconds = defaults.object(forKey: "idleThresholdSeconds") as? Int ?? 120
         self.distractionAlertMinutes = defaults.object(forKey: "distractionAlertMinutes") as? Int ?? 0
         self.retentionDays = defaults.object(forKey: "retentionDays") as? Int ?? 90
+        self.pomodoroWorkMinutes = defaults.object(forKey: "pomodoroWorkMinutes") as? Int ?? 25
+        self.pomodoroBreakMinutes = defaults.object(forKey: "pomodoroBreakMinutes") as? Int ?? 5
+        self.pomodoroLongBreakMinutes = defaults.object(forKey: "pomodoroLongBreakMinutes") as? Int ?? 15
+        self.pomodoroSessionsBeforeLong = defaults.object(forKey: "pomodoroSessionsBeforeLong") as? Int ?? 4
+        self.countdownMinutes = defaults.object(forKey: "countdownMinutes") as? Int ?? 25
+        self.use24HourClock = defaults.object(forKey: "use24HourClock") as? Bool ?? true
+        self.defaultTimerMode = TimerMode(rawValue: defaults.string(forKey: "defaultTimerMode") ?? "") ?? .stopwatch
+        self.sessionGapSeconds = defaults.object(forKey: "sessionGapSeconds") as? Int ?? 300
     }
 
     func modelName(for provider: AIProviderType) -> String {
@@ -309,4 +344,128 @@ final class AppSettings {
     var currentModelName: String {
         modelName(for: aiProvider)
     }
+}
+
+// MARK: - Todo Models
+
+enum TodoStatus: String, Codable, CaseIterable, Sendable {
+    case pending    = "pending"
+    case inProgress = "inProgress"
+    case done       = "done"
+
+    var label: String {
+        switch self { case .pending: "To Do"; case .inProgress: "In Progress"; case .done: "Done" }
+    }
+}
+
+enum TodoPriority: Int, Codable, CaseIterable, Sendable {
+    case low = 0, medium = 1, high = 2
+    var label: String { ["Low", "Medium", "High"][rawValue] }
+    var color: Color {
+        let theme = AppSettings.shared.appTheme
+        switch self {
+        case .low:    return theme.successColor
+        case .medium: return theme.warningColor
+        case .high:   return theme.errorColor
+        }
+    }
+    var icon: String { ["arrow.down", "minus", "arrow.up"][rawValue] }
+}
+
+struct TodoItem: Codable, Identifiable, Sendable {
+    var id: String = UUID().uuidString
+    var title: String
+    var notes: String = ""
+    var status: TodoStatus = .pending
+    var priority: TodoPriority = .medium
+    var dueDate: Date? = nil
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+}
+
+// MARK: - Timer Models
+
+enum TimerMode: String, Codable, CaseIterable, Sendable {
+    case pomodoro  = "Pomodoro"
+    case countdown = "Countdown"
+    case stopwatch = "Stopwatch"
+    var icon: String {
+        switch self { case .pomodoro: "timer"; case .countdown: "hourglass"; case .stopwatch: "stopwatch" }
+    }
+}
+
+enum PomodoroPhase: String, Sendable {
+    case work, shortBreak, longBreak
+    var label: String {
+        switch self { case .work: "Focus"; case .shortBreak: "Short Break"; case .longBreak: "Long Break" }
+    }
+    var color: Color {
+        let theme = AppSettings.shared.appTheme
+        switch self {
+        case .work:       return theme.infoColor
+        case .shortBreak: return theme.successColor
+        case .longBreak:  return theme.warningColor
+        }
+    }
+}
+
+struct LapRecord: Codable, Identifiable, Sendable {
+    var id: String = UUID().uuidString
+    var index: Int              // 1-based lap number
+    var duration: TimeInterval  // how long this lap lasted
+    var startedAt: Date
+    var endedAt: Date
+    var todoId: String?         // which todo was active during this lap
+}
+
+struct TimerSession: Codable, Identifiable, Sendable {
+    var id: String = UUID().uuidString
+    var todoId: String?
+    var mode: TimerMode
+    var duration: TimeInterval   // seconds actually tracked
+    var startedAt: Date
+    var endedAt: Date
+}
+
+// MARK: - App Blocker Models
+
+/// An app entry inside a BlockCard.
+struct BlockedApp: Codable, Identifiable, Sendable, Hashable {
+    var id: String = UUID().uuidString
+    var displayName: String
+    var bundleID: String
+}
+
+/// A group card containing websites and apps to block together.
+struct BlockCard: Codable, Identifiable, Sendable {
+    var id: String = UUID().uuidString
+    var name: String                    // "Social Media"
+    var emoji: String = "🚫"            // card icon
+    var colorName: String = "purple"    // "purple","blue","red","orange","green","teal","pink","yellow"
+    var isEnabled: Bool = true
+    var websites: [String] = []         // ["reddit.com", "twitter.com"]
+    var apps: [BlockedApp] = []         // apps with bundle IDs
+    var dailyLimitMinutes: Int = 0      // 0 = always block
+    var createdAt: Date = Date()
+
+    var isAlwaysBlock: Bool { dailyLimitMinutes == 0 }
+
+    var accentColor: Color {
+        switch colorName {
+        case "blue":   return .blue
+        case "red":    return .red
+        case "orange": return .orange
+        case "green":  return Color(red: 0.2, green: 0.75, blue: 0.45)
+        case "teal":   return .teal
+        case "pink":   return .pink
+        case "yellow": return .yellow
+        default:       return .purple
+        }
+    }
+}
+
+struct BlockUsage: Codable, Sendable {
+    var cardId: String         // references BlockCard.id
+    var date: String           // "YYYY-MM-DD"
+    var usedSeconds: Int
 }

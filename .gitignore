@@ -1,3 +1,30 @@
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+**/.DS_Store
+
+# Xcode
 *.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+xcuserdata/
 DerivedData/
+build/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+Packages/
+*.resolved
+
+# Claude / Copilot local config (no secrets but not needed in repo)
+.claude/
+
+# Editor
+.idea/
+*.swp
+*.swo

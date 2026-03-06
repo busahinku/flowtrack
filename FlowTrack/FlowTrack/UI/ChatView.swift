@@ -8,16 +8,17 @@ struct ChatView: View {
     @State private var inputText = ""
     @State private var showDatePicker = false
     @FocusState private var inputFocused: Bool
-    @State private var scrollProxy: ScrollViewProxy?
+
+    // Streaming state
+    @State private var streamingText: String = ""
+    @State private var isStreaming = false
 
     private var theme: AppTheme { AppSettings.shared.appTheme }
 
     var body: some View {
         VStack(spacing: 0) {
-            headerBar
-            Divider()
             ZStack {
-                if engine.messages.isEmpty {
+                if engine.messages.isEmpty && !isStreaming {
                     emptyState
                 } else {
                     messageList
@@ -26,75 +27,99 @@ struct ChatView: View {
             Divider()
             inputBar
         }
-        .background(Color(NSColor.windowBackgroundColor))
-        .sheet(isPresented: $showDatePicker) { datePicker }
-    }
-
-    // MARK: - Header
-
-    private var headerBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(theme.accentColor)
-
-            Text("FlowTrack AI")
-                .font(.system(size: 14, weight: .semibold))
-
-            Spacer()
-
-            // Date selector button
-            Button {
-                showDatePicker = true
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "calendar")
-                        .font(.system(size: 11))
-                    Text(dateLabel)
-                        .font(.system(size: 12))
-                }
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(.quaternary, in: Capsule())
+        .background(theme.timelineBg)
+        .toolbarBackground(.hidden, for: .windowToolbar)
+        .navigationTitle("")
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                dateNavToolbar
             }
-            .buttonStyle(.plain)
-
-            if !engine.messages.isEmpty {
-                Button {
-                    engine.clearMessages()
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+            ToolbarItemGroup(placement: .primaryAction) {
+                if !engine.messages.isEmpty || isStreaming {
+                    Button {
+                        engine.clearMessages()
+                        streamingText = ""
+                        isStreaming = false
+                    } label: {
+                        Image(systemName: "trash")
+                            .foregroundStyle(.secondary)
+                    }
+                    .help("Clear conversation")
                 }
-                .buttonStyle(.plain)
-                .help("Clear conversation")
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
     }
 
-    // MARK: - Empty State (suggestions)
+    // MARK: - Toolbar date nav
+
+    private var dateNavToolbar: some View {
+        HStack(spacing: 2) {
+            Button {
+                engine.contextDate = Calendar.current.date(byAdding: .day, value: -1, to: engine.contextDate) ?? engine.contextDate
+                engine.clearMessages()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+
+            Button { showDatePicker.toggle() } label: {
+                Text(dateLabel)
+                    .font(.headline)
+                    .frame(minWidth: 90)
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showDatePicker) {
+                DatePicker("", selection: Binding(
+                    get: { engine.contextDate },
+                    set: { newDate in
+                        engine.contextDate = newDate
+                        engine.clearMessages()
+                        streamingText = ""
+                    }
+                ), displayedComponents: .date)
+                    .labelsHidden()
+                    .datePickerStyle(.graphical)
+                    .padding(8)
+                    .frame(width: 300, height: 320)
+            }
+
+            Button {
+                engine.contextDate = Calendar.current.date(byAdding: .day, value: 1, to: engine.contextDate) ?? engine.contextDate
+                engine.clearMessages()
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Empty State
 
     private var emptyState: some View {
         ScrollView {
-            VStack(spacing: 24) {
-                Spacer(minLength: 20)
-                VStack(spacing: 6) {
+            VStack(spacing: 28) {
+                Spacer(minLength: 24)
+                VStack(spacing: 8) {
                     ZStack {
                         Circle()
                             .fill(theme.accentColor.opacity(0.12))
-                            .frame(width: 56, height: 56)
+                            .frame(width: 60, height: 60)
                         Image(systemName: "sparkles")
-                            .font(.system(size: 22, weight: .medium))
+                            .font(.system(size: 24, weight: .medium))
                             .foregroundStyle(theme.accentColor)
                     }
-                    Text("Ask me anything about your day")
-                        .font(.system(size: 14, weight: .semibold))
-                    Text(dateLabelFull)
-                        .font(.caption)
+                    Text("FlowTrack AI")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("Ask me anything about \(dateLabelFull)")
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
 
@@ -107,7 +132,7 @@ struct ChatView: View {
                 }
                 .padding(.horizontal, 16)
 
-                Spacer(minLength: 20)
+                Spacer(minLength: 16)
             }
         }
     }
@@ -117,34 +142,45 @@ struct ChatView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 12) {
+                LazyVStack(spacing: 14) {
                     ForEach(engine.messages) { msg in
                         MessageBubble(message: msg)
                             .id(msg.id)
                     }
-                    if engine.isThinking {
-                        ThinkingIndicator()
-                            .id("thinking")
+                    // Streaming / thinking row
+                    if isStreaming || engine.isThinking {
+                        if isStreaming && !streamingText.isEmpty {
+                            StreamingBubble(text: streamingText)
+                                .id("streaming")
+                        } else {
+                            ThinkingIndicator()
+                                .id("thinking")
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.top, 14)
+                .padding(.bottom, 12)
             }
-            .onAppear { scrollProxy = proxy }
             .onChange(of: engine.messages.count) { _, _ in
                 scrollToBottom(proxy: proxy)
             }
+            .onChange(of: streamingText) { _, _ in
+                withAnimation(.easeOut(duration: 0.1)) {
+                    proxy.scrollTo("streaming", anchor: .bottom)
+                }
+            }
             .onChange(of: engine.isThinking) { _, thinking in
-                if thinking { scrollToBottom(proxy: proxy, anchor: "thinking") }
+                if thinking {
+                    withAnimation { proxy.scrollTo("thinking", anchor: .bottom) }
+                }
             }
         }
     }
 
-    private func scrollToBottom(proxy: ScrollViewProxy, anchor: String? = nil) {
-        withAnimation(.easeOut(duration: 0.25)) {
-            if let a = anchor {
-                proxy.scrollTo(a, anchor: .bottom)
-            } else if let last = engine.messages.last {
+    private func scrollToBottom(proxy: ScrollViewProxy) {
+        withAnimation(.easeOut(duration: 0.2)) {
+            if let last = engine.messages.last {
                 proxy.scrollTo(last.id, anchor: .bottom)
             }
         }
@@ -154,8 +190,7 @@ struct ChatView: View {
 
     private var inputBar: some View {
         VStack(spacing: 0) {
-            // Suggestion chips when messages exist
-            if !engine.messages.isEmpty && !engine.isThinking {
+            if !engine.messages.isEmpty && !engine.isThinking && !isStreaming {
                 quickChips
             }
 
@@ -166,19 +201,16 @@ struct ChatView: View {
                     .lineLimit(1...5)
                     .focused($inputFocused)
                     .onSubmit { sendIfValid() }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(.quaternary)
-                    )
+                    .padding(.vertical, 9)
+                    .padding(.horizontal, 13)
+                    .background(theme.dividerColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 13))
 
                 Button {
                     sendIfValid()
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 28))
-                        .foregroundStyle(canSend ? theme.accentColor : Color.secondary.opacity(0.4))
+                        .font(.system(size: 30))
+                        .foregroundStyle(canSend ? theme.accentColor : Color.secondary.opacity(0.35))
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSend)
@@ -191,22 +223,17 @@ struct ChatView: View {
 
     private var quickChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: 7) {
                 ForEach(ChatEngine.suggestions.prefix(5), id: \.label) { s in
-                    Button {
-                        send(s.prompt)
-                    } label: {
+                    Button { send(s.prompt) } label: {
                         HStack(spacing: 4) {
-                            Image(systemName: s.icon)
-                                .font(.system(size: 10))
-                            Text(s.label)
-                                .font(.system(size: 11))
+                            Image(systemName: s.icon).font(.system(size: 10))
+                            Text(s.label).font(.system(size: 11))
                         }
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
-                        .background(.quaternary, in: Capsule())
-                    }
+                        .background(.quaternary, in: Capsule())                    }
                     .buttonStyle(.plain)
                 }
             }
@@ -215,36 +242,11 @@ struct ChatView: View {
         }
     }
 
-    // MARK: - Date Picker Sheet
-
-    private var datePicker: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Select Date")
-                    .font(.system(size: 14, weight: .semibold))
-                Spacer()
-                Button("Done") { showDatePicker = false }
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(theme.accentColor)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            Divider()
-            DatePicker("", selection: $engine.contextDate, displayedComponents: .date)
-                .datePickerStyle(.graphical)
-                .padding(.horizontal, 12)
-                .onChange(of: engine.contextDate) { _, _ in
-                    engine.clearMessages()
-                }
-            Spacer()
-        }
-        .frame(width: 320, height: 380)
-    }
-
-    // MARK: - Helpers
+    // MARK: - Send
 
     private var canSend: Bool {
-        !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !engine.isThinking
+        !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !engine.isThinking && !isStreaming
     }
 
     private func sendIfValid() {
@@ -253,26 +255,74 @@ struct ChatView: View {
     }
 
     private func send(_ text: String) {
-        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
         inputText = ""
-        Task { await engine.send(t) }
+        Task { await sendAndStream(trimmed) }
     }
+
+    private func sendAndStream(_ text: String) async {
+        // Append user message immediately
+        let userMsg = ChatMessage(role: .user, content: text)
+        engine.messages.append(userMsg)
+        engine.isThinking = true
+        streamingText = ""
+        isStreaming = false
+
+        do {
+            let reply = try await engine.fetchReply(for: text)
+            engine.isThinking = false
+            // Animate the reply streaming in
+            await streamIn(reply)
+        } catch {
+            engine.isThinking = false
+            isStreaming = false
+            streamingText = ""
+            engine.messages.append(ChatMessage(role: .error, content: error.localizedDescription))
+        }
+    }
+
+    /// Animates text appearing character-by-character, then commits to messages.
+    private func streamIn(_ fullText: String) async {
+        guard !fullText.isEmpty else { return }
+        isStreaming = true
+        streamingText = ""
+
+        let chars = Array(fullText)
+        let total = chars.count
+        // Aim for ~1.5s total, but floor at 2 chars/tick and cap tick delay at 16ms
+        let tickChars = max(2, total / 90)   // 90 ticks × tickChars ≈ total
+        let tickMs: UInt64 = 16_000_000      // 16ms ≈ 60fps
+
+        var idx = 0
+        while idx < total {
+            let end = min(idx + tickChars, total)
+            streamingText = String(chars[0..<end])
+            idx = end
+            try? await Task.sleep(nanoseconds: tickMs)
+        }
+
+        // Commit final message and clear streaming state
+        engine.messages.append(ChatMessage(role: .assistant, content: fullText))
+        streamingText = ""
+        isStreaming = false
+    }
+
+    // MARK: - Date Helpers
 
     private var dateLabel: String {
         let cal = Calendar.current
         if cal.isDateInToday(engine.contextDate) { return "Today" }
         if cal.isDateInYesterday(engine.contextDate) { return "Yesterday" }
-        if engine.contextDate > Date().addingTimeInterval(86400 * 6) { return "Future" }
-        let f = DateFormatter()
-        f.dateFormat = "MMM d"
+        let f = DateFormatter(); f.dateFormat = "MMM d"
         return f.string(from: engine.contextDate)
     }
 
     private var dateLabelFull: String {
         let cal = Calendar.current
-        if cal.isDateInToday(engine.contextDate) { return "Today" }
-        let f = DateFormatter()
-        f.dateStyle = .long
+        if cal.isDateInToday(engine.contextDate) { return "today" }
+        if cal.isDateInYesterday(engine.contextDate) { return "yesterday" }
+        let f = DateFormatter(); f.dateStyle = .long
         return f.string(from: engine.contextDate)
     }
 }
@@ -281,14 +331,12 @@ struct ChatView: View {
 
 private struct MessageBubble: View {
     let message: ChatMessage
-    @State private var isExpanded = false
-
+    @State private var isHovered = false
     private var theme: AppTheme { AppSettings.shared.appTheme }
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            if message.role == .user { Spacer(minLength: 48) }
-
+            if message.role == .user { Spacer(minLength: 52) }
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 3) {
                 bubbleContent
                     .textSelection(.enabled)
@@ -297,9 +345,9 @@ private struct MessageBubble: View {
                     .foregroundStyle(.tertiary)
                     .padding(.horizontal, 4)
             }
-
-            if message.role != .user { Spacer(minLength: 48) }
+            if message.role != .user { Spacer(minLength: 52) }
         }
+        .onHover { isHovered = $0 }
     }
 
     @ViewBuilder
@@ -308,162 +356,284 @@ private struct MessageBubble: View {
         case .user:
             Text(message.content)
                 .font(.system(size: 13))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(theme.accentColor, in: BubbleShape(isUser: true))
-
-        case .assistant:
-            MarkdownText(message.content)
+                .foregroundStyle(theme.selectedForeground)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .background(
-                    BubbleShape(isUser: false)
-                        .fill(Color(NSColor.controlBackgroundColor))
-                        .overlay(
-                            BubbleShape(isUser: false)
-                                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
-                        )
-                )
+                .background(theme.accentColor, in: RoundedRectangle(cornerRadius: 16))
+
+        case .assistant:
+            ZStack(alignment: .topTrailing) {
+                MarkdownBubble(text: message.content)
+                if isHovered {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(message.content, forType: .string)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 11))
+                            .padding(5)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .offset(x: -6, y: 6)
+                    .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.15), value: isHovered)
+            .contextMenu {
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(message.content, forType: .string)
+                }
+            }
 
         case .error:
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(theme.warningColor)
                 Text(message.content)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.vertical, 9)
             .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.orange.opacity(0.08))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.orange.opacity(0.2), lineWidth: 1)
-                    )
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(theme.warningColor.opacity(0.08))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.warningColor.opacity(0.2)))
             )
         }
     }
 
     private var timeString: String {
-        let f = DateFormatter()
-        f.timeStyle = .short
+        let f = DateFormatter(); f.timeStyle = .short
         return f.string(from: message.timestamp)
     }
 }
 
-// MARK: - MarkdownText (simple subset)
+// MARK: - StreamingBubble (same look as assistant, shown during animation)
 
-/// Renders **bold**, bullet lists, and ## headings from AI responses.
-private struct MarkdownText: View {
-    let raw: String
-
-    init(_ raw: String) { self.raw = raw }
+private struct StreamingBubble: View {
+    let text: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, para in
-                para
-            }
+        HStack(alignment: .top, spacing: 0) {
+            MarkdownBubble(text: text, showCursor: true)
+            Spacer(minLength: 52)
         }
     }
+}
 
-    private var paragraphs: [AnyView] {
-        let lines = raw.components(separatedBy: "\n")
-        var views: [AnyView] = []
-        var buffer: [String] = []
+// MARK: - MarkdownBubble
 
-        func flush() {
-            if !buffer.isEmpty {
-                let joined = buffer.joined(separator: "\n")
-                if !joined.trimmingCharacters(in: .whitespaces).isEmpty {
-                    views.append(AnyView(styledText(joined).font(.system(size: 13))))
-                }
-                buffer = []
+private struct MarkdownBubble: View {
+    let text: String
+    var showCursor: Bool = false
+    private var theme: AppTheme { AppSettings.shared.appTheme }
+
+    var body: some View {
+        MarkdownRenderer(text: text, showCursor: showCursor)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(NSColor.controlBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(theme.dividerColor.opacity(0.07), lineWidth: 1)
+                    )
+            )
+    }
+}
+
+// MARK: - MarkdownRenderer
+
+private struct MarkdownRenderer: View {
+    let text: String
+    var showCursor: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                renderBlock(block)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("## ") || trimmed.hasPrefix("# ") {
-                flush()
-                let heading = trimmed.replacingOccurrences(of: "^#+\\s*", with: "", options: .regularExpression)
-                views.append(AnyView(
-                    Text(heading)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.primary)
-                ))
-            } else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("• ") || trimmed.hasPrefix("* ") {
-                flush()
-                let bullet = trimmed.dropFirst(2)
-                views.append(AnyView(
-                    HStack(alignment: .top, spacing: 6) {
+    @ViewBuilder
+    private func renderBlock(_ block: MDBlock) -> some View {
+        switch block {
+        case .heading(let text, let level):
+            inlineText(text, bold: true)
+                .font(level == 1 ? .system(size: 14, weight: .bold) : .system(size: 13, weight: .semibold))
+                .padding(.top, level == 1 ? 4 : 2)
+
+        case .bullet(let items):
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(Array(items.enumerated()), id: \.offset) { i, item in
+                    HStack(alignment: .top, spacing: 7) {
                         Text("•")
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
+                            .frame(width: 10)
                             .padding(.top, 1)
-                        styledText(String(bullet))
+                        inlineText(item)
                             .font(.system(size: 13))
                     }
-                ))
-            } else if trimmed.isEmpty {
-                flush()
-            } else {
-                buffer.append(line)
+                }
             }
+
+        case .paragraph(let text):
+            let displayText = showCursor && block == blocks.last ? text + "▌" : text
+            inlineText(displayText)
+                .font(.system(size: 13))
+                .fixedSize(horizontal: false, vertical: true)
+
+        case .numbered(let items):
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(Array(items.enumerated()), id: \.offset) { i, item in
+                    HStack(alignment: .top, spacing: 7) {
+                        Text("\(i + 1).")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .frame(minWidth: 18, alignment: .trailing)
+                        inlineText(item)
+                            .font(.system(size: 13))
+                    }
+                }
+            }
+
+        case .divider:
+            Divider().opacity(0.5)
         }
-        flush()
-        return views
     }
 
-    private func styledText(_ raw: String) -> Text {
-        // Parse **bold** segments
+    // Inline bold/italic/code parsing
+    private func inlineText(_ raw: String, bold: Bool = false) -> Text {
         var result = Text("")
         var remaining = raw
-        while let boldStart = remaining.range(of: "**") {
-            let before = String(remaining[remaining.startIndex..<boldStart.lowerBound])
-            if !before.isEmpty { result = result + Text(before) }
-            remaining = String(remaining[boldStart.upperBound...])
-            if let boldEnd = remaining.range(of: "**") {
-                let bold = String(remaining[remaining.startIndex..<boldEnd.lowerBound])
-                result = result + Text(bold).bold()
-                remaining = String(remaining[boldEnd.upperBound...])
+        while !remaining.isEmpty {
+            // **bold**
+            if let r = findPair(in: remaining, open: "**", close: "**") {
+                result = result + Text(r.before)
+                result = result + Text(r.inner).bold()
+                remaining = r.after
+            // *italic*
+            } else if let r = findPair(in: remaining, open: "*", close: "*") {
+                result = result + Text(r.before)
+                result = result + Text(r.inner).italic()
+                remaining = r.after
+            // `code`
+            } else if let r = findPair(in: remaining, open: "`", close: "`") {
+                result = result + Text(r.before)
+                result = result + Text(r.inner).font(.system(size: 12, design: .monospaced))
+                remaining = r.after
+            } else {
+                result = result + Text(remaining)
+                break
             }
         }
-        if !remaining.isEmpty { result = result + Text(remaining) }
+        return bold ? result.bold() : result
+    }
+
+    private struct ParseResult {
+        let before: String; let inner: String; let after: String
+    }
+
+    private func findPair(in s: String, open: String, close: String) -> ParseResult? {
+        guard let start = s.range(of: open) else { return nil }
+        let afterOpen = s[start.upperBound...]
+        guard let end = afterOpen.range(of: close) else { return nil }
+        return ParseResult(
+            before: String(s[s.startIndex..<start.lowerBound]),
+            inner: String(afterOpen[afterOpen.startIndex..<end.lowerBound]),
+            after: String(afterOpen[end.upperBound...])
+        )
+    }
+
+    // MARK: Parse into blocks
+    private var blocks: [MDBlock] {
+        let lines = text.components(separatedBy: "\n")
+        var result: [MDBlock] = []
+        var bulletBuffer: [String] = []
+        var numberedBuffer: [String] = []
+        var paragraphBuffer: [String] = []
+
+        func flushBullets() {
+            if !bulletBuffer.isEmpty { result.append(.bullet(bulletBuffer)); bulletBuffer = [] }
+        }
+        func flushNumbered() {
+            if !numberedBuffer.isEmpty { result.append(.numbered(numberedBuffer)); numberedBuffer = [] }
+        }
+        func flushParagraph() {
+            let joined = paragraphBuffer.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+            if !joined.isEmpty { result.append(.paragraph(joined)) }
+            paragraphBuffer = []
+        }
+
+        for line in lines {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if t.hasPrefix("### ") || t.hasPrefix("## ") || t.hasPrefix("# ") {
+                flushBullets(); flushNumbered(); flushParagraph()
+                let level = t.hasPrefix("### ") ? 3 : t.hasPrefix("## ") ? 2 : 1
+                let heading = t.replacingOccurrences(of: "^#+\\s*", with: "", options: .regularExpression)
+                result.append(.heading(heading, level))
+            } else if t.hasPrefix("- ") || t.hasPrefix("• ") || t.hasPrefix("* ") {
+                flushNumbered(); flushParagraph()
+                bulletBuffer.append(String(t.dropFirst(2)))
+            } else if let match = t.range(of: "^\\d+\\.\\s+", options: .regularExpression) {
+                flushBullets(); flushParagraph()
+                numberedBuffer.append(String(t[match.upperBound...]))
+            } else if t == "---" || t == "***" || t == "___" {
+                flushBullets(); flushNumbered(); flushParagraph()
+                result.append(.divider)
+            } else if t.isEmpty {
+                flushBullets(); flushNumbered(); flushParagraph()
+            } else {
+                flushBullets(); flushNumbered()
+                paragraphBuffer.append(t)
+            }
+        }
+        flushBullets(); flushNumbered(); flushParagraph()
         return result
     }
+}
+
+private enum MDBlock: Equatable {
+    case heading(String, Int)
+    case bullet([String])
+    case numbered([String])
+    case paragraph(String)
+    case divider
 }
 
 // MARK: - ThinkingIndicator
 
 private struct ThinkingIndicator: View {
     @State private var phase = 0
-    private let timer = Timer.publish(every: 0.45, on: .main, in: .common).autoconnect()
+    private let timer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
+    private var theme: AppTheme { AppSettings.shared.appTheme }
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             HStack(spacing: 5) {
                 ForEach(0..<3, id: \.self) { i in
                     Circle()
-                        .fill(Color.secondary.opacity(phase == i ? 0.9 : 0.3))
+                        .fill(theme.secondaryText.opacity(phase == i ? 0.85 : 0.25))
                         .frame(width: 6, height: 6)
-                        .scaleEffect(phase == i ? 1.2 : 0.9)
-                        .animation(.easeInOut(duration: 0.4), value: phase)
+                        .scaleEffect(phase == i ? 1.25 : 1.0)
+                        .animation(.easeInOut(duration: 0.35), value: phase)
                 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 13)
             .background(
-                BubbleShape(isUser: false)
+                RoundedRectangle(cornerRadius: 16)
                     .fill(Color(NSColor.controlBackgroundColor))
-                    .overlay(
-                        BubbleShape(isUser: false)
-                            .stroke(Color.primary.opacity(0.07), lineWidth: 1)
-                    )
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(theme.dividerColor.opacity(0.07)))
             )
             Spacer()
         }
@@ -496,33 +666,11 @@ private struct SuggestionChip: View {
             .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(isHovered ? Color.primary.opacity(0.06) : Color.primary.opacity(0.03))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.primary.opacity(0.1), lineWidth: 1)
-                    )
+                    .fill(isHovered ? AppSettings.shared.appTheme.dividerColor.opacity(0.06) : AppSettings.shared.appTheme.dividerColor.opacity(0.03))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppSettings.shared.appTheme.dividerColor.opacity(0.08)))
             )
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-    }
-}
-
-// MARK: - BubbleShape
-
-private struct BubbleShape: Shape {
-    let isUser: Bool
-
-    func path(in rect: CGRect) -> Path {
-        let r: CGFloat = 14
-        let tailR: CGFloat = 4
-        var path = Path()
-        if isUser {
-            // Rounded rect with slight point at bottom-right
-            path.addRoundedRect(in: rect, cornerSize: CGSize(width: r, height: r))
-        } else {
-            path.addRoundedRect(in: rect, cornerSize: CGSize(width: r, height: r))
-        }
-        return path
     }
 }

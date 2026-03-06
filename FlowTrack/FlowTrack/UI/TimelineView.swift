@@ -4,8 +4,9 @@ import Foundation
 // MARK: - Layout constants
 private enum TL {
     static let hourHeight: CGFloat = 140
-    static let labelWidth: CGFloat = 52
+    static let labelWidth: CGFloat = 58
     static let cardLeading: CGFloat = 8   // gap between label column and cards
+    static let cardTrailing: CGFloat = 10 // right padding so cards don't touch the edge
     static let colGap: CGFloat = 3        // gap between concurrent columns
     static let minHeight: CGFloat = 22
     static let cornerRadius: CGFloat = 7
@@ -141,7 +142,7 @@ struct TimelineView: View {
     private var dateNavToolbar: some View {
         HStack(spacing: 2) {
             Button {
-                appState.selectedDate = Calendar.current.date(byAdding: .day, value: -1, to: appState.selectedDate)!
+                appState.selectedDate = Calendar.current.date(byAdding: .day, value: -1, to: appState.selectedDate) ?? appState.selectedDate
             } label: {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 12, weight: .semibold))
@@ -149,7 +150,7 @@ struct TimelineView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(theme.secondaryText)
 
             Button { showDatePicker.toggle() } label: {
                 Text(dateLabel)
@@ -166,7 +167,7 @@ struct TimelineView: View {
             }
 
             Button {
-                appState.selectedDate = Calendar.current.date(byAdding: .day, value: 1, to: appState.selectedDate)!
+                appState.selectedDate = Calendar.current.date(byAdding: .day, value: 1, to: appState.selectedDate) ?? appState.selectedDate
             } label: {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .semibold))
@@ -174,14 +175,14 @@ struct TimelineView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(theme.secondaryText)
         }
     }
 
     // MARK: - Timeline body
     private func timelineBody(width: CGFloat) -> some View {
         let totalH = CGFloat(TL.totalHours) * TL.hourHeight
-        let usable = max(1, width - TL.labelWidth - TL.cardLeading)
+        let usable = max(1, width - TL.labelWidth - TL.cardLeading - TL.cardTrailing)
         let layouts = CalendarLayoutEngine.compute(appState.timeSlots)
 
         return ZStack(alignment: .topLeading) {
@@ -259,7 +260,7 @@ struct TimelineView: View {
                 Rectangle()
                     .fill(
                         LinearGradient(
-                            colors: [Color.red, Color.red.opacity(0.4)],
+                            colors: [theme.nowLineColor, theme.nowLineColor.opacity(0.4)],
                             startPoint: .leading,
                             endPoint: .trailing
                         )
@@ -267,7 +268,7 @@ struct TimelineView: View {
                     .frame(height: 2)
                     .padding(.leading, CGFloat(TL.labelWidth - 4))
                 Circle()
-                    .fill(Color.red)
+                    .fill(theme.nowLineColor)
                     .frame(width: 8, height: 8)
                     .offset(x: TL.labelWidth - 8)
             }
@@ -303,7 +304,10 @@ struct TimelineView: View {
     }
 
     private func hourLabel(_ h: Int) -> String {
-        if h == 0 { return "12a" }
+        if AppSettings.shared.use24HourClock {
+            return String(format: "%02d:00", h)
+        }
+        if h == 0  { return "12a" }
         if h == 12 { return "12p" }
         return h < 12 ? "\(h)a" : "\(h - 12)p"
     }
@@ -366,7 +370,7 @@ struct SessionCardView: View {
                         Spacer(minLength: 0)
                         Text(Theme.formatTimeRange(slot.startTime, slot.endTime))
                             .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.secondaryText)
                             .lineLimit(1)
                     }
 
@@ -391,7 +395,7 @@ struct SessionCardView: View {
                         Divider().opacity(0.4)
                         Text(summary)
                             .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.secondaryText)
                             .lineLimit(4)
                             .fixedSize(horizontal: false, vertical: false)
                     }
@@ -413,7 +417,7 @@ struct SessionCardView: View {
                 .stroke(catColor.opacity(isHovered ? 0.55 : 0.22), lineWidth: 1)
         )
         .shadow(color: catColor.opacity(isHovered ? 0.2 : 0.0), radius: 6, y: 2)
-        .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
+        .shadow(color: theme.shadowColor.opacity(0.06), radius: 2, y: 1)
         .animation(.easeOut(duration: 0.1), value: isHovered)
     }
 }

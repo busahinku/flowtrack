@@ -5,6 +5,10 @@ enum DashboardTab: String, CaseIterable, Hashable {
     case stats = "Statistics"
     case heatmap = "Heatmap"
     case chat = "AI Chat"
+    case todos = "Tasks"
+    case timer = "Timer"
+    case journal = "Journal"
+    case blocker = "Blocker"
 
     var icon: String {
         switch self {
@@ -12,6 +16,10 @@ enum DashboardTab: String, CaseIterable, Hashable {
         case .stats:    return "chart.bar.fill"
         case .heatmap:  return "square.grid.3x3.fill"
         case .chat:     return "sparkles"
+        case .todos:    return "checklist"
+        case .timer:    return "timer"
+        case .journal:  return "book.closed.fill"
+        case .blocker:  return "shield.fill"
         }
     }
 }
@@ -22,6 +30,7 @@ enum DashboardTab: String, CaseIterable, Hashable {
 // ─────────────────────────────────────────────────────────────────────────────
 struct DashboardView: View {
     @State private var selectedTab: DashboardTab? = .timeline
+    @Bindable private var appState = AppState.shared
 
     private var theme: AppTheme { AppSettings.shared.appTheme }
 
@@ -33,6 +42,9 @@ struct DashboardView: View {
             detailContent
         }
         .preferredColorScheme(theme.colorScheme)
+        .onChange(of: appState.requestedTab) { _, tab in
+            if let tab { selectedTab = tab; appState.requestedTab = nil }
+        }
     }
 
     @ViewBuilder
@@ -42,6 +54,10 @@ struct DashboardView: View {
         case .stats:    StatsView()
         case .heatmap:  HeatmapView()
         case .chat:     ChatView()
+        case .todos:    TodoView()
+        case .timer:    TimerView()
+        case .journal:  JournalView()
+        case .blocker:  AppBlockerView()
         case nil:       TimelineView()
         }
     }
@@ -54,6 +70,7 @@ struct DashboardView: View {
 private struct SidebarView: View {
     @Binding var selectedTab: DashboardTab?
     @Bindable private var appState  = AppState.shared
+    @Bindable private var todoStore = TodoStore.shared
     @ObservedObject private var tracker = ActivityTracker.shared
 
     private var theme: AppTheme { AppSettings.shared.appTheme }
@@ -79,17 +96,17 @@ private struct SidebarView: View {
                     if !tracker.currentApp.isEmpty {
                         Text(tracker.currentApp)
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.secondaryText)
                             .lineLimit(1)
                     }
                 }
             } icon: {
                 Circle()
-                    .fill(tracker.isTracking ? Color.green : Color.red)
+                    .fill(tracker.isTracking ? theme.successColor : theme.errorColor)
                     .frame(width: 8, height: 8)
             }
             .font(.subheadline)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(theme.secondaryText)
             .listRowSeparator(.hidden)
             .selectionDisabled()
         }
@@ -102,6 +119,7 @@ private struct SidebarView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     statRow("Distraction", distractionTime)
                     statRow("Active",      totalActiveTime)
+                    statRow("Timer",       todayTrackedTime)
                 }
                 Spacer()
             }
@@ -125,7 +143,7 @@ private struct SidebarView: View {
     private var focusRing: some View {
         ZStack {
             Circle()
-                .stroke(Color.secondary.opacity(0.15), lineWidth: 5)
+                .stroke(theme.secondaryText.opacity(0.15), lineWidth: 5)
             Circle()
                 .trim(from: 0, to: focusScorePercent)
                 .stroke(theme.accentColor, style: StrokeStyle(lineWidth: 5, lineCap: .round))
@@ -136,7 +154,7 @@ private struct SidebarView: View {
                     .font(.system(size: 12, weight: .bold, design: .rounded))
                 Text("Focus")
                     .font(.system(size: 8))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.secondaryText)
             }
         }
         .frame(width: 46, height: 46)
@@ -150,10 +168,10 @@ private struct SidebarView: View {
             HStack(spacing: 6) {
                 Image(systemName: appState.isRunningAI ? "sparkles" : "sparkle")
                     .font(.system(size: 11))
-                    .foregroundStyle(appState.isRunningAI ? .yellow : .secondary)
+                    .foregroundStyle(appState.isRunningAI ? theme.warningColor : .secondary)
                 Text(appState.isRunningAI ? "AI Processing…" : "AI Idle")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.secondaryText)
                 Spacer()
                 if let nextRun = appState.aiNextRunTime {
                     let rem = max(0, nextRun.timeIntervalSince(Date()))
@@ -168,7 +186,7 @@ private struct SidebarView: View {
             SettingsLink {
                 Label("Settings", systemImage: "gear")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.secondaryText)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
@@ -187,7 +205,7 @@ private struct SidebarView: View {
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
             Text(label)
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.secondaryText)
         }
     }
 
@@ -211,5 +229,14 @@ private struct SidebarView: View {
             .reduce(0.0) { $0 + $1.duration }
         guard secs > 0 else { return "—" }
         return Theme.formatDuration(secs)
+    }
+
+    private var todayTrackedTime: String {
+        let sessions = todoStore.timerSessions.filter {
+            Calendar.current.isDateInToday($0.startedAt)
+        }
+        let total = sessions.reduce(0.0) { $0 + $1.duration }
+        guard total >= 60 else { return "—" }
+        return Theme.formatDuration(total)
     }
 }

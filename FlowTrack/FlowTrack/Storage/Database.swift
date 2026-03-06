@@ -62,6 +62,16 @@ final class Database: Sendable {
             try db.execute(sql: "UPDATE activities SET category = 'Work' WHERE category = 'Productivity'")
         }
 
+        migrator.registerMigration("v5_journal_entries") { db in
+            try db.create(table: "journal_entries", ifNotExists: true) { t in
+                t.column("date", .text).primaryKey()   // "YYYY-MM-DD"
+                t.column("ciphertext", .blob).notNull()
+                t.column("nonce", .blob).notNull()
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 
@@ -114,34 +124,37 @@ final class Database: Sendable {
     }
 
     // MARK: - Session Building (shared logic)
-    // Sessions are split only on idle gaps > gapThreshold.
-    // Category is determined by whichever category had the most total active time in the session.
+    // Sessions are split on idle gaps > gapThreshold OR when the category changes.
+    // Category-based splitting produces sessions with a single accurate category.
     private func buildSessions(from activities: [ActivityRecord], gapThreshold: TimeInterval = 300) -> [TimeSlot] {
         guard !activities.isEmpty else { return [] }
 
         var sessions: [TimeSlot] = []
         var currentActivities: [ActivityRecord] = []
         var sessionStart: Date = activities[0].timestamp
+        var currentSessionCategory: Category = activities[0].category
 
         for record in activities {
             if let lastActivity = currentActivities.last {
                 let lastEnd = lastActivity.timestamp.addingTimeInterval(lastActivity.duration)
                 let gap = record.timestamp.timeIntervalSince(lastEnd)
-                if gap > gapThreshold {
+                let categoryChanged = record.category != currentSessionCategory
+                if gap > gapThreshold || categoryChanged {
                     // Flush current session
                     let endTime = lastEnd
-                    let dominantCategory = dominantCategory(in: currentActivities)
+                    let category = dominantCategory(in: currentActivities)
                     let summaries = buildSummaries(from: currentActivities)
                     sessions.append(TimeSlot(
                         id: "\(Int(sessionStart.timeIntervalSince1970))-\(Int(endTime.timeIntervalSince1970))",
                         startTime: sessionStart,
                         endTime: endTime,
-                        category: dominantCategory,
+                        category: category,
                         activities: summaries,
                         isIdle: false
                     ))
                     currentActivities = []
                     sessionStart = record.timestamp
+                    currentSessionCategory = record.category
                 }
             }
             currentActivities.append(record)
@@ -150,13 +163,13 @@ final class Database: Sendable {
         // Final session
         if !currentActivities.isEmpty {
             let endTime = currentActivities.last.map { $0.timestamp.addingTimeInterval($0.duration) } ?? sessionStart
-            let dominantCategory = dominantCategory(in: currentActivities)
+            let category = dominantCategory(in: currentActivities)
             let summaries = buildSummaries(from: currentActivities)
             sessions.append(TimeSlot(
                 id: "\(Int(sessionStart.timeIntervalSince1970))-\(Int(endTime.timeIntervalSince1970))",
                 startTime: sessionStart,
                 endTime: endTime,
-                category: dominantCategory,
+                category: category,
                 activities: summaries,
                 isIdle: false
             ))
@@ -311,10 +324,32 @@ final class Database: Sendable {
         let cal = Calendar.current
 
         for a in activities where !a.isIdle {
-            let hour = cal.component(.hour, from: a.timestamp)
-            var cats = hourCats[hour] ?? [:]
-            cats[a.category.rawValue, default: 0] += a.duration / 60.0
-            hourCats[hour] = cats
+            let startHour = cal.component(.hour, from: a.timestamp)
+            let endTime = a.timestamp.addingTimeInterval(a.duration)
+            let endHour = cal.component(.hour, from: endTime)
+
+            if startHour == endHour || a.duration <= 0 {
+                // Simple case: all duration in one hour
+                var cats = hourCats[startHour] ?? [:]
+                cats[a.category.rawValue, default: 0] += a.duration / 60.0
+                hourCats[startHour] = cats
+            } else {
+                // Spans hour boundary: split proportionally
+                let nextHourBoundary = cal.date(bySettingHour: startHour + 1, minute: 0, second: 0, of: a.timestamp)
+                    ?? a.timestamp.addingTimeInterval(a.duration)
+                let firstPortion = nextHourBoundary.timeIntervalSince(a.timestamp)
+                let secondPortion = a.duration - firstPortion
+
+                var cats1 = hourCats[startHour] ?? [:]
+                cats1[a.category.rawValue, default: 0] += firstPortion / 60.0
+                hourCats[startHour] = cats1
+
+                if secondPortion > 0 {
+                    var cats2 = hourCats[endHour] ?? [:]
+                    cats2[a.category.rawValue, default: 0] += secondPortion / 60.0
+                    hourCats[endHour] = cats2
+                }
+            }
         }
 
         var stats: [HourStat] = []
@@ -330,7 +365,8 @@ final class Database: Sendable {
     func heatmapForWeek(containing date: Date) throws -> [Date: Double] {
         let cal = Calendar.current
         let weekday = cal.component(.weekday, from: date)
-        let startOfWeek = cal.date(byAdding: .day, value: -(weekday - 1), to: cal.startOfDay(for: date))!
+        let daysFromMonday = (weekday + 5) % 7  // Sun→6, Mon→0, Tue→1, ..., Sat→5
+        let startOfWeek = cal.date(byAdding: .day, value: -daysFromMonday, to: cal.startOfDay(for: date))!
         let endOfWeek = cal.date(byAdding: .day, value: 7, to: startOfWeek)!
 
         // Single range query instead of 7 separate queries
@@ -368,6 +404,30 @@ final class Database: Sendable {
         }
     }
 
+    /// Fetch browser activities (Safari, Chrome, Firefox, Arc, Edge) that have a URL.
+    /// These may have been mis-categorized by poisoned learned rules.
+    func browserActivitiesWithURL(limit: Int = 3000) throws -> [ActivityRecord] {
+        let browserBundleIDs = [
+            "com.apple.Safari", "com.google.Chrome", "org.mozilla.firefox",
+            "company.thebrowser.Browser", "com.microsoft.edgemac", "com.operasoftware.Opera",
+            "com.brave.Browser", "com.vivaldi.Vivaldi", "com.duckduckgo.macos.browser"
+        ]
+        let placeholders = browserBundleIDs.map { _ in "?" }.joined(separator: ", ")
+        return try dbQueue.read { db in
+            let sql = """
+                SELECT * FROM activities
+                WHERE bundleID IN (\(placeholders))
+                AND url IS NOT NULL AND url != ''
+                AND isIdle = 0
+                ORDER BY timestamp DESC
+                LIMIT ?
+            """
+            var args: [DatabaseValue] = browserBundleIDs.map { $0.databaseValue }
+            args.append(limit.databaseValue)
+            return try ActivityRecord.fetchAll(db, sql: sql, arguments: StatementArguments(args))
+        }
+    }
+
     func updateCategory(for id: Int64, to category: Category) throws {
         try dbQueue.write { db in
             try db.execute(sql: "UPDATE activities SET category = ? WHERE id = ?", arguments: [category.rawValue, id])
@@ -396,14 +456,21 @@ final class Database: Sendable {
         }
     }
 
-    func loadAllSessionAI() throws -> [(sessionId: String, title: String?, summary: String?)] {
+    func loadAllSessionAI(limit: Int = 500) throws -> [(sessionId: String, title: String?, summary: String?)] {
         try dbQueue.read { db in
-            let rows = try Row.fetchAll(db, sql: "SELECT sessionId, title, summary FROM session_ai")
+            let rows = try Row.fetchAll(db, sql: "SELECT sessionId, title, summary FROM session_ai ORDER BY updatedAt DESC LIMIT ?", arguments: [limit])
             return rows.map { row in
                 (sessionId: row["sessionId"] as String,
                  title: row["title"] as String?,
                  summary: row["summary"] as String?)
             }
+        }
+    }
+
+    // MARK: - Category Remapping
+    func remapCategory(from oldCategory: String, to newCategory: String) {
+        try? dbQueue.write { db in
+            try db.execute(sql: "UPDATE activities SET category = ? WHERE category = ?", arguments: [newCategory, oldCategory])
         }
     }
 
@@ -448,8 +515,9 @@ final class Database: Sendable {
         let lastPrune = UserDefaults.standard.object(forKey: lastPruneKey) as? Date ?? .distantPast
         guard Date().timeIntervalSince(lastPrune) > 7 * 86400 else { return } // once per week
 
-        Task(priority: .background) {
-            let cutoff = Calendar.current.date(byAdding: .day, value: -retentionDays, to: Date())!
+        // Use a regular GCD background thread — avoids blocking Swift's cooperative thread pool.
+        DispatchQueue.global(qos: .background).async {
+            let cutoff = Calendar.current.date(byAdding: .day, value: -retentionDays, to: Date()) ?? Date()
             try? self.dbQueue.write { db in
                 try db.execute(sql: "DELETE FROM activities WHERE timestamp < ?", arguments: [cutoff])
                 // Prune orphaned AI sessions: keep only those updated after the cutoff
@@ -464,16 +532,36 @@ final class Database: Sendable {
 
     /// Count of consecutive days (ending today) where productive time >= 50% of active time.
     func focusStreakDays() throws -> Int {
-        var streak = 0
-        var checkDate = Calendar.current.startOfDay(for: Date())
         let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let lookback = cal.date(byAdding: .day, value: -365, to: today)!
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: today)!
+
+        // Single query: fetch all non-idle activities in the lookback window
+        let activities = try dbQueue.read { db in
+            try ActivityRecord
+                .filter(ActivityRecord.Columns.timestamp >= lookback && ActivityRecord.Columns.timestamp < tomorrow)
+                .filter(ActivityRecord.Columns.isIdle == false)
+                .order(ActivityRecord.Columns.timestamp)
+                .fetchAll(db)
+        }
+
+        // Group by day and compute per-day productive ratio
+        var dayTotals: [Date: (total: Double, productive: Double)] = [:]
+        for a in activities {
+            let day = cal.startOfDay(for: a.timestamp)
+            var entry = dayTotals[day] ?? (total: 0, productive: 0)
+            entry.total += a.duration
+            if a.category.isProductive { entry.productive += a.duration }
+            dayTotals[day] = entry
+        }
+
+        // Count streak backwards from today
+        var streak = 0
+        var checkDate = today
         for _ in 0..<365 {
-            let nextDay = cal.date(byAdding: .day, value: 1, to: checkDate)!
-            let stats = try categoryStatsForRange(from: checkDate, to: nextDay)
-            let total = stats.reduce(0.0) { $0 + $1.totalSeconds }
-            guard total > 60 else { break } // no data = streak broken
-            let productive = stats.filter { $0.category.isProductive }.reduce(0.0) { $0 + $1.totalSeconds }
-            guard productive / total >= 0.5 else { break }
+            guard let entry = dayTotals[checkDate], entry.total > 60 else { break }
+            guard entry.productive / entry.total >= 0.5 else { break }
             streak += 1
             checkDate = cal.date(byAdding: .day, value: -1, to: checkDate)!
         }

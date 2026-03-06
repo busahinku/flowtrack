@@ -3,6 +3,7 @@ import SwiftUI
 struct OnboardingView: View {
     @State private var step = 0
     @Binding var isPresented: Bool
+    private var theme: AppTheme { AppSettings.shared.appTheme }
 
     var body: some View {
         VStack(spacing: 24) {
@@ -56,8 +57,7 @@ struct OnboardingView: View {
         VStack(spacing: 16) {
             Image(systemName: "lock.shield")
                 .font(.system(size: 60))
-                .foregroundStyle(.orange)
-            Text("Accessibility Permission")
+                .foregroundStyle(theme.warningColor)
                 .font(.title.bold())
             Text("FlowTrack needs Accessibility permission to read window titles and track which apps you're using.")
                 .multilineTextAlignment(.center)
@@ -78,7 +78,7 @@ struct OnboardingView: View {
 
             if PermissionChecker.hasAccessibility {
                 Label("Permission Granted", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
+                    .foregroundStyle(theme.successColor)
             }
         }
     }
@@ -87,7 +87,7 @@ struct OnboardingView: View {
         VStack(spacing: 16) {
             Image(systemName: "sparkles")
                 .font(.system(size: 60))
-                .foregroundStyle(.purple)
+                .foregroundStyle(theme.infoColor)
             Text("You're All Set!")
                 .font(.title.bold())
             Text("FlowTrack will now track your activities and AI will categorize and summarize your work sessions automatically.")

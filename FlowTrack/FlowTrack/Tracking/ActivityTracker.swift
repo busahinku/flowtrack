@@ -22,7 +22,7 @@ final class ActivityTracker: ObservableObject {
 
     // MARK: - Private State
     private var heartbeatTimer: Timer?
-    private var batteryMonitorTimer: Timer?
+    private var powerSourceCallback: CFRunLoopSource?
     private var lastActivity: Date = Date()
     private var idleThreshold: TimeInterval { TimeInterval(AppSettings.shared.idleThresholdSeconds) }
     private var consecutiveIdleCount = 0
@@ -34,10 +34,22 @@ final class ActivityTracker: ObservableObject {
     private var lastSavedTitle: String = ""
     private var lastSavedURL: String? = nil
     private var lastSavedIsIdle: Bool = false
+    private var lastSavedAppName: String = ""
+    private var lastSavedCategory: Category = .uncategorized
+
+    // Accurate duration tracking — time of last DB write per bundleID
+    private var lastWriteDate: Date = Date()
+
+    // AX title fetch optimization — skip when app hasn't changed
+    private var lastFrontmostPID: pid_t = 0
+    private var lastTitleFetchDate: Date = .distantPast
 
     // Browser URL cache — only re-fetch AppleScript when title actually changes
     private var lastBrowserTitle: String = ""
     private var cachedBrowserURL: String? = nil
+
+    // Browser URL debounce — cancel pending fetch when title changes rapidly
+    private var browserURLTask: Task<Void, Never>?
 
     // App Nap exemption token
     private var activityToken: NSObjectProtocol?
@@ -78,7 +90,8 @@ final class ActivityTracker: ObservableObject {
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil, queue: .main
         ) { [weak self] notification in
-            Task { @MainActor [weak self] in self?.handleAppSwitch(notification) }
+            let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            Task { @MainActor [weak self] in self?.handleAppSwitch(app: app) }
         }
 
         // Screen sleep/wake — pause tracking when display is off
@@ -116,7 +129,10 @@ final class ActivityTracker: ObservableObject {
     func stopTracking() {
         isTracking = false
         heartbeatTimer?.invalidate(); heartbeatTimer = nil
-        batteryMonitorTimer?.invalidate(); batteryMonitorTimer = nil
+        if let source = powerSourceCallback {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .defaultMode)
+            powerSourceCallback = nil
+        }
         if let token = activityToken { ProcessInfo.processInfo.endActivity(token) }
         activityToken = nil
         if let obs = appSwitchObserver { NSWorkspace.shared.notificationCenter.removeObserver(obs) }
@@ -132,10 +148,11 @@ final class ActivityTracker: ObservableObject {
 
     private func scheduleHeartbeat() {
         heartbeatTimer?.invalidate()
-        let interval: TimeInterval = cachedOnBattery ? 45 : 30
+        let interval: TimeInterval = cachedOnBattery ? 30 : 15
         heartbeatTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
             Task { @MainActor [weak self] in self?.heartbeat() }
         }
+        heartbeatTimer?.tolerance = interval * 0.1  // allow 10% coalescing to save energy
     }
 
     private func heartbeat() {
@@ -154,64 +171,102 @@ final class ActivityTracker: ObservableObject {
 
         if recordIsIdle && consecutiveIdleCount > 3 { return }
 
-        // Title change detection (AX API — lightweight, no AppleScript)
-        let newTitle = AppSettings.shared.captureWindowTitles ? getWindowTitle(for: frontApp) : ""
+        // AX title fetch optimization — skip when PID unchanged and title is fresh
+        let pid = frontApp.processIdentifier
+        let now = Date()
+        let pidChanged = pid != lastFrontmostPID
+        let titleStale = now.timeIntervalSince(lastTitleFetchDate) >= 5
+        let newTitle: String
+        if AppSettings.shared.captureWindowTitles && (pidChanged || titleStale) {
+            newTitle = getWindowTitle(for: frontApp)
+            lastTitleFetchDate = now
+            lastFrontmostPID = pid
+        } else if AppSettings.shared.captureWindowTitles {
+            newTitle = lastSavedTitle // reuse cached
+        } else {
+            newTitle = ""
+        }
+
         let titleChanged = newTitle != lastSavedTitle
         if titleChanged { currentTitle = newTitle }
 
-        let duration: TimeInterval = cachedOnBattery ? 45 : 30
+        // Actual elapsed time since last write for this app (accurate duration)
+        let elapsed = now.timeIntervalSince(lastWriteDate)
         let isBrowser = knownBrowsers.contains(where: { appName.contains($0) })
 
-        // Deduplication: skip write if nothing changed
-        let stateChanged = bundleID != lastSavedBundleID || titleChanged || recordIsIdle != lastSavedIsIdle
-
         if isBrowser {
-            let urlFetchNeeded = titleChanged || cachedBrowserURL == nil
-            if urlFetchNeeded {
+            let urlChanged = titleChanged || cachedBrowserURL == nil
+            if urlChanged {
+                // Debounce browser URL fetch — cancel any pending fetch
+                browserURLTask?.cancel()
                 let capturedTitle = newTitle
-                Task.detached(priority: .utility) {
-                    let url = ActivityTracker.fetchBrowserURL(appName: appName)
-                    await MainActor.run { [weak self] in
-                        guard let self else { return }
-                        self.cachedBrowserURL = url
-                        self.lastBrowserTitle = capturedTitle
-                        let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: capturedTitle, url: url, isIdle: recordIsIdle)
-                        self.checkDistractionAlert(category: cat)
-                        self.writeRecord(appName: appName, bundleID: bundleID, title: capturedTitle, url: url, category: cat, isIdle: recordIsIdle, duration: duration)
-                        self.lastSavedBundleID = bundleID; self.lastSavedTitle = capturedTitle
-                        self.lastSavedURL = url; self.lastSavedIsIdle = recordIsIdle
-                    }
+                let capturedElapsed = elapsed
+                browserURLTask = Task {
+                    try? await Task.sleep(for: .seconds(1.5))
+                    guard !Task.isCancelled else { return }
+                    let url = await ActivityTracker.fetchBrowserURL(appName: appName)
+                    guard !Task.isCancelled else { return }
+                    self.cachedBrowserURL = url
+                    self.lastBrowserTitle = capturedTitle
+                    let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: capturedTitle, url: url, isIdle: recordIsIdle)
+                    self.checkDistractionAlert(category: cat)
+                    self.writeRecord(appName: appName, bundleID: bundleID, title: capturedTitle, url: url, category: cat, isIdle: recordIsIdle, duration: capturedElapsed)
+                    self.lastSavedBundleID = bundleID; self.lastSavedTitle = capturedTitle
+                    self.lastSavedAppName = appName; self.lastSavedCategory = cat
+                    self.lastSavedURL = url; self.lastSavedIsIdle = recordIsIdle
+                    self.lastWriteDate = Date()
                 }
             } else {
-                // Same tab — write heartbeat with cached URL (proves presence), skip AppleScript
+                // Same tab — dedup: only write if ≥60s since last write (liveness pulse)
+                guard elapsed >= 60 else { return }
                 let cat = resolveCategory(appName: appName, bundleID: bundleID, title: newTitle, url: cachedBrowserURL, isIdle: recordIsIdle)
                 checkDistractionAlert(category: cat)
-                writeRecord(appName: appName, bundleID: bundleID, title: newTitle, url: cachedBrowserURL, category: cat, isIdle: recordIsIdle, duration: duration)
+                writeRecord(appName: appName, bundleID: bundleID, title: newTitle, url: cachedBrowserURL, category: cat, isIdle: recordIsIdle, duration: elapsed)
                 lastSavedBundleID = bundleID; lastSavedTitle = newTitle; lastSavedIsIdle = recordIsIdle
+                lastSavedAppName = appName; lastSavedCategory = cat
+                lastWriteDate = Date()
             }
         } else {
             cachedBrowserURL = nil
+            // Dedup: if nothing changed, only write every 60s as a liveness pulse
+            let nothingChanged = bundleID == lastSavedBundleID && newTitle == lastSavedTitle && recordIsIdle == lastSavedIsIdle
+            if nothingChanged && elapsed < 60 { return }
+
             let cat = resolveCategory(appName: appName, bundleID: bundleID, title: newTitle, url: nil, isIdle: recordIsIdle)
             checkDistractionAlert(category: cat)
-            if stateChanged {
-                writeRecord(appName: appName, bundleID: bundleID, title: newTitle, url: nil, category: cat, isIdle: recordIsIdle, duration: duration)
-                lastSavedBundleID = bundleID; lastSavedTitle = newTitle; lastSavedIsIdle = recordIsIdle
-            } else {
-                // Same state — just write heartbeat (proves presence)
-                writeRecord(appName: appName, bundleID: bundleID, title: newTitle, url: nil, category: cat, isIdle: recordIsIdle, duration: duration)
-            }
+            writeRecord(appName: appName, bundleID: bundleID, title: newTitle, url: nil, category: cat, isIdle: recordIsIdle, duration: elapsed)
+            lastSavedBundleID = bundleID; lastSavedTitle = newTitle; lastSavedIsIdle = recordIsIdle
+            lastSavedAppName = appName; lastSavedCategory = cat
+            lastWriteDate = Date()
         }
     }
 
     // MARK: - App Switch Handler (event-driven, instant)
 
-    private func handleAppSwitch(_ notification: Notification) {
-        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+    private func handleAppSwitch(app: NSRunningApplication?) {
+        guard let app else { return }
         let bundleID = app.bundleIdentifier ?? ""
         let appName = app.localizedName ?? "Unknown"
 
         if AppSettings.shared.excludedBundleIDs.contains(bundleID) { return }
         guard bundleID != lastSavedBundleID else { return } // same app, skip
+
+        // Cancel any pending browser URL debounce from previous app
+        browserURLTask?.cancel()
+        browserURLTask = nil
+
+        // Write closing record for the previous app to capture time since last heartbeat
+        let now = Date()
+        if !lastSavedBundleID.isEmpty && !lastSavedAppName.isEmpty
+            && !AppSettings.shared.excludedBundleIDs.contains(lastSavedBundleID) {
+            let elapsed = now.timeIntervalSince(lastWriteDate)
+            if elapsed > 1.0 {
+                writeRecord(appName: lastSavedAppName, bundleID: lastSavedBundleID,
+                            title: lastSavedTitle, url: lastSavedURL,
+                            category: lastSavedCategory, isIdle: lastSavedIsIdle,
+                            duration: elapsed)
+            }
+        }
 
         // Track app switches for context-switching metric
         resetSwitchCountIfNewDay()
@@ -222,14 +277,22 @@ final class ActivityTracker: ObservableObject {
         consecutiveIdleCount = 0
         cachedBrowserURL = nil
         lastBrowserTitle = ""
+        lastWriteDate = now
 
         let title = AppSettings.shared.captureWindowTitles ? getWindowTitle(for: app) : ""
         currentTitle = title
+        lastFrontmostPID = app.processIdentifier
+        lastTitleFetchDate = now
+
+        // Update dedup state immediately so heartbeat doesn't double-record
+        lastSavedBundleID = bundleID; lastSavedTitle = title
+        lastSavedURL = nil; lastSavedIsIdle = false; lastSavedAppName = appName
 
         let isBrowser = knownBrowsers.contains(where: { appName.contains($0) })
         if isBrowser {
+            // Fetch URL async — only write ONE record (after URL is known)
             Task.detached(priority: .utility) {
-                let url = ActivityTracker.fetchBrowserURL(appName: appName)
+                let url = await ActivityTracker.fetchBrowserURL(appName: appName)
                 await MainActor.run { [weak self] in
                     guard let self else { return }
                     self.cachedBrowserURL = url
@@ -237,16 +300,16 @@ final class ActivityTracker: ObservableObject {
                     let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: title, url: url, isIdle: false)
                     self.checkDistractionAlert(category: cat)
                     self.writeRecord(appName: appName, bundleID: bundleID, title: title, url: url, category: cat, isIdle: false, duration: 0)
-                    self.lastSavedBundleID = bundleID; self.lastSavedTitle = title
-                    self.lastSavedURL = url; self.lastSavedIsIdle = false
+                    self.lastSavedURL = url
+                    self.lastSavedCategory = cat
                 }
             }
         } else {
+            // Non-browser: write immediately so the switch is recorded at the right timestamp
             let cat = resolveCategory(appName: appName, bundleID: bundleID, title: title, url: nil, isIdle: false)
             checkDistractionAlert(category: cat)
             writeRecord(appName: appName, bundleID: bundleID, title: title, url: nil, category: cat, isIdle: false, duration: 0)
-            lastSavedBundleID = bundleID; lastSavedTitle = title
-            lastSavedURL = nil; lastSavedIsIdle = false
+            lastSavedCategory = cat
         }
     }
 
@@ -261,6 +324,7 @@ final class ActivityTracker: ObservableObject {
 
     private func handleScreenWake() {
         isScreenAsleep = false
+        lastWriteDate = Date() // don't count sleep time as app duration
         scheduleHeartbeat()
         captureCurrentApp()
         trackerLogger.info("Screen/system wake — tracking resumed")
@@ -292,7 +356,7 @@ final class ActivityTracker: ObservableObject {
             isIdle: isIdle, duration: duration
         )
         Task(priority: .utility) {
-            try? await Database.shared.saveActivity(record)
+            try? Database.shared.saveActivity(record)
         }
     }
 
@@ -305,15 +369,21 @@ final class ActivityTracker: ObservableObject {
     }
 
     private func scheduleBatteryMonitor() {
-        batteryMonitorTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                let newBattery = self.isOnBattery()
-                if newBattery != self.cachedOnBattery {
-                    self.cachedOnBattery = newBattery
-                    self.scheduleHeartbeat() // re-schedule with new interval
+        // Use IOKit notification instead of polling — fires only when power source changes
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        if let source = IOPSNotificationCreateRunLoopSource({ context in
+            guard let context else { return }
+            let tracker = Unmanaged<ActivityTracker>.fromOpaque(context).takeUnretainedValue()
+            Task { @MainActor in
+                let newBattery = tracker.isOnBattery()
+                if newBattery != tracker.cachedOnBattery {
+                    tracker.cachedOnBattery = newBattery
+                    tracker.scheduleHeartbeat()
                 }
             }
+        }, context)?.takeRetainedValue() {
+            CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
+            powerSourceCallback = source
         }
     }
 
@@ -323,6 +393,7 @@ final class ActivityTracker: ObservableObject {
         var value: AnyObject?
         let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &value)
         guard result == .success, let rawValue = value else { return "" }
+        // CoreFoundation bridging: AXUIElement is always an AXUIElement when result == .success
         let axElement = rawValue as! AXUIElement
         var titleValue: AnyObject?
         AXUIElementCopyAttributeValue(axElement, kAXTitleAttribute as CFString, &titleValue)
@@ -330,8 +401,14 @@ final class ActivityTracker: ObservableObject {
     }
 
     /// Runs AppleScript to get the active browser tab URL.
-    /// Must be called off the main actor — executeAndReturnError blocks for 100–300ms.
-    nonisolated static func fetchBrowserURL(appName: String) -> String? {
+    /// Firefox uses AXUIElement instead (no AppleScript support for URL).
+    /// Async — suspends the calling task without blocking any thread pool thread.
+    nonisolated static func fetchBrowserURL(appName: String) async -> String? {
+        // Firefox doesn't expose URL via AppleScript — use AXUIElement address bar
+        if appName.contains("Firefox") {
+            return fetchFirefoxURL()
+        }
+
         let script: String
         if appName.contains("Safari") {
             script = "tell application \"Safari\" to get URL of current tab of front window"
@@ -345,21 +422,80 @@ final class ActivityTracker: ObservableObject {
             script = "tell application \"Opera\" to get URL of active tab of front window"
         } else if appName.contains("Arc") {
             script = "tell application \"Arc\" to get URL of active tab of front window"
-        } else if appName.contains("Firefox") {
-            script = "tell application \"Firefox\" to get URL of active tab of front window"
         } else {
             return nil
         }
-        let appleScript = NSAppleScript(source: script)
-        var error: NSDictionary?
-        let result = appleScript?.executeAndReturnError(&error)
-        return result?.stringValue
+
+        // Use withCheckedContinuation so the calling async task suspends (not blocks a thread).
+        // Two GCD dispatches race: the actual AppleScript and a 3-second timeout.
+        // A one-shot flag guarantees the continuation is resumed exactly once.
+        return await withCheckedContinuation { continuation in
+            let once = _Once()
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 3) {
+                if once.fulfill() {
+                    trackerLogger.warning("AppleScript timed out for \(appName, privacy: .public)")
+                    continuation.resume(returning: nil)
+                }
+            }
+            DispatchQueue.global(qos: .utility).async {
+                let appleScript = NSAppleScript(source: script)
+                var error: NSDictionary?
+                let output = appleScript?.executeAndReturnError(&error)
+                if once.fulfill() {
+                    continuation.resume(returning: output?.stringValue)
+                }
+            }
+        }
+    }
+
+    /// Reads Firefox URL from the AXUIElement address bar (toolbar item with URL role).
+    /// Firefox doesn't support AppleScript URL access, so we use Accessibility API.
+    nonisolated private static func fetchFirefoxURL() -> String? {
+        guard let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "org.mozilla.firefox" }) else { return nil }
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        var windowRef: AnyObject?
+        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowRef) == .success else { return nil }
+        let window = windowRef as! AXUIElement
+        // Traverse toolbar → address bar (search field with URL value)
+        if let url = searchAXForURL(element: window, depth: 0) {
+            return url
+        }
+        return nil
+    }
+
+    nonisolated private static func searchAXForURL(element: AXUIElement, depth: Int) -> String? {
+        guard depth < 8 else { return nil }
+        var roleRef: AnyObject?
+        AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef)
+        let role = roleRef as? String ?? ""
+
+        // Check if this element looks like an address bar (text field with a URL value)
+        if role == kAXTextFieldRole || role == "AXComboBox" {
+            var valueRef: AnyObject?
+            AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &valueRef)
+            if let value = valueRef as? String,
+               (value.hasPrefix("http://") || value.hasPrefix("https://") || value.hasPrefix("about:")) {
+                return value
+            }
+        }
+
+        // Recurse into children
+        var childrenRef: AnyObject?
+        guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef) == .success,
+              let children = childrenRef as? [AXUIElement] else { return nil }
+        for child in children {
+            if let found = searchAXForURL(element: child, depth: depth + 1) { return found }
+        }
+        return nil
     }
 
     private func checkIdle() -> Bool {
         let idleTime = CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: .mouseMoved)
         let keyIdle = CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: .keyDown)
-        return min(idleTime, keyIdle) > 30
+        // Use a fraction of the user's idle threshold for early detection
+        // (recordIsIdle still uses the full idleThreshold for the actual idle decision)
+        let earlyDetectThreshold = min(30, idleThreshold / 2)
+        return min(idleTime, keyIdle) > earlyDetectThreshold
     }
 
     private func isOnBattery() -> Bool {
@@ -374,7 +510,8 @@ final class ActivityTracker: ObservableObject {
 
         if category == .distraction || category == .entertainment {
             if distractionStartTime == nil { distractionStartTime = Date() }
-            let elapsed = Date().timeIntervalSince(distractionStartTime!)
+            guard let start = distractionStartTime else { return }
+            let elapsed = Date().timeIntervalSince(start)
             let threshold = TimeInterval(alertMinutes * 60)
             let canFire = lastDistractionAlertFired.map { Date().timeIntervalSince($0) > threshold } ?? true
             if elapsed >= threshold && canFire {
@@ -396,5 +533,18 @@ final class ActivityTracker: ObservableObject {
             let request = UNNotificationRequest(identifier: "distraction-\(Date().timeIntervalSince1970)", content: content, trigger: nil)
             UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
         }
+    }
+}
+
+// MARK: - _Once (file-level to avoid @MainActor isolation from outer class)
+/// Thread-safe one-shot flag — ensures a continuation is resumed exactly once.
+private final class _Once: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    /// Returns true the first time called; false on all subsequent calls.
+    func fulfill() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard !done else { return false }
+        done = true; return true
     }
 }

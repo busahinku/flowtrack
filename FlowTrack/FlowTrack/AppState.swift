@@ -22,24 +22,36 @@ final class AppState {
     var todaySwitchCount: Int { ActivityTracker.shared.todaySwitchCount }
     /// True when user has been in a productive app for >20 min continuously
     var isInDeepWork: Bool = false
+    /// Set to navigate the main window to a specific tab; cleared after consumption
+    var requestedTab: DashboardTab? = nil
 
     private var aiTimer: Timer?
     private var refreshTimer: Timer?
     let settings = AppSettings.shared
 
     // AI category cache: bundleID → category (prevents same app getting different categories)
-    // Capped at 500 entries to bound memory usage
+    // Capped at 500 entries to bound memory usage; evicts oldest entries first
     private var aiCategoryCache: [String: Category] = [:]
+    private var aiCategoryCacheOrder: [String] = []  // insertion order for LRU eviction
+
+    // Insertion-order tracking for sessionTitles/sessionSummaries to ensure deterministic LRU eviction
+    private var sessionTitleOrder: [String] = []
+    private var sessionSummaryOrder: [String] = []
 
     // Session rebuild cache — skip expensive rebuild when nothing changed
     private var cachedSessionDate: Date?
     private var cachedActivityCount: Int = -1
+
+    // Streak cache — only recompute when the date changes
+    private var cachedStreakDate: Date?
+    private var cachedStreakValue: Int = 0
 
     private init() {
         loadPersistedAIData()
         startTimers()
         Task {
             await reCategorizeWithRules()
+            await reCategorizePoisonedBrowserActivities()
             await refreshData()
             Database.shared.pruneOldActivitiesIfScheduled()
         }
@@ -75,7 +87,8 @@ final class AppState {
 
             guard force || count != cachedActivityCount || dateChanged else { return }
 
-            timeSlots = try Database.shared.sessionsForDate(selectedDate)
+            let gap = TimeInterval(settings.sessionGapSeconds)
+            timeSlots = try Database.shared.sessionsForDate(selectedDate, gapThreshold: gap)
             categoryStats = try Database.shared.categoryStatsForDate(selectedDate)
             cachedActivityCount = count
             cachedSessionDate = selectedDate
@@ -83,11 +96,20 @@ final class AppState {
             // Detect deep work sessions
             updateDeepWorkState()
 
-            // Refresh streak (cheap query, run async)
-            Task(priority: .background) {
-                if let days = try? Database.shared.focusStreakDays() {
-                    await MainActor.run { self.streakDays = days }
+            // Refresh streak — only recompute when the calendar day changes
+            let today = Calendar.current.startOfDay(for: Date())
+            if cachedStreakDate != today {
+                Task(priority: .background) {
+                    if let days = try? Database.shared.focusStreakDays() {
+                        await MainActor.run {
+                            self.streakDays = days
+                            self.cachedStreakDate = today
+                            self.cachedStreakValue = days
+                        }
+                    }
                 }
+            } else {
+                streakDays = cachedStreakValue
             }
 
             // Memory caps: keep only last 200 entries in AI caches
@@ -100,12 +122,14 @@ final class AppState {
     private func enforceAICacheLimit() {
         let limit = 200
         if sessionTitles.count > limit {
-            let keys = Array(sessionTitles.keys.prefix(sessionTitles.count - limit))
-            keys.forEach { sessionTitles.removeValue(forKey: $0) }
+            let toRemove = sessionTitleOrder.prefix(sessionTitles.count - limit)
+            toRemove.forEach { sessionTitles.removeValue(forKey: $0) }
+            sessionTitleOrder.removeFirst(toRemove.count)
         }
         if sessionSummaries.count > limit {
-            let keys = Array(sessionSummaries.keys.prefix(sessionSummaries.count - limit))
-            keys.forEach { sessionSummaries.removeValue(forKey: $0) }
+            let toRemove = sessionSummaryOrder.prefix(sessionSummaries.count - limit)
+            toRemove.forEach { sessionSummaries.removeValue(forKey: $0) }
+            sessionSummaryOrder.removeFirst(toRemove.count)
         }
     }
 
@@ -137,6 +161,38 @@ final class AppState {
             }
         } catch {
             log.error("Re-categorize error: \(error.localizedDescription)")
+        }
+    }
+
+    /// Re-categorize browser activities that have a URL using domain rules.
+    /// This fixes historically poisoned records where learned bundleID rules forced Work on all browser activity.
+    func reCategorizePoisonedBrowserActivities() async {
+        do {
+            let browserActivities = try Database.shared.browserActivitiesWithURL(limit: 3000)
+            guard !browserActivities.isEmpty else { return }
+
+            var updates: [(id: Int64, category: Category)] = []
+            for record in browserActivities {
+                guard let id = record.id, let url = record.url else { continue }
+                // Only update if domain rules give a confident answer
+                if let cat = RuleEngine.shared.categorize(
+                    appName: record.appName,
+                    bundleID: record.bundleID,
+                    windowTitle: record.windowTitle,
+                    url: url
+                ), cat != Category.uncategorized {
+                    if cat != record.category {
+                        updates.append((id: id, category: cat))
+                    }
+                }
+            }
+
+            if !updates.isEmpty {
+                try Database.shared.updateCategoriesBatch(updates)
+                log.info("Fixed \(updates.count) previously mis-categorized browser activities")
+            }
+        } catch {
+            log.error("Browser re-categorize error: \(error.localizedDescription)")
         }
     }
 
@@ -182,13 +238,14 @@ final class AppState {
                         }
                         return (slot.id, title)
                     } catch {
-                        self.log.error("Title generation failed for \(slot.id): \(error.localizedDescription)")
+                        self.log.error("Title generation failed for \(slot.id, privacy: .private): \(error.localizedDescription, privacy: .private)")
                         return nil
                     }
                 }
             }
             for await result in group {
                 if let (id, title) = result {
+                    if sessionTitles[id] == nil { sessionTitleOrder.append(id) }
                     sessionTitles[id] = title
                     try? Database.shared.saveSessionAI(sessionId: id, title: title, summary: sessionSummaries[id])
                 }
@@ -205,13 +262,14 @@ final class AppState {
                         }
                         return (slot.id, summary)
                     } catch {
-                        self.log.error("Summary generation failed for \(slot.id): \(error.localizedDescription)")
+                        self.log.error("Summary generation failed for \(slot.id, privacy: .private): \(error.localizedDescription, privacy: .private)")
                         return nil
                     }
                 }
             }
             for await result in group {
                 if let (id, summary) = result {
+                    if sessionSummaries[id] == nil { sessionSummaryOrder.append(id) }
                     sessionSummaries[id] = summary
                     try? Database.shared.saveSessionAI(sessionId: id, title: sessionTitles[id], summary: summary)
                 }
@@ -282,7 +340,7 @@ final class AppState {
                             allUpdates.append((id: id, category: category))
                             learnCategory(category, for: record)
                         } catch {
-                            log.warning("Individual categorization failed for \(record.appName): \(error.localizedDescription)")
+                            log.warning("Individual categorization failed for \(record.appName, privacy: .private): \(error.localizedDescription, privacy: .private)")
                         }
                     }
                 }
@@ -301,18 +359,22 @@ final class AppState {
     private func learnCategory(_ category: Category, for record: ActivityRecord) {
         guard category != .uncategorized, category != .idle else { return }
         let bid = record.bundleID.lowercased()
-        // Only cache for non-browser apps (browsers should be categorized per URL)
         let browserBIDs = ["safari", "chrome", "firefox", "arc", "brave", "edge", "opera", "vivaldi", "browser"]
         let isBrowser = browserBIDs.contains(where: { bid.contains($0) })
         if !isBrowser {
-            // Evict cache if it grows too large
+            // Non-browser: cache by bundleID
             if aiCategoryCache.count >= 500 {
-                // LRU eviction: drop oldest 50 entries instead of wiping the entire cache
-                aiCategoryCache.keys.prefix(50).forEach { aiCategoryCache.removeValue(forKey: $0) }
+                let evictCount = 50
+                let toRemove = aiCategoryCacheOrder.prefix(evictCount)
+                for key in toRemove { aiCategoryCache.removeValue(forKey: key) }
+                aiCategoryCacheOrder.removeFirst(min(evictCount, aiCategoryCacheOrder.count))
             }
             aiCategoryCache[bid] = category
-            RuleEngine.shared.learnFromAI(appName: record.appName, bundleID: record.bundleID, category: category)
+            aiCategoryCacheOrder.append(bid)
         }
+        // Always call learnFromAI — it handles browser vs non-browser internally,
+        // and for browsers it will learn a domain rule (if URL is available)
+        RuleEngine.shared.learnFromAI(appName: record.appName, bundleID: record.bundleID, category: category, url: record.url)
     }
 
     // MARK: - AI Fallback Chain
@@ -383,8 +445,14 @@ final class AppState {
         do {
             let data = try Database.shared.loadAllSessionAI()
             for item in data {
-                if let title = item.title { sessionTitles[item.sessionId] = title }
-                if let summary = item.summary { sessionSummaries[item.sessionId] = summary }
+                if let title = item.title {
+                    if sessionTitles[item.sessionId] == nil { sessionTitleOrder.append(item.sessionId) }
+                    sessionTitles[item.sessionId] = title
+                }
+                if let summary = item.summary {
+                    if sessionSummaries[item.sessionId] == nil { sessionSummaryOrder.append(item.sessionId) }
+                    sessionSummaries[item.sessionId] = summary
+                }
             }
         } catch {
             log.error("Failed to load persisted AI data: \(error.localizedDescription)")

@@ -53,7 +53,12 @@ final class SecureStore: @unchecked Sendable {
         for (provider, key) in dict where !key.isEmpty {
             keychain.set(key, forKey: provider)
         }
-        try? FileManager.default.removeItem(at: fileURL)
-        secureStoreLogger.info("Migrated API keys from plaintext file to Keychain")
+        do {
+            try FileManager.default.removeItem(at: fileURL)
+            secureStoreLogger.info("Migrated API keys from plaintext file to Keychain")
+        } catch {
+            // Log at fault level — the plaintext key file could not be deleted.
+            secureStoreLogger.fault("Could not delete legacy API key file after migration: \(error.localizedDescription, privacy: .private). Keys may remain on disk in plaintext.")
+        }
     }
 }

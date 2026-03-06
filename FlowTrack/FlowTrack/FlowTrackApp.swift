@@ -13,7 +13,7 @@ struct FlowTrackApp: App {
             MenuBarView()
                 .preferredColorScheme(AppSettings.shared.appTheme.colorScheme)
         } label: {
-            MenuBarIconView(size: 18)
+            MenuBarLabelView()
         }
         .menuBarExtraStyle(.window)
 
@@ -26,6 +26,7 @@ struct FlowTrackApp: App {
                 }
                 .onAppear {
                     ActivityTracker.shared.startTracking()
+                    AppBlockerMonitor.shared.start()
                     // Capture openWindow in delegate so dock-click can reopen after close
                     appDelegate.reopenDashboard = { openWindow(id: "dashboard") }
                 }
@@ -51,6 +52,8 @@ class FlowTrackAppDelegate: NSObject, NSApplicationDelegate {
         let showDock = AppSettings.shared.showDockIcon
         NSApp.setActivationPolicy(showDock ? .regular : .accessory)
         UserDefaults.standard.removeObject(forKey: "reallyQuit")
+        // Start activity tracking immediately on launch
+        ActivityTracker.shared.startTracking()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

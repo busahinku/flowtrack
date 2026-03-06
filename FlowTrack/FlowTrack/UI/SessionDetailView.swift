@@ -64,7 +64,7 @@ struct SessionDetailView: View {
                     Button { dismiss() } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.secondaryText)
                             .frame(width: 24, height: 24)
                             .background(.secondary.opacity(0.1), in: Circle())
                     }
@@ -75,14 +75,14 @@ struct SessionDetailView: View {
                 HStack(spacing: 8) {
                     Label(Theme.formatTimeRange(slot.startTime, slot.endTime), systemImage: "clock")
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryText)
 
                     Text("·")
                         .foregroundStyle(.tertiary)
 
                     Text(Theme.formatDuration(slot.duration))
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryText)
                 }
             }
             .padding(.horizontal, 16)
@@ -100,23 +100,23 @@ struct SessionDetailView: View {
             HStack(spacing: 5) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.purple)
+                    .foregroundStyle(theme.infoColor)
                 Text("AI Summary")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.secondaryText)
             }
             Text(text)
                 .font(.system(size: 13))
-                .foregroundStyle(.primary.opacity(0.85))
+                .foregroundStyle(theme.primaryText.opacity(0.85))
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.purple.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+        .background(theme.infoColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.purple.opacity(0.12), lineWidth: 1)
+                .stroke(theme.infoColor.opacity(0.12), lineWidth: 1)
         )
     }
 
@@ -125,7 +125,7 @@ struct SessionDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Apps Used")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.secondaryText)
                 .padding(.horizontal, 12)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
@@ -148,7 +148,7 @@ struct SessionDetailView: View {
         .background(theme.cardBg, in: RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(.primary.opacity(0.06), lineWidth: 1)
+                .stroke(theme.dividerColor.opacity(0.06), lineWidth: 1)
         )
     }
 }
@@ -159,6 +159,7 @@ struct AppDetailRow: View {
     var totalDuration: TimeInterval = 0
     var catColor: Color = .blue
     @State private var expanded = false
+    private var theme: AppTheme { AppSettings.shared.appTheme }
 
     private var fraction: Double {
         guard totalDuration > 0 else { return 0 }
@@ -181,7 +182,7 @@ struct AppDetailRow: View {
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
                                 RoundedRectangle(cornerRadius: 2)
-                                    .fill(.primary.opacity(0.06))
+                                    .fill(theme.dividerColor.opacity(0.06))
                                 RoundedRectangle(cornerRadius: 2)
                                     .fill(catColor.opacity(0.5))
                                     .frame(width: geo.size.width * fraction)
@@ -194,7 +195,7 @@ struct AppDetailRow: View {
 
                     Text(Theme.formatDuration(activity.duration))
                         .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryText)
                         .monospacedDigit()
 
                     Image(systemName: "chevron.right")
@@ -210,13 +211,13 @@ struct AppDetailRow: View {
                     if !activity.title.isEmpty {
                         Text(activity.title)
                             .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.secondaryText)
                             .lineLimit(2)
                     }
                     if let url = activity.url {
                         Text(url)
                             .font(.system(size: 11))
-                            .foregroundStyle(.blue.opacity(0.8))
+                            .foregroundStyle(theme.infoColor.opacity(0.8))
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }

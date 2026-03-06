@@ -23,6 +23,18 @@ struct CLIProvider: AIProvider, Sendable {
         return try await runCLI(prompt: prompt).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    func chat(messages: [ChatTurn], systemPrompt: String) async throws -> String {
+        // Flatten conversation + system context into a single prompt for CLI tools
+        var parts: [String] = [systemPrompt, "---"]
+        for turn in messages.suffix(10) {  // only last 10 turns for CLI (token-safe)
+            let prefix = turn.role == "user" ? "User" : "Assistant"
+            parts.append("\(prefix): \(turn.content)")
+        }
+        parts.append("Assistant:")
+        return try await runCLI(prompt: parts.joined(separator: "\n\n"))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     func checkHealth() async throws -> Bool {
         guard findCLIPath() != nil else {
             throw AIError.cliNotFound(command)
@@ -94,10 +106,14 @@ struct CLIProvider: AIProvider, Sendable {
             process.executableURL = URL(fileURLWithPath: cliPath)
             process.environment = buildEnvironment()
 
+            // Use stdin to pass prompt — avoids exposing user data in `ps` output
+            let stdinPipe = Pipe()
+            process.standardInput = stdinPipe
+
             if command == "claude" {
-                process.arguments = ["-p", prompt, "--model", model, "--output-format", "text"]
+                process.arguments = ["--model", model, "--output-format", "text"]
             } else {
-                process.arguments = ["-q", prompt, "--model", model]
+                process.arguments = ["--model", model]
             }
 
             let stdoutPipe = Pipe()
@@ -112,7 +128,14 @@ struct CLIProvider: AIProvider, Sendable {
                 return
             }
 
-            // Terminate the process if it hasn't finished in 30 seconds
+            // Write prompt to stdin and close to signal EOF
+            if let data = prompt.data(using: .utf8) {
+                stdinPipe.fileHandleForWriting.write(data)
+            }
+            stdinPipe.fileHandleForWriting.closeFile()
+
+            // Use terminationHandler to avoid blocking a cooperative thread pool thread.
+            // waitUntilExit() would block for up to 30s — terminationHandler is event-driven.
             var didTimeout = false
             let timeoutItem = DispatchWorkItem {
                 if process.isRunning {
@@ -121,31 +144,29 @@ struct CLIProvider: AIProvider, Sendable {
                 }
             }
             DispatchQueue.global().asyncAfter(deadline: .now() + 30, execute: timeoutItem)
-            process.waitUntilExit()
-            timeoutItem.cancel()
 
-            let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-            let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-            let stdout = String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let stderr = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            process.terminationHandler = { _ in
+                timeoutItem.cancel()
+                let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                let stdout = String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let stderr = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
-            if didTimeout {
-                continuation.resume(throwing: AIError.cliError("\(command) timed out after 30s"))
-                return
+                if didTimeout {
+                    continuation.resume(throwing: AIError.cliError("\(self.command) timed out after 30s"))
+                    return
+                }
+                if process.terminationStatus != 0 {
+                    let errorMsg = !stderr.isEmpty ? stderr : (!stdout.isEmpty ? stdout : "CLI exited with code \(process.terminationStatus)")
+                    continuation.resume(throwing: AIError.cliError(errorMsg))
+                    return
+                }
+                if stdout.isEmpty {
+                    continuation.resume(throwing: AIError.invalidResponse("Empty CLI response"))
+                    return
+                }
+                continuation.resume(returning: stdout)
             }
-
-            if process.terminationStatus != 0 {
-                let errorMsg = !stderr.isEmpty ? stderr : (!stdout.isEmpty ? stdout : "CLI exited with code \(process.terminationStatus)")
-                continuation.resume(throwing: AIError.cliError(errorMsg))
-                return
-            }
-
-            if stdout.isEmpty {
-                continuation.resume(throwing: AIError.invalidResponse("Empty CLI response"))
-                return
-            }
-
-            continuation.resume(returning: stdout)
         }
     }
 }

@@ -41,6 +41,7 @@ final class CategoryManager: @unchecked Sendable {
 
     private var definitions: [CategoryDefinition]
     private let fileURL: URL
+    private let lock = NSLock()
 
     private init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -55,22 +56,25 @@ final class CategoryManager: @unchecked Sendable {
             migrateDefaults()
         } else {
             self.definitions = Self.defaultDefinitions
-            save()
+            saveLocked()  // init is single-threaded, no lock needed
         }
     }
 
     private func migrateDefaults() {
+        lock.lock()
+        defer { lock.unlock() }
+
         var changed = false
         let defaults = Dictionary(uniqueKeysWithValues: Self.defaultDefinitions.map { ($0.name, $0) })
 
-        // Remap removed categories to their new homes
+        // Remap removed categories to their new homes and update DB records
         let remapped = ["Communication": "Work", "Learning": "Work", "Health": "Personal", "Productivity": "Work"]
         for (old, new) in remapped {
             if let idx = definitions.firstIndex(where: { $0.name == old }) {
                 definitions.remove(at: idx)
                 changed = true
+                Database.shared.remapCategory(from: old, to: new)
             }
-            _ = new // suppress unused warning
         }
 
         // Add default categories that don't exist yet
@@ -87,7 +91,7 @@ final class CategoryManager: @unchecked Sendable {
                 changed = true
             }
         }
-        if changed { save() }
+        if changed { saveLocked() }
     }
 
     static let defaultDefinitions: [CategoryDefinition] = [
@@ -107,14 +111,22 @@ final class CategoryManager: @unchecked Sendable {
                            aiPrompt: "Activity that hasn't been categorized yet — AI should attempt to classify into one of the other categories"),
     ]
 
-    var allCategories: [CategoryDefinition] { definitions }
+    var allCategories: [CategoryDefinition] {
+        lock.lock()
+        defer { lock.unlock() }
+        return definitions
+    }
 
     var selectableCategories: [CategoryDefinition] {
-        definitions.filter { !$0.isSystem }
+        lock.lock()
+        defer { lock.unlock() }
+        return definitions.filter { !$0.isSystem }
     }
 
     func definition(for category: Category) -> CategoryDefinition? {
-        definitions.first { $0.name == category.rawValue }
+        lock.lock()
+        defer { lock.unlock() }
+        return definitions.first { $0.name == category.rawValue }
     }
 
     func color(for category: Category) -> Color {
@@ -122,23 +134,40 @@ final class CategoryManager: @unchecked Sendable {
     }
 
     func addCategory(_ def: CategoryDefinition) {
+        lock.lock()
         definitions.append(def)
-        save()
+        let snapshot = definitions
+        lock.unlock()
+        saveSnapshot(snapshot)
     }
 
     func updateCategory(_ def: CategoryDefinition) {
+        lock.lock()
         if let idx = definitions.firstIndex(where: { $0.name == def.name }) {
             definitions[idx] = def
-            save()
         }
+        let snapshot = definitions
+        lock.unlock()
+        saveSnapshot(snapshot)
     }
 
     func removeCategory(named name: String) {
+        lock.lock()
         definitions.removeAll { $0.name == name && !$0.isSystem }
-        save()
+        let snapshot = definitions
+        lock.unlock()
+        saveSnapshot(snapshot)
     }
 
-    private func save() {
+    /// Writes a snapshot of definitions to disk — called outside the lock.
+    private func saveSnapshot(_ snapshot: [CategoryDefinition]) {
+        if let data = try? JSONEncoder().encode(snapshot) {
+            try? data.write(to: fileURL, options: .atomic)
+        }
+    }
+
+    /// Must be called while lock is held (only used during init where single-threaded)
+    private func saveLocked() {
         if let data = try? JSONEncoder().encode(definitions) {
             try? data.write(to: fileURL, options: .atomic)
         }
