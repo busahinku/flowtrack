@@ -247,57 +247,57 @@
     {
         "matchType": "appName",
         "pattern": "Figma",
-        "category": "Creative"
+        "category": "Work"
     },
     {
         "matchType": "appName",
         "pattern": "Sketch",
-        "category": "Creative"
+        "category": "Work"
     },
     {
         "matchType": "appName",
         "pattern": "Photoshop",
-        "category": "Creative"
+        "category": "Work"
     },
     {
         "matchType": "appName",
         "pattern": "Illustrator",
-        "category": "Creative"
+        "category": "Work"
     },
     {
         "matchType": "appName",
         "pattern": "Canva",
-        "category": "Creative"
+        "category": "Work"
     },
     {
         "matchType": "appName",
         "pattern": "Blender",
-        "category": "Creative"
+        "category": "Work"
     },
     {
         "matchType": "appName",
         "pattern": "Final Cut",
-        "category": "Creative"
+        "category": "Work"
     },
     {
         "matchType": "appName",
         "pattern": "Logic Pro",
-        "category": "Creative"
+        "category": "Work"
     },
     {
         "matchType": "appName",
         "pattern": "GarageBand",
-        "category": "Creative"
+        "category": "Work"
     },
     {
         "matchType": "domain",
         "pattern": "figma.com",
-        "category": "Creative"
+        "category": "Work"
     },
     {
         "matchType": "domain",
         "pattern": "canva.com",
-        "category": "Creative"
+        "category": "Work"
     },
     {
         "matchType": "appName",
@@ -437,117 +437,117 @@
     {
         "matchType": "domain",
         "pattern": "youtube.com",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "netflix.com",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "twitch.tv",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "spotify.com",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "appName",
         "pattern": "Spotify",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "appName",
         "pattern": "Music",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "appName",
         "pattern": "TV",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "appName",
         "pattern": "Podcasts",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "appName",
         "pattern": "Finder",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "appName",
         "pattern": "System Settings",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "appName",
         "pattern": "System Preferences",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "appName",
         "pattern": "1Password",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "appName",
         "pattern": "Bitwarden",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "appName",
         "pattern": "CleanMyMac",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "appName",
         "pattern": "App Store",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "appName",
         "pattern": "Preview",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "appName",
         "pattern": "Calculator",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "amazon.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "google.com/maps",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "maps.google.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "appName",
         "pattern": "Health",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "appName",
         "pattern": "Fitness",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "strava.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
@@ -882,77 +882,77 @@
     {
         "matchType": "domain",
         "pattern": "disneyplus.com",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "primevideo.com",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "hulu.com",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "hbomax.com",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "max.com",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "peacocktv.com",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "crunchyroll.com",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "soundcloud.com",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "deezer.com",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "music.apple.com",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "pandora.com",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "steamcommunity.com",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "store.steampowered.com",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "epicgames.com",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "itch.io",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
@@ -1032,202 +1032,202 @@
     {
         "matchType": "domain",
         "pattern": "google.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "search.google.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "apple.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "icloud.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "paypal.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "venmo.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "cashapp.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "bank",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "chase.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "wellsfargo.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "bankofamerica.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "airbnb.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "booking.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "expedia.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "tripadvisor.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "weather.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "darksky.net",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "yelp.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "doordash.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "ubereats.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "grubhub.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "ebay.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "etsy.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "shopify.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "walmart.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "target.com",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "wikipedia.org",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "domain",
         "pattern": "wikimedia.org",
-        "category": "Personal"
+        "category": "Distraction"
     },
     {
         "matchType": "windowTitle",
         "pattern": "- YouTube",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "windowTitle",
         "pattern": "| YouTube",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "windowTitle",
         "pattern": "| Netflix",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "windowTitle",
         "pattern": "on Netflix",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "windowTitle",
         "pattern": "| Disney+",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "windowTitle",
         "pattern": "| Hulu",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "windowTitle",
         "pattern": "| HBO Max",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "windowTitle",
         "pattern": "Prime Video",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "windowTitle",
         "pattern": "| Crunchyroll",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "windowTitle",
         "pattern": "- Twitch",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "windowTitle",
         "pattern": "| Twitch",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "windowTitle",
         "pattern": "Spotify - Web Player",
-        "category": "Entertainment"
+        "category": "Distraction"
     },
     {
         "matchType": "windowTitle",

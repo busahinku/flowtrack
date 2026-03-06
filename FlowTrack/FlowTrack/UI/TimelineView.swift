@@ -15,10 +15,11 @@ private enum TL {
 
 // MARK: - Card layout result
 private struct CardLayout: Identifiable {
+    let index: Int      // unique index within the layout array
     let slot: TimeSlot
     let col: Int        // 0-based column index within overlap group
     let totalCols: Int  // total columns in this overlap group
-    var id: String { slot.id }
+    var id: String { "\(slot.id)-\(index)" }
 }
 
 // MARK: - Google-Calendar-style layout engine
@@ -83,6 +84,7 @@ private enum CalendarLayoutEngine {
 
         return assigned.enumerated().map { i, a in
             CardLayout(
+                index: i,
                 slot: a.slot,
                 col: a.col,
                 totalCols: (groupMaxCol[groupID[i], default: 0]) + 1
@@ -189,7 +191,7 @@ struct TimelineView: View {
             hourGrid(width: width, totalH: totalH)
 
             ForEach(layouts) { item in
-                let colW = (usable - CGFloat(item.totalCols - 1) * TL.colGap) / CGFloat(item.totalCols)
+                let colW = max(1, (usable - CGFloat(item.totalCols - 1) * TL.colGap) / CGFloat(item.totalCols))
                 let xOff = TL.labelWidth + TL.cardLeading + CGFloat(item.col) * (colW + TL.colGap)
                 let yOff = timeY(item.slot.startTime)
                 let cardH = max(slotH(item.slot), TL.minHeight)
@@ -300,7 +302,7 @@ struct TimelineView: View {
     }
 
     private func slotH(_ slot: TimeSlot) -> CGFloat {
-        CGFloat(slot.endTime.timeIntervalSince(slot.startTime) / 3600.0) * TL.hourHeight
+        max(0, CGFloat(slot.endTime.timeIntervalSince(slot.startTime) / 3600.0) * TL.hourHeight)
     }
 
     private func hourLabel(_ h: Int) -> String {
@@ -354,7 +356,7 @@ struct SessionCardView: View {
                         .font(.system(size: 10, weight: .semibold))
                         .lineLimit(1)
                     Spacer(minLength: 0)
-                    Text(Theme.formatDuration(slot.duration))
+                    Text(Theme.formatDuration(slot.activeDuration))
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(catColor.opacity(0.9))
                 }
@@ -385,7 +387,7 @@ struct SessionCardView: View {
                                 .foregroundStyle(.tertiary)
                         }
                         Spacer(minLength: 0)
-                        Text(Theme.formatDuration(slot.duration))
+                        Text(Theme.formatDuration(slot.activeDuration))
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(catColor.opacity(0.9))
                     }

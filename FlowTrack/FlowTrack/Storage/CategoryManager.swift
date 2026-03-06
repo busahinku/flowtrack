@@ -68,7 +68,9 @@ final class CategoryManager: @unchecked Sendable {
         let defaults = Dictionary(uniqueKeysWithValues: Self.defaultDefinitions.map { ($0.name, $0) })
 
         // Remap removed categories to their new homes and update DB records
-        let remapped = ["Communication": "Work", "Learning": "Work", "Health": "Personal", "Productivity": "Work"]
+        let remapped = ["Communication": "Work", "Learning": "Work", "Health": "Distraction",
+                        "Productivity": "Work", "Creative": "Work",
+                        "Personal": "Distraction", "Entertainment": "Distraction"]
         for (old, new) in remapped {
             if let idx = definitions.firstIndex(where: { $0.name == old }) {
                 definitions.remove(at: idx)
@@ -96,19 +98,13 @@ final class CategoryManager: @unchecked Sendable {
 
     static let defaultDefinitions: [CategoryDefinition] = [
         CategoryDefinition(name: "Work", colorHex: "#3B82F6", icon: "briefcase.fill", isProductive: true, isSystem: false,
-                           aiPrompt: "Coding, software development, IDEs, terminals, Git, programming tools, DevOps, databases, API testing, email (Mail, Outlook, Gmail), work communication (Slack, Teams, Zoom, Discord, Messages, chat), online learning, tutorials, documentation, courses, Stack Overflow, tech articles, planning, notes, calendars, task management, project management, spreadsheets, Notion, Obsidian"),
-        CategoryDefinition(name: "Creative", colorHex: "#EC4899", icon: "paintbrush.fill", isProductive: true, isSystem: false,
-                           aiPrompt: "Design tools, Figma, Photoshop, illustration, video editing, music production, creative writing, 3D modeling"),
-        CategoryDefinition(name: "Personal", colorHex: "#22C55E", icon: "person.fill", isProductive: false, isSystem: false,
-                           aiPrompt: "Personal activities, banking, shopping, food delivery, personal finance, travel booking, fitness, health tracking, meditation, system settings, Finder"),
+                           aiPrompt: "Coding, software development, IDEs, terminals, Git, programming tools, DevOps, databases, email, work communication (Slack, Teams, Zoom, Discord), online learning, tutorials, documentation, courses, Stack Overflow, planning, notes, calendars, task management, project management, spreadsheets, Notion, Obsidian, design tools (Figma, Photoshop), creative work, video editing, music production"),
         CategoryDefinition(name: "Distraction", colorHex: "#EF4444", icon: "eye.slash.fill", isProductive: false, isSystem: false,
-                           aiPrompt: "Social media scrolling, news feeds, Reddit, Twitter/X, TikTok, Instagram, YouTube shorts, memes, clickbait, non-work browsing"),
-        CategoryDefinition(name: "Entertainment", colorHex: "#F97316", icon: "play.circle.fill", isProductive: false, isSystem: false,
-                           aiPrompt: "Streaming video, Netflix, movies, TV shows, gaming, music listening, Spotify, podcasts, leisure content"),
+                           aiPrompt: "Social media (Reddit, Twitter/X, TikTok, Instagram, LinkedIn), news feeds, YouTube (non-tutorial), streaming video (Netflix, Hulu, Disney+), gaming, shopping, banking, personal finance, travel booking, music listening, podcasts, Finder, system preferences, any non-work activity"),
         CategoryDefinition(name: "Idle", colorHex: "#9CA3AF", icon: "moon.fill", isProductive: false, isSystem: true,
                            aiPrompt: "Computer is idle, screen locked, screensaver active, no user input detected"),
         CategoryDefinition(name: "Uncategorized", colorHex: "#6B7280", icon: "questionmark.circle", isProductive: false, isSystem: true,
-                           aiPrompt: "Activity that hasn't been categorized yet — AI should attempt to classify into one of the other categories"),
+                           aiPrompt: "Activity that hasn't been categorized yet — classify as Work or Distraction"),
     ]
 
     var allCategories: [CategoryDefinition] {

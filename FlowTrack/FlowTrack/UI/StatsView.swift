@@ -904,7 +904,7 @@ struct StatsView: View {
                         .background(Theme.color(for: slot.category).opacity(0.12))
                         .cornerRadius(6)
 
-                        Text(Theme.formatDuration(slot.duration))
+                        Text(Theme.formatDuration(slot.activeDuration))
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(theme.secondaryText)
                             .frame(width: 50, alignment: .trailing)

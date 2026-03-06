@@ -124,58 +124,94 @@ final class Database: Sendable {
     }
 
     // MARK: - Session Building (shared logic)
-    // Sessions are split on idle gaps > gapThreshold OR when the category changes.
-    // Category-based splitting produces sessions with a single accurate category.
+    // Three-phase pipeline:
+    //   1. Split on idle gaps (> gapThreshold) into raw chunks
+    //   2. Within each chunk, split on sustained category changes (>= minCategoryDuration)
+    //      — quick app switches (< 60s) are absorbed into the surrounding session
+    //   3. Merge adjacent same-category sessions back together
     private func buildSessions(from activities: [ActivityRecord], gapThreshold: TimeInterval = 300) -> [TimeSlot] {
         guard !activities.isEmpty else { return [] }
+        let minCategoryDuration: TimeInterval = 60 // seconds
 
-        var sessions: [TimeSlot] = []
-        var currentActivities: [ActivityRecord] = []
-        var sessionStart: Date = activities[0].timestamp
-        var currentSessionCategory: Category = activities[0].category
+        // Phase 1: Group activities by idle gaps
+        var gapGroups: [[ActivityRecord]] = []
+        var currentGroup: [ActivityRecord] = [activities[0]]
 
-        for record in activities {
-            if let lastActivity = currentActivities.last {
-                let lastEnd = lastActivity.timestamp.addingTimeInterval(lastActivity.duration)
-                let gap = record.timestamp.timeIntervalSince(lastEnd)
-                let categoryChanged = record.category != currentSessionCategory
-                if gap > gapThreshold || categoryChanged {
-                    // Flush current session
-                    let endTime = lastEnd
-                    let category = dominantCategory(in: currentActivities)
-                    let summaries = buildSummaries(from: currentActivities)
-                    sessions.append(TimeSlot(
-                        id: "\(Int(sessionStart.timeIntervalSince1970))-\(Int(endTime.timeIntervalSince1970))",
-                        startTime: sessionStart,
-                        endTime: endTime,
-                        category: category,
-                        activities: summaries,
-                        isIdle: false
-                    ))
-                    currentActivities = []
-                    sessionStart = record.timestamp
-                    currentSessionCategory = record.category
-                }
+        for i in 1..<activities.count {
+            let prevEnd = activities[i - 1].timestamp.addingTimeInterval(activities[i - 1].duration)
+            let gap = activities[i].timestamp.timeIntervalSince(prevEnd)
+            if gap > gapThreshold {
+                gapGroups.append(currentGroup)
+                currentGroup = [activities[i]]
+            } else {
+                currentGroup.append(activities[i])
             }
-            currentActivities.append(record)
+        }
+        gapGroups.append(currentGroup)
+
+        // Phase 2: Within each gap group, split on sustained category changes
+        var sessions: [TimeSlot] = []
+        for group in gapGroups {
+            sessions.append(contentsOf: splitOnSustainedCategory(group, minDuration: minCategoryDuration))
         }
 
-        // Final session
-        if !currentActivities.isEmpty {
-            let endTime = currentActivities.last.map { $0.timestamp.addingTimeInterval($0.duration) } ?? sessionStart
-            let category = dominantCategory(in: currentActivities)
-            let summaries = buildSummaries(from: currentActivities)
-            sessions.append(TimeSlot(
-                id: "\(Int(sessionStart.timeIntervalSince1970))-\(Int(endTime.timeIntervalSince1970))",
-                startTime: sessionStart,
-                endTime: endTime,
+        // Phase 3: Merge adjacent same-category sessions
+        return mergeAdjacentSameCategory(sessions)
+    }
+
+    /// Splits a group of activities into sessions based on sustained category runs.
+    /// Runs shorter than `minDuration` are absorbed into the previous session.
+    private func splitOnSustainedCategory(_ activities: [ActivityRecord], minDuration: TimeInterval) -> [TimeSlot] {
+        guard !activities.isEmpty else { return [] }
+
+        // Build consecutive runs of the same category
+        var runs: [(category: Category, activities: [ActivityRecord], duration: TimeInterval)] = []
+        var curCat = activities[0].category
+        var curActs: [ActivityRecord] = [activities[0]]
+        var curDur: TimeInterval = activities[0].duration
+
+        for i in 1..<activities.count {
+            let a = activities[i]
+            if a.category == curCat {
+                curActs.append(a)
+                curDur += a.duration
+            } else {
+                runs.append((curCat, curActs, curDur))
+                curCat = a.category
+                curActs = [a]
+                curDur = a.duration
+            }
+        }
+        runs.append((curCat, curActs, curDur))
+
+        // Merge short runs (< minDuration) into the previous run
+        var merged: [(category: Category, activities: [ActivityRecord], duration: TimeInterval)] = []
+        for run in runs {
+            if run.duration < minDuration && !merged.isEmpty {
+                // Absorb into previous — keeps previous category (dominant recalculated later)
+                merged[merged.count - 1].activities += run.activities
+                merged[merged.count - 1].duration += run.duration
+            } else {
+                merged.append(run)
+            }
+        }
+
+        // Convert each merged run into a TimeSlot
+        return merged.map { run in
+            let start = run.activities.first!.timestamp
+            let last = run.activities.last!
+            let end = last.timestamp.addingTimeInterval(last.duration)
+            let category = dominantCategory(in: run.activities)
+            let summaries = buildSummaries(from: run.activities)
+            return TimeSlot(
+                id: "\(Int(start.timeIntervalSince1970))-\(Int(end.timeIntervalSince1970))",
+                startTime: start,
+                endTime: end,
                 category: category,
                 activities: summaries,
                 isIdle: false
-            ))
+            )
         }
-
-        return sessions
     }
 
     /// Returns the category with the highest total activity duration in a set of records.

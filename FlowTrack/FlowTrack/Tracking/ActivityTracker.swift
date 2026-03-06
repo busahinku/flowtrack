@@ -350,6 +350,7 @@ final class ActivityTracker: ObservableObject {
     }
 
     private func writeRecord(appName: String, bundleID: String, title: String, url: String?, category: Category, isIdle: Bool, duration: TimeInterval) {
+        guard duration >= 60 || isIdle else { return }  // skip sub-minute non-idle noise
         let record = ActivityRecord(
             timestamp: Date(), appName: appName, bundleID: bundleID,
             windowTitle: title, url: url, category: category,
@@ -508,7 +509,7 @@ final class ActivityTracker: ObservableObject {
         let alertMinutes = AppSettings.shared.distractionAlertMinutes
         guard alertMinutes > 0 else { distractionStartTime = nil; return }
 
-        if category == .distraction || category == .entertainment {
+        if category == .distraction {
             if distractionStartTime == nil { distractionStartTime = Date() }
             guard let start = distractionStartTime else { return }
             let elapsed = Date().timeIntervalSince(start)

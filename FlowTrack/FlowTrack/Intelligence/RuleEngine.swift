@@ -158,10 +158,10 @@ final class RuleEngine: @unchecked Sendable {
             if ["dt.xcode", "instruments", "filesmerge", "accessibilityinspector", "simulator", "dt.instruments"].contains(where: { suffix.contains($0) }) { return .work }
             if ["mail", "messages", "facetime"].contains(where: { suffix.hasPrefix($0) }) { return .work }
             if ["notes", "reminders", "calendar", "pages", "numbers", "keynote", "iwork", "shortcuts", "freeform"].contains(where: { suffix.hasPrefix($0) }) { return .work }
-            if ["garageband", "imovie", "photos", "preview"].contains(where: { suffix.hasPrefix($0) }) { return .creative }
-            if ["music", "tv", "podcasts", "books"].contains(where: { suffix.hasPrefix($0) }) { return .entertainment }
-            if suffix.hasPrefix("maps") { return .personal }
-            return .personal
+            if ["garageband", "imovie", "photos", "preview"].contains(where: { suffix.hasPrefix($0) }) { return .work }
+            if ["music", "tv", "podcasts", "books"].contains(where: { suffix.hasPrefix($0) }) { return .distraction }
+            if suffix.hasPrefix("maps") { return .distraction }
+            return .distraction
         }
 
         // ── 3. JetBrains IDEs ──────────────────────────────────────────────────────────────────
@@ -179,9 +179,9 @@ final class RuleEngine: @unchecked Sendable {
         if bid.hasPrefix("com.adobe.") {
             if bid.contains("lightroom") || bid.contains("photoshop") || bid.contains("premiere") ||
                bid.contains("illustrator") || bid.contains("indesign") || bid.contains("aftereffects") ||
-               bid.contains("xd") { return .creative }
+               bid.contains("xd") { return .work }
             if bid.contains("acrobat") || bid.contains("reader") { return .work }
-            return .creative
+            return .work
         }
 
         // ── 6. Electron / known productivity apps by name ────────────────────────────────────
@@ -203,11 +203,11 @@ final class RuleEngine: @unchecked Sendable {
         let entertainmentAppNames = ["vlc", "iina", "infuse", "jellyfin", "plex", "kodi", "stremio",
                                      "steamlink", "openemu", "retroarch", "dolphin emulator",
                                      "spotify", "vox", "cog", "swinsian", "doppler", "capo"]
-        if entertainmentAppNames.contains(where: { name.contains($0) }) { return .entertainment }
+        if entertainmentAppNames.contains(where: { name.contains($0) }) { return .distraction }
 
         let creativeAppNames = ["procreate", "pixelmator", "affinity", "canva", "sketch",
                                 "principle", "protopie", "rive", "hype", "webflow"]
-        if creativeAppNames.contains(where: { name.contains($0) }) { return .creative }
+        if creativeAppNames.contains(where: { name.contains($0) }) { return .work }
 
         // ── 7. Development tools by bundle ID fragments ───────────────────────────────────────
         let devBIDs = ["terminal", "iterm", "warp", "ghostty", "alacritty", "kitty", "hyper",
@@ -243,11 +243,11 @@ final class RuleEngine: @unchecked Sendable {
             if title.contains("- youtube") || title.contains("| youtube") {
                 if learningIndicators.contains(where: { title.contains($0) }) { return .learning }
             }
-            return .entertainment
+            return .distraction
         }
         // Streaming services mentioned anywhere in title
         let streamingApps = ["netflix", "disney+", "disneyplus", "hulu", "hbomax", " hbo ", "prime video", "crunchyroll"]
-        if streamingApps.contains(where: { title.contains($0) }) { return .entertainment }
+        if streamingApps.contains(where: { title.contains($0) }) { return .distraction }
 
         // ── Learning / Educational content ────────────────────────────────────────────────────
         let learningDomains = ["- udemy", "| udemy", "- coursera", "| coursera",

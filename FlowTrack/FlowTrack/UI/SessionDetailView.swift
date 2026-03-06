@@ -80,7 +80,7 @@ struct SessionDetailView: View {
                     Text("·")
                         .foregroundStyle(.tertiary)
 
-                    Text(Theme.formatDuration(slot.duration))
+                    Text(Theme.formatDuration(slot.activeDuration))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(theme.secondaryText)
                 }
@@ -138,7 +138,7 @@ struct SessionDetailView: View {
                 }
                 AppDetailRow(
                     activity: activity,
-                    totalDuration: slot.duration,
+                    totalDuration: slot.activeDuration,
                     catColor: catColor
                 )
                 .padding(.horizontal, 12)

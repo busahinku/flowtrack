@@ -116,13 +116,9 @@ struct AIPromptBuilder {
         var prompt = """
         You are a productivity tracker AI. Categorize this computer activity into EXACTLY one category.
 
-        Categories and what they mean:
-        - Work: coding, writing code, terminal/shell, professional tools, databases, APIs, project management (Jira/Linear/Notion for work), documentation, business communication (Slack, Teams, email), cloud consoles, deployment tools
-        - Distraction: social media (LinkedIn, Twitter, Instagram, Reddit, Facebook), news sites (HackerNews, TechCrunch, CNN, BBC), forums, random browsing, entertainment browsing
-        - Entertainment: video streaming (Netflix, YouTube for fun, Disney+, Twitch), music (Spotify, Apple Music), gaming, podcasts
-        - Personal: banking, shopping, maps, travel, food ordering, personal email, health apps, personal errands
-        - Creative: design tools (Figma, Sketch, Photoshop, Illustrator), video editing, music production, art creation
-        - Learning: educational courses (Coursera, Udemy, Khan Academy), studying, reading documentation to learn, tutorials
+        Categories:
+        - Work: coding, writing code, terminal/shell, IDEs, professional tools, databases, APIs, project management, documentation, business communication (Slack, Teams, email), cloud consoles, deployment tools, design tools (Figma, Photoshop), video editing, music production, creative work, online learning, tutorials, educational content
+        - Distraction: social media (LinkedIn, Twitter, Instagram, Reddit, Facebook, TikTok), news sites, forums, random browsing, streaming video (Netflix, YouTube entertainment, Disney+), gaming, music streaming, shopping, banking, maps, travel, food ordering, personal apps, system settings, Finder
         - Uncategorized: cannot determine from available information
 
         Activity to categorize:
@@ -130,7 +126,7 @@ struct AIPromptBuilder {
         Window Title: \(windowTitle)
         """
         if let url = url { prompt += "\nURL/Domain: \(domainOnly(from: url))" }
-        prompt += "\n\nRespond with ONLY the category name, nothing else."
+        prompt += "\n\nRespond with ONLY the category name (Work, Distraction, or Uncategorized), nothing else."
         return prompt
     }
 
@@ -139,12 +135,8 @@ struct AIPromptBuilder {
         You are a productivity tracker AI. Categorize each computer activity into EXACTLY one category.
 
         Categories:
-        - Work: coding, professional tools, project management, business communication, cloud/deployment
-        - Distraction: social media, news sites, forums, random browsing
-        - Entertainment: video/music streaming, gaming
-        - Personal: banking, shopping, maps, food delivery, personal errands
-        - Creative: design, video editing, music production, art tools
-        - Learning: educational courses, studying, tutorials
+        - Work: coding, professional tools, project management, business communication, cloud/deployment, design tools, creative work, learning/tutorials
+        - Distraction: social media, news sites, forums, streaming video, gaming, music streaming, shopping, personal apps, system utilities
         - Uncategorized: cannot determine
 
         Activities to categorize:
@@ -217,6 +209,13 @@ struct AIPromptBuilder {
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "\"", with: "")
             .replacingOccurrences(of: ".", with: "")
+        // Legacy category names AI might still return → remap to new 2-category system
+        let legacyMap: [String: Category] = [
+            "entertainment": .distraction, "personal": .distraction,
+            "creative": .work, "learning": .work, "productivity": .work,
+            "communication": .work, "health": .distraction
+        ]
+        if let mapped = legacyMap[cleaned.lowercased()] { return mapped }
         let allCats = CategoryManager.shared.allCategories
         if let match = allCats.first(where: { $0.name.lowercased() == cleaned.lowercased() }) {
             return Category(rawValue: match.name)

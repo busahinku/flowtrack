@@ -10,15 +10,15 @@ struct Category: RawRepresentable, Codable, Hashable, Sendable {
     static let idle = Category(rawValue: "Idle")
     static let uncategorized = Category(rawValue: "Uncategorized")
     static let work = Category(rawValue: "Work")
-    static let productivity = Category(rawValue: "Work")  // merged into Work
-    static let personal = Category(rawValue: "Personal")
     static let distraction = Category(rawValue: "Distraction")
-    static let creative = Category(rawValue: "Creative")
-    static let entertainment = Category(rawValue: "Entertainment")
-    // Legacy aliases — kept for backward compat with any stored data
+    // Legacy aliases — all map to Work or Distraction
+    static let productivity = Category(rawValue: "Work")
+    static let creative = Category(rawValue: "Work")
     static let communication = Category(rawValue: "Work")
     static let learning = Category(rawValue: "Work")
-    static let health = Category(rawValue: "Personal")
+    static let personal = Category(rawValue: "Distraction")
+    static let entertainment = Category(rawValue: "Distraction")
+    static let health = Category(rawValue: "Distraction")
 
     var isProductive: Bool {
         CategoryManager.shared.definition(for: self)?.isProductive ?? false
@@ -71,6 +71,8 @@ struct TimeSlot: Identifiable, Sendable {
     let isIdle: Bool
 
     var duration: TimeInterval { endTime.timeIntervalSince(startTime) }
+    /// Sum of all activity durations (excludes idle gaps between activities)
+    var activeDuration: TimeInterval { activities.reduce(0) { $0 + $1.duration } }
 }
 
 // MARK: - ActivitySummary
