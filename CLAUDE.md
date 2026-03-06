@@ -8,13 +8,13 @@ This is a macOS Xcode project (no Makefile/SPM CLI). Build and run from Xcode or
 
 ```bash
 # Build
-xcodebuild -project FlowTrack/FlowTrack.xcodeproj -scheme FlowTrack -configuration Debug build
+xcodebuild -project FlowTrack.xcodeproj -scheme FlowTrack -configuration Debug build
 
 # Run tests (Swift Testing framework, not XCTest)
-xcodebuild -project FlowTrack/FlowTrack.xcodeproj -scheme FlowTrack -configuration Debug test
+xcodebuild -project FlowTrack.xcodeproj -scheme FlowTrack -configuration Debug test
 
 # Clean build
-xcodebuild -project FlowTrack/FlowTrack.xcodeproj -scheme FlowTrack clean
+xcodebuild -project FlowTrack.xcodeproj -scheme FlowTrack clean
 ```
 
 Deployment target: macOS 14.6. SPM dependencies (GRDB, KeychainSwift) resolve automatically.
@@ -60,7 +60,7 @@ ActivityTracker (5s poll) → Database (GRDB/SQLite) → AppState (30s refresh) 
 
 ## Project Layout
 
-All Swift sources live under `FlowTrack/FlowTrack/`:
+All Swift sources live under `FlowTrack/`:
 
 | Directory | Purpose |
 |-----------|---------|
