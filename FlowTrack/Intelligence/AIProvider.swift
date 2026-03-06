@@ -257,14 +257,13 @@ struct AIPromptBuilder {
         let windowStartStr = timeFmt.string(from: windowStart)
         let windowEndStr = timeFmt.string(from: windowEnd)
 
-        // Build compact activity list
+        // Build compact activity list (idle already filtered upstream)
         var lines: [String] = []
         for a in activities {
             let time = timeFmt.string(from: a.timestamp)
             var line = "\(time) \(a.appName)"
             if !a.windowTitle.isEmpty { line += " \"\(a.windowTitle.prefix(80))\"" }
             if let url = a.url { line += " [\(domainOnly(from: url))]" }
-            // Append metadata hints when available
             if let metaJSON = a.contentMetadata,
                let metaData = metaJSON.data(using: .utf8),
                let meta = try? JSONDecoder().decode(ContentMetadata.self, from: metaData) {
@@ -276,29 +275,33 @@ struct AIPromptBuilder {
                 if !hints.isEmpty { line += " {\(hints.joined(separator: ", "))}" }
             }
             line += " \(Int(a.duration))s"
-            if a.isIdle { line += " [IDLE]" }
             lines.append(line)
         }
 
-        let categoriesList = CategoryManager.shared.allCategories.map { $0.name }.joined(separator: ", ")
+        let categoriesList = CategoryManager.shared.allCategories
+            .filter { !$0.isSystem || $0.name == "Uncategorized" }
+            .map { $0.name }
+            .joined(separator: ", ")
 
         return """
         Analyze this \(windowStartStr)–\(windowEndStr) activity window. Return a JSON array of time segments.
 
-        Activities (format: HH:mm:ss AppName "WindowTitle" [domain] duration_seconds):
+        Activities (only active periods, idle time already removed):
         \(lines.joined(separator: "\n"))
 
-        Rules:
-        - Group consecutive related activities into segments (minimum 60 seconds per segment)
-        - Detect idle gaps (periods with [IDLE] markers or no activity for >2 minutes)
+        RULES:
+        - Create segments that cover ONLY the time ranges where activities occurred
+        - Do NOT fill the entire window — leave gaps where there was no activity
+        - Group consecutive related activities into segments (minimum 60 seconds)
+        - Merge brief app switches (<30s) into the surrounding segment
         - Available categories: \(categoriesList)
-        - Each segment needs: start (HH:mm), end (HH:mm), category, title (5-10 words describing what was done), isIdle (boolean)
-        - Add a summary field (1-2 sentences) for segments longer than 10 minutes
-        - Merge very short app switches (<30s) into the surrounding segment
-        - Start must be >= \(windowStartStr.prefix(5)) and end must be <= \(windowEndStr.prefix(5))
+        - Segments must NOT overlap
+        - Each segment: start (HH:mm), end (HH:mm), category, title (5-10 word description)
+        - Add summary (1-2 sentences) for segments longer than 10 minutes, otherwise null
+        - start >= \(windowStartStr.prefix(5)), end <= \(windowEndStr.prefix(5))
 
-        Respond with ONLY a JSON array, no markdown fences, no explanation:
-        [{"start":"HH:mm","end":"HH:mm","category":"Work","title":"Short description","summary":null,"isIdle":false}]
+        Respond ONLY with a JSON array:
+        [{"start":"HH:mm","end":"HH:mm","category":"Work","title":"...","summary":null,"isIdle":false}]
         """
     }
 
@@ -321,7 +324,6 @@ struct AIPromptBuilder {
         timeFmt.dateFormat = "HH:mm"
         timeFmt.timeZone = cal.timeZone
 
-        // Base date for constructing segment times
         let dayStart = cal.startOfDay(for: windowStart)
 
         var results: [WindowSegmentResult] = []
@@ -333,26 +335,41 @@ struct AIPromptBuilder {
             guard let startTime = timeFmt.date(from: startStr),
                   let endTime = timeFmt.date(from: endStr) else { continue }
 
-            // Reconstruct full dates from HH:mm relative to the window's day
             let startComps = cal.dateComponents([.hour, .minute], from: startTime)
             let endComps = cal.dateComponents([.hour, .minute], from: endTime)
             let segStart = cal.date(bySettingHour: startComps.hour ?? 0, minute: startComps.minute ?? 0, second: 0, of: dayStart)!
             var segEnd = cal.date(bySettingHour: endComps.hour ?? 0, minute: endComps.minute ?? 0, second: 0, of: dayStart)!
 
-            // Handle midnight crossover
             if segEnd <= segStart { segEnd = cal.date(byAdding: .day, value: 1, to: segEnd)! }
 
-            // Clamp to window bounds
             let clampedStart = max(segStart, windowStart)
             let clampedEnd = min(segEnd, windowEnd)
             guard clampedEnd > clampedStart else { continue }
 
+            // Skip idle segments
+            let isIdle = obj["isIdle"] as? Bool ?? false
+            if isIdle { continue }
+
+            // Skip segments shorter than 60 seconds
+            let segDuration = clampedEnd.timeIntervalSince(clampedStart)
+            if segDuration < 60 {
+                aiLogger.debug("Skipping segment \(startStr)-\(endStr): too short (\(Int(segDuration))s)")
+                continue
+            }
+
+            // Skip if overlaps with a previous (longer) segment
+            let overlaps = results.contains { existing in
+                clampedStart < existing.segmentEnd && clampedEnd > existing.segmentStart
+            }
+            if overlaps {
+                aiLogger.debug("Skipping segment \(startStr)-\(endStr): overlaps existing segment")
+                continue
+            }
+
             let category = parseCategory(catStr) ?? .uncategorized
             let title = obj["title"] as? String
             let summary = obj["summary"] as? String
-            let isIdle = obj["isIdle"] as? Bool ?? false
 
-            // Collect apps that fall within this segment's time range
             let segActivities = activities.filter { a in
                 a.timestamp >= clampedStart && a.timestamp < clampedEnd && !a.isIdle
             }
@@ -364,7 +381,7 @@ struct AIPromptBuilder {
                 category: category,
                 title: title,
                 summary: summary,
-                isIdle: isIdle,
+                isIdle: false,
                 apps: apps
             ))
         }
@@ -390,12 +407,16 @@ struct AIPromptBuilder {
         }.sorted { $0.duration > $1.duration }
     }
 
-    /// Fallback: create a single segment covering the full window with dominant category
+    /// Fallback: create a single segment covering actual activity range (not full window)
     static func fallbackSegment(windowStart: Date, windowEnd: Date, activities: [ActivityRecord]) -> [WindowSegmentResult] {
         let nonIdle = activities.filter { !$0.isIdle }
         guard !nonIdle.isEmpty else { return [] }
 
-        // Find dominant category by total duration
+        // Use actual activity time range, not full window bounds
+        let actualStart = nonIdle.map(\.timestamp).min() ?? windowStart
+        let lastActivity = nonIdle.max { $0.timestamp < $1.timestamp }!
+        let actualEnd = min(lastActivity.timestamp.addingTimeInterval(lastActivity.duration), windowEnd)
+
         var totals: [String: TimeInterval] = [:]
         for a in nonIdle { totals[a.category.rawValue, default: 0] += a.duration }
         let best = totals.max { $0.value < $1.value }
@@ -403,8 +424,8 @@ struct AIPromptBuilder {
         let apps = buildAppEntries(from: nonIdle)
 
         return [WindowSegmentResult(
-            segmentStart: windowStart,
-            segmentEnd: windowEnd,
+            segmentStart: actualStart,
+            segmentEnd: actualEnd,
             category: category,
             title: nil,
             summary: nil,

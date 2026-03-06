@@ -442,14 +442,28 @@ final class Database: Sendable {
             )
         }
 
-        // Add .pending placeholders for unprocessed past windows that have activities
+        // Add .pending placeholders for unprocessed past windows — trimmed to actual activity range
         let unprocessed = try unprocessedWindowIds(for: date)
         for wid in unprocessed {
             if let bounds = Self.windowBounds(for: wid) {
+                // Query actual activity time range in this window
+                let activityRange = try dbQueue.read { db -> (start: Date, end: Date)? in
+                    let row = try Row.fetchOne(db, sql: """
+                        SELECT MIN(timestamp) as minT, MAX(timestamp) as maxT, MAX(duration) as lastDur
+                        FROM activities
+                        WHERE timestamp >= ? AND timestamp < ? AND isIdle = 0
+                        """, arguments: [bounds.start, bounds.end])
+                    guard let minT = row?["minT"] as? Date,
+                          let maxT = row?["maxT"] as? Date else { return nil }
+                    let lastDur = (row?["lastDur"] as? Double) ?? 5.0
+                    return (minT, min(maxT.addingTimeInterval(lastDur), bounds.end))
+                }
+                let slotStart = activityRange?.start ?? bounds.start
+                let slotEnd = activityRange?.end ?? bounds.end
                 slots.append(TimeSlot(
                     id: "pending-\(wid)",
-                    startTime: bounds.start,
-                    endTime: bounds.end,
+                    startTime: slotStart,
+                    endTime: slotEnd,
                     category: .uncategorized,
                     activities: [],
                     isIdle: false,

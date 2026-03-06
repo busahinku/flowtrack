@@ -186,7 +186,7 @@ final class AppState {
         defer { isRunningAI = false }
 
         await reCategorizeWithRules()
-        await analyzeUnprocessedWindows(limit: 4)
+        await analyzeUnprocessedWindows(limit: 16)
         await refreshData(force: true)
     }
 
@@ -208,7 +208,7 @@ final class AppState {
                 do {
                     let results = try await withFallback { provider in
                         try await provider.analyzeActivityWindow(
-                            activities: activities,
+                            activities: nonIdle,
                             windowStart: bounds.start,
                             windowEnd: bounds.end
                         )
