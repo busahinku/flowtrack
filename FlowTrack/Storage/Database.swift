@@ -810,6 +810,14 @@ final class Database: Sendable {
     }
 
     // MARK: - Data Management
+    func clearTodaysAIAnalysis() throws {
+        let (start, end) = dayBounds(for: Date())
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM window_segments WHERE segmentStart >= ? AND segmentStart < ?", arguments: [start, end])
+            try db.execute(sql: "DELETE FROM session_ai WHERE updatedAt >= ? AND updatedAt < ?", arguments: [start, end])
+        }
+    }
+
     func clearSessionAI() throws {
         try dbQueue.write { db in
             try db.execute(sql: "DELETE FROM session_ai")
@@ -834,7 +842,8 @@ final class Database: Sendable {
         let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date())!
         try dbQueue.write { db in
             try db.execute(sql: "DELETE FROM activities WHERE timestamp < ?", arguments: [cutoff])
-            try db.execute(sql: "DELETE FROM session_ai WHERE session_id NOT IN (SELECT DISTINCT session_id FROM activities)")
+            try db.execute(sql: "DELETE FROM session_ai WHERE updatedAt < ?", arguments: [cutoff])
+            try db.execute(sql: "DELETE FROM window_segments WHERE segmentStart < ?", arguments: [cutoff])
         }
         try dbQueue.writeWithoutTransaction { db in try db.execute(sql: "VACUUM") }
     }

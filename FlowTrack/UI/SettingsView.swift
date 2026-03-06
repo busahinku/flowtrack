@@ -1165,7 +1165,7 @@ struct PrivacyTab: View {
                 }
                 .foregroundStyle(theme.errorColor)
 
-                Button("Clear AI Summaries Only") {
+                Button("Clear Today's AI Analysis") {
                     showClearAIConfirm = true
                 }
                 .foregroundStyle(theme.secondaryText)
@@ -1254,18 +1254,17 @@ struct PrivacyTab: View {
             }
         } message: { Text("This will permanently delete all activity records older than \(clearDaysOption) days.") }
 
-        .alert("Clear AI Data?", isPresented: $showClearAIConfirm) {
+        .alert("Clear Today's AI Analysis?", isPresented: $showClearAIConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Clear", role: .destructive) {
                 do {
-                    try Database.shared.clearSessionAI()
-                    try Database.shared.clearWindowSegments()
+                    try Database.shared.clearTodaysAIAnalysis()
                     Task { await AppState.shared.refreshData(force: true) }
                     refreshStats()
-                    setResult("AI summaries cleared")
+                    setResult("Today's AI analysis cleared")
                 } catch { clearError = error.localizedDescription }
             }
-        } message: { Text("This will remove all AI-generated titles and summaries. Activity data will be kept.") }
+        } message: { Text("This will remove today's AI-generated analysis. Activity data is kept and AI will re-analyze on next run.") }
 
         .alert("Clear All Activity Data?", isPresented: $showClearConfirm) {
             Button("Cancel", role: .cancel) {}
