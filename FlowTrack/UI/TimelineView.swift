@@ -302,7 +302,15 @@ struct TimelineView: View {
     }
 
     private func slotH(_ slot: TimeSlot) -> CGFloat {
-        max(0, CGFloat(slot.endTime.timeIntervalSince(slot.startTime) / 3600.0) * TL.hourHeight)
+        // Use activeDuration (actual work time) for card height so cards reflect real effort,
+        // not wall-clock span which inflates height when idle gaps exist within a merged card.
+        let duration: TimeInterval
+        if slot.status == .processed && slot.activeDuration > 0 {
+            duration = slot.activeDuration
+        } else {
+            duration = slot.endTime.timeIntervalSince(slot.startTime)
+        }
+        return max(0, CGFloat(duration / 3600.0) * TL.hourHeight)
     }
 
     private func hourLabel(_ h: Int) -> String {

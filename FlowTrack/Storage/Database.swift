@@ -497,17 +497,22 @@ final class Database: Sendable {
         return mergeAdjacentProcessedSlots(slots)
     }
 
-    /// Merges adjacent .processed TimeSlots with the same category into one visual card
+    /// Merges adjacent .processed TimeSlots with the same category into one visual card,
+    /// but only if the gap between them is ≤ 10 minutes (avoids merging across long idle gaps).
     private func mergeAdjacentProcessedSlots(_ slots: [TimeSlot]) -> [TimeSlot] {
         guard !slots.isEmpty else { return [] }
+        let maxMergeGap: TimeInterval = 10 * 60  // 10 minutes
         var merged: [TimeSlot] = []
         var current = slots[0]
 
         for i in 1..<slots.count {
             let next = slots[i]
-            // Only merge two processed, same-category, non-idle slots
+            let gap = next.startTime.timeIntervalSince(current.endTime)
+
+            // Only merge two processed, same-category, non-idle slots within the gap threshold
             if current.status == .processed && next.status == .processed
-                && current.category == next.category && !current.isIdle && !next.isIdle {
+                && current.category == next.category && !current.isIdle && !next.isIdle
+                && gap <= maxMergeGap {
                 // Merge activities
                 var indexByName: [String: Int] = Dictionary(
                     uniqueKeysWithValues: current.activities.enumerated().map { ($0.element.appName, $0.offset) }
@@ -543,7 +548,7 @@ final class Database: Sendable {
                     status: .processed
                 )
             } else if current.status == .processed && next.status == .continuous
-                && current.category == next.category {
+                && current.category == next.category && gap <= maxMergeGap {
                 // Extend the previous card to cover the continuous window
                 current = TimeSlot(
                     id: current.id,

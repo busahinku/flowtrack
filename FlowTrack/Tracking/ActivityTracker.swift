@@ -163,11 +163,14 @@ final class ActivityTracker: ObservableObject {
 
         if AppSettings.shared.excludedBundleIDs.contains(bundleID) { return }
 
+        // loginwindow = macOS screen lock/login screen — treat as idle, don't track as activity
+        let isSystemIdle = bundleID == "com.apple.loginwindow" || appName.lowercased() == "loginwindow"
+
         let isIdle = checkIdle()
         if isIdle { consecutiveIdleCount += 1 } else { consecutiveIdleCount = 0; lastActivity = Date() }
 
         let idleDuration = Date().timeIntervalSince(lastActivity)
-        let recordIsIdle = idleDuration > idleThreshold
+        let recordIsIdle = isSystemIdle || idleDuration > idleThreshold
 
         if recordIsIdle && consecutiveIdleCount > 3 { return }
 

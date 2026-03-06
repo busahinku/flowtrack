@@ -373,11 +373,20 @@ struct AIPromptBuilder {
             let segActivities = activities.filter { a in
                 a.timestamp >= clampedStart && a.timestamp < clampedEnd && !a.isIdle
             }
+            // Trim segment end to the last actual activity to avoid over-wide cards
+            let trimmedEnd: Date
+            if let lastAct = segActivities.max(by: { $0.timestamp < $1.timestamp }) {
+                trimmedEnd = min(lastAct.timestamp.addingTimeInterval(lastAct.duration), clampedEnd)
+            } else {
+                trimmedEnd = clampedEnd
+            }
+            guard trimmedEnd > clampedStart else { continue }
+
             let apps = buildAppEntries(from: segActivities)
 
             results.append(WindowSegmentResult(
                 segmentStart: clampedStart,
-                segmentEnd: clampedEnd,
+                segmentEnd: trimmedEnd,
                 category: category,
                 title: title,
                 summary: summary,
@@ -393,9 +402,12 @@ struct AIPromptBuilder {
     }
 
     /// Build CodableAppEntry list from activities (grouped by app)
+    private static let systemIdleApps: Set<String> = ["loginwindow", "com.apple.loginwindow"]
     private static func buildAppEntries(from activities: [ActivityRecord]) -> [CodableAppEntry] {
         var grouped: [String: (bundleID: String, title: String, url: String?, duration: TimeInterval)] = [:]
         for a in activities where !a.isIdle {
+            // Exclude system idle processes from app summaries
+            if systemIdleApps.contains(a.appName.lowercased()) || systemIdleApps.contains(a.bundleID.lowercased()) { continue }
             var entry = grouped[a.appName] ?? (bundleID: a.bundleID, title: a.windowTitle, url: a.url, duration: 0)
             entry.duration += a.duration
             if entry.title.isEmpty && !a.windowTitle.isEmpty { entry.title = a.windowTitle }
