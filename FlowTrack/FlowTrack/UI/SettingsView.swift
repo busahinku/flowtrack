@@ -497,7 +497,6 @@ struct AITab: View {
                 }
             }
 
-            let model = settings.modelName(for: providerType)
             let provider = AIProviderFactory.create(for: providerType)
             settingsLog.debug("Testing \(providerType.rawValue, privacy: .public) AI provider")
             do {

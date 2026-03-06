@@ -17,7 +17,7 @@ enum JournalCrypto {
     // MARK: - Key Derivation
 
     /// Derive a 256-bit symmetric key from a password + random salt using PBKDF2-SHA256.
-    static func deriveKey(password: String, salt: Data) -> SymmetricKey {
+    nonisolated static func deriveKey(password: String, salt: Data) -> SymmetricKey {
         var derivedKeyData = Data(repeating: 0, count: keyLength)
         let passwordData   = Data(password.utf8)
         let result: Int32  = derivedKeyData.withUnsafeMutableBytes { derivedPtr in
@@ -42,7 +42,7 @@ enum JournalCrypto {
     }
 
     /// Generate a cryptographically random salt.
-    static func randomSalt() -> Data {
+    nonisolated static func randomSalt() -> Data {
         var bytes = [UInt8](repeating: 0, count: saltLength)
         let status = SecRandomCopyBytes(kSecRandomDefault, saltLength, &bytes)
         precondition(status == errSecSuccess)
@@ -52,14 +52,14 @@ enum JournalCrypto {
     // MARK: - HMAC Verifier
 
     /// Produce a stable verifier from a key. Used to confirm a password re-derives the same key.
-    static func verifier(for key: SymmetricKey) -> Data {
+    nonisolated static func verifier(for key: SymmetricKey) -> Data {
         let tag = "FlowTrackJournalV1"
         let mac = HMAC<SHA256>.authenticationCode(for: Data(tag.utf8), using: key)
         return Data(mac)
     }
 
     /// Check whether a derived key matches the stored verifier.
-    static func isKeyValid(_ key: SymmetricKey, verifier storedVerifier: Data) -> Bool {
+    nonisolated static func isKeyValid(_ key: SymmetricKey, verifier storedVerifier: Data) -> Bool {
         let computed = verifier(for: key)
         return computed == storedVerifier
     }

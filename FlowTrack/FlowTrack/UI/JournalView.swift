@@ -910,7 +910,7 @@ private struct MarkdownPreviewView: NSViewRepresentable {
         do {
             let opts = AttributedString.MarkdownParsingOptions(interpretedSyntax: .full)
             let attrStr = try AttributedString(markdown: data, options: opts)
-            var ns = try NSAttributedString(attrStr, including: \.appKit)
+            let ns = try NSAttributedString(attrStr, including: \.appKit)
             // Apply base font and color while preserving markdown formatting
             let mutable = NSMutableAttributedString(attributedString: ns)
             let range = NSRange(location: 0, length: mutable.length)

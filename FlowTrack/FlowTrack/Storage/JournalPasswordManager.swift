@@ -3,7 +3,7 @@ import KeychainSwift
 import CryptoKit
 import OSLog
 
-private let pmLog = Logger(subsystem: "com.flowtrack", category: "JournalPasswordManager")
+nonisolated(unsafe) private let pmLog = Logger(subsystem: "com.flowtrack", category: "JournalPasswordManager")
 
 // MARK: - JournalPasswordManager
 /// Manages Journal password lifecycle: setup, verification, and reset.
@@ -14,23 +14,25 @@ private let pmLog = Logger(subsystem: "com.flowtrack", category: "JournalPasswor
 ///   - All Keychain items are `.thisDeviceOnly` — no iCloud sync, no device transfer.
 ///   - Thread-safe via NSLock.
 final class JournalPasswordManager {
-    static let shared = JournalPasswordManager()
+    nonisolated(unsafe) static let shared = JournalPasswordManager()
 
-    private let keychain: KeychainSwift
-    private let lock = NSLock()
-    private let saltKey     = "journal_salt_v2"
-    private let verifierKey = "journal_verifier_v2"
+    nonisolated(unsafe) private let keychain: KeychainSwift
+    nonisolated(unsafe) private let lock = NSLock()
+    /// Single Keychain item holding both salt + verifier as a 64-byte blob (32+32).
+    nonisolated(unsafe) private let credsKey = "journal_creds_v3"
 
     private init() {
         keychain = KeychainSwift(keyPrefix: "FlowTrackJournal_")
         keychain.synchronizable = false
+        migrateV2IfNeeded()
     }
 
     // MARK: - State
 
-    var isSetUp: Bool {
+    nonisolated var isSetUp: Bool {
         lock.lock(); defer { lock.unlock() }
-        return keychain.getData(saltKey) != nil && keychain.getData(verifierKey) != nil
+        guard let blob = keychain.getData(credsKey) else { return false }
+        return blob.count == 64
     }
 
     // MARK: - Setup
@@ -38,20 +40,17 @@ final class JournalPasswordManager {
     /// First-time password setup.
     /// Runs PBKDF2 synchronously — MUST be called from a background thread (Task.detached).
     /// Returns the derived `SymmetricKey` so the caller can immediately unlock without a second PBKDF2 round.
-    func setupAndDeriveKey(password: String) throws -> SymmetricKey {
+    nonisolated func setupAndDeriveKey(password: String) throws -> SymmetricKey {
         lock.lock(); defer { lock.unlock() }
-        // Allow re-setup after reset (isSetUp already cleared). Protect against concurrent calls.
         let salt     = JournalCrypto.randomSalt()
         let key      = JournalCrypto.deriveKey(password: password, salt: salt)
         let verifier = JournalCrypto.verifier(for: key)
-
-        let saltOk = keychain.set(salt,     forKey: saltKey,     withAccess: .accessibleWhenUnlockedThisDeviceOnly)
-        let verOk  = keychain.set(verifier, forKey: verifierKey, withAccess: .accessibleWhenUnlockedThisDeviceOnly)
-        guard saltOk && verOk else {
-            // Clean up on failure
-            keychain.delete(saltKey)
-            keychain.delete(verifierKey)
-            pmLog.error("Keychain write failed (salt=\(saltOk) ver=\(verOk))")
+        // Store salt(32) + verifier(32) as a single 64-byte Keychain item → one prompt instead of two
+        var blob = Data()
+        blob.append(salt)
+        blob.append(verifier)
+        guard keychain.set(blob, forKey: credsKey, withAccess: .accessibleWhenUnlockedThisDeviceOnly) else {
+            pmLog.error("Keychain write failed for journal credentials")
             throw JournalPasswordError.keychainFailed
         }
         pmLog.info("Journal password set up successfully")
@@ -62,13 +61,14 @@ final class JournalPasswordManager {
 
     /// Verify a password and return the derived key.
     /// Runs PBKDF2 synchronously — MUST be called from a background thread (Task.detached).
-    func verifyAndDeriveKey(password: String) throws -> SymmetricKey {
+    nonisolated func verifyAndDeriveKey(password: String) throws -> SymmetricKey {
         lock.lock()
-        guard let salt     = keychain.getData(saltKey),
-              let stored   = keychain.getData(verifierKey) else {
+        guard let blob = keychain.getData(credsKey), blob.count == 64 else {
             lock.unlock()
             throw JournalPasswordError.notSetUp
         }
+        let salt   = Data(blob.prefix(32))
+        let stored = Data(blob.suffix(32))
         lock.unlock()
 
         let key = JournalCrypto.deriveKey(password: password, salt: salt)
@@ -82,9 +82,25 @@ final class JournalPasswordManager {
 
     func reset() {
         lock.lock(); defer { lock.unlock() }
-        keychain.delete(saltKey)
-        keychain.delete(verifierKey)
+        keychain.delete(credsKey)
         pmLog.info("Journal password reset — Keychain cleared")
+    }
+
+    // MARK: - Migration from v2 (two separate items → one blob)
+
+    private func migrateV2IfNeeded() {
+        let oldSaltKey = "journal_salt_v2"
+        let oldVerKey  = "journal_verifier_v2"
+        guard keychain.getData(credsKey) == nil,
+              let salt = keychain.getData(oldSaltKey),
+              let ver  = keychain.getData(oldVerKey),
+              salt.count == 32, ver.count == 32 else { return }
+        var blob = Data(); blob.append(salt); blob.append(ver)
+        if keychain.set(blob, forKey: credsKey, withAccess: .accessibleWhenUnlockedThisDeviceOnly) {
+            keychain.delete(oldSaltKey)
+            keychain.delete(oldVerKey)
+            pmLog.info("Migrated journal credentials from v2 (2 items) to v3 (1 item)")
+        }
     }
 }
 

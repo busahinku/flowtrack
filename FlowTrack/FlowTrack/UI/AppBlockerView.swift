@@ -735,7 +735,7 @@ struct BlockCardSheet: View {
         }
     }
 
-    private func loadInstalledApps() -> [InstalledAppInfo] {
+    nonisolated private func loadInstalledApps() -> [InstalledAppInfo] {
         var seen = Set<String>(); var apps: [InstalledAppInfo] = []
         for app in NSWorkspace.shared.runningApplications {
             guard let name = app.localizedName, let bid = app.bundleIdentifier,

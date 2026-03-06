@@ -540,6 +540,7 @@ final class ActivityTracker: ObservableObject {
 // MARK: - _Once (file-level to avoid @MainActor isolation from outer class)
 /// Thread-safe one-shot flag — ensures a continuation is resumed exactly once.
 private final class _Once: @unchecked Sendable {
+    nonisolated init() {}
     private let lock = NSLock()
     private var done = false
     /// Returns true the first time called; false on all subsequent calls.

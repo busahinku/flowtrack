@@ -3,7 +3,7 @@ import AppKit
 import UserNotifications
 import OSLog
 
-private let blockerLog = Logger(subsystem: "com.flowtrack", category: "AppBlocker")
+nonisolated(unsafe) private let blockerLog = Logger(subsystem: "com.flowtrack", category: "AppBlocker")
 
 // MARK: - AppBlockerStore
 @MainActor @Observable
@@ -102,7 +102,7 @@ final class AppBlockerStore {
         }
     }
 
-    private func _rewriteHostsBlockSync(domains: [String]) {
+    nonisolated private func _rewriteHostsBlockSync(domains: [String]) {
         let hostsPath = "/etc/hosts"
         guard let current = try? String(contentsOfFile: hostsPath, encoding: .utf8) else { return }
 

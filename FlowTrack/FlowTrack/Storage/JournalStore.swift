@@ -39,7 +39,8 @@ final class JournalStore {
             forName: NSApplication.didResignActiveNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.lock() }
+            guard let self else { return }
+            Task { @MainActor in self.lock() }
         }
         loadEntryDates()
     }

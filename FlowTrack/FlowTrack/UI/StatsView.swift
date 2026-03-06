@@ -1396,7 +1396,7 @@ struct StatsView: View {
 
     private var previousPeriodRange: (from: Date, to: Date) {
         let cal = Calendar.current
-        let (from, to) = dateRange
+        let (from, _) = dateRange
         switch period {
         case .day:
             return (cal.date(byAdding: .day, value: -1, to: from)!, from)

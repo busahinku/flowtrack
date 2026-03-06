@@ -27,14 +27,15 @@ final class BlockPageServer {
             return
         }
         l.stateUpdateHandler = { [weak self] state in
+            guard let self else { return }
             Task { @MainActor in
                 switch state {
                 case .ready:
-                    self?.isRunning = true
+                    self.isRunning = true
                     serverLog.info("Block page server listening on port \(BlockPageServer.serverPort)")
                 case .failed(let err):
                     serverLog.error("Block page server failed: \(err.localizedDescription)")
-                    self?.isRunning = false
+                    self.isRunning = false
                 default: break
                 }
             }
@@ -85,7 +86,7 @@ final class BlockPageServer {
 
     // MARK: - Block page HTML
 
-    static func blockPageHTML(for host: String) -> String {
+    nonisolated static func blockPageHTML(for host: String) -> String {
         let domain = host.isEmpty ? "this site" : host
         return """
         <!DOCTYPE html>
