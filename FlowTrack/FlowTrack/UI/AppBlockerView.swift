@@ -54,7 +54,9 @@ struct AppBlockerView: View {
                                         startPoint: .topLeading, endPoint: .bottomTrailing))
                     .frame(width: 52, height: 52)
                     .shadow(color: Color.purple.opacity(0.4), radius: 10, y: 4)
-                Text("🛡️").font(.system(size: 26))
+                Image(systemName: "shield.fill")
+                    .font(.system(size: 26))
+                    .foregroundStyle(.white)
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text("Focus Shield")
@@ -81,7 +83,8 @@ struct AppBlockerView: View {
     // MARK: - Empty State
     private var emptyState: some View {
         VStack(spacing: 20) {
-            Text("🛡️").font(.system(size: 52))
+            Image(systemName: "shield.fill").font(.system(size: 52))
+                .foregroundStyle(theme.secondaryText.opacity(0.4))
             Text("No Focus Cards Yet")
                 .font(.headline)
                 .foregroundStyle(theme.primaryText)
@@ -153,8 +156,9 @@ private struct BlockCardRow: View {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(card.accentColor.opacity(card.isEnabled ? 0.18 : 0.07))
                     .frame(width: 46, height: 46)
-                Text(card.emoji)
+                Image(systemName: card.iconName)
                     .font(.system(size: 22))
+                    .foregroundStyle(card.accentColor)
                     .grayscale(card.isEnabled ? 0 : 0.8)
             }
 
@@ -294,7 +298,7 @@ struct BlockCardSheet: View {
 
     // Card fields
     @State private var name: String = ""
-    @State private var emoji: String = "🚫"
+    @State private var iconName: String = "nosign"
     @State private var colorName: String = "purple"
     @State private var alwaysBlock = true
     @State private var limitMinutes = 60
@@ -310,7 +314,7 @@ struct BlockCardSheet: View {
     @State private var aiLoading = false
     @State private var aiError: String? = nil
     @State private var showAI = false
-    @State private var showEmojiPicker = false
+    @State private var showIconPicker = false
 
     private let colors = ["purple", "blue", "red", "orange", "green", "teal", "pink", "yellow"]
     private let colorValues: [String: Color] = [
@@ -370,20 +374,22 @@ struct BlockCardSheet: View {
                     // Card identity
                     VStack(spacing: 12) {
                         HStack(spacing: 12) {
-                            // Emoji picker
+                            // Icon picker
                             Button {
-                                showEmojiPicker.toggle()
+                                showIconPicker.toggle()
                             } label: {
                                 ZStack {
                                     RoundedRectangle(cornerRadius: 10)
                                         .fill(accentColor.opacity(0.12))
                                         .frame(width: 44, height: 44)
-                                    Text(emoji).font(.system(size: 22))
+                                    Image(systemName: iconName)
+                                        .font(.system(size: 20))
+                                        .foregroundStyle(accentColor)
                                 }
                             }
                             .buttonStyle(.plain)
-                            .popover(isPresented: $showEmojiPicker) {
-                                EmojiPickerView(selected: $emoji, isPresented: $showEmojiPicker)
+                            .popover(isPresented: $showIconPicker) {
+                                IconPickerView(selected: $iconName, isPresented: $showIconPicker)
                             }
 
                             TextField("Card name (e.g. Social Media)", text: $name)
@@ -647,7 +653,7 @@ struct BlockCardSheet: View {
     private func save() {
         var card = editingCard ?? BlockCard(name: name)
         card.name = name
-        card.emoji = emoji
+        card.iconName = iconName
         card.colorName = colorName
         card.dailyLimitMinutes = alwaysBlock ? 0 : limitMinutes
         card.websites = websites
@@ -662,7 +668,7 @@ struct BlockCardSheet: View {
 
     private func populate() {
         if let c = editingCard {
-            name = c.name; emoji = c.emoji; colorName = c.colorName
+            name = c.name; iconName = c.iconName; colorName = c.colorName
             alwaysBlock = c.isAlwaysBlock
             limitMinutes = c.dailyLimitMinutes == 0 ? 60 : c.dailyLimitMinutes
             websites = c.websites; apps = c.apps
@@ -676,31 +682,33 @@ struct BlockCardSheet: View {
     private func generateWithAI() async {
         guard !aiPrompt.isEmpty else { return }
         aiLoading = true; aiError = nil
-        let prompt = """
-        The user wants to block distracting content related to: "\(aiPrompt)"
-        
-        Respond with ONLY a JSON object in this exact format (no markdown, no explanation):
-        {
-          "name": "card name (2-3 words)",
-          "emoji": "single emoji",
-          "websites": ["domain1.com", "domain2.com", ...],
-          "description": "one sentence"
-        }
-        
-        Include 5-15 relevant websites. Use only domain names without www or https.
-        Examples: reddit.com, twitter.com, instagram.com, youtube.com, tiktok.com
+        let systemPrompt = """
+        You are a productivity assistant that generates focus cards for blocking distracting websites.
+        Always respond with ONLY a valid JSON object — no markdown, no code blocks, no extra text.
+        Use this exact format:
+        {"name": "card name (2-3 words)", "websites": ["domain1.com", "domain2.com"]}
+        Include 5-15 relevant domain names without www or https prefixes.
         """
+        let userMessage = "Create a focus card for blocking: \"\(aiPrompt)\""
         let settings = AppSettings.shared
         let provider = AIProviderFactory.create(for: settings.aiProvider, model: settings.modelName(for: settings.aiProvider))
         do {
-            let response = try await provider.categorize(appName: "blocker", bundleID: "blocker", windowTitle: prompt, url: nil)
-            let raw = response.rawValue
-            // Parse JSON from response
-            if let data = raw.data(using: .utf8),
+            let raw = try await provider.chat(
+                messages: [ChatTurn(role: "user", content: userMessage)],
+                systemPrompt: systemPrompt
+            )
+            // Extract JSON, handling optional markdown code fences
+            let jsonString: String
+            if let start = raw.firstIndex(of: "{"), let end = raw.lastIndex(of: "}") {
+                jsonString = String(raw[start...end])
+            } else {
+                await MainActor.run { aiError = "AI returned unexpected format. Try again."; aiLoading = false }
+                return
+            }
+            if let data = jsonString.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 await MainActor.run {
                     if let n = json["name"] as? String, !n.isEmpty { name = n }
-                    if let e = json["emoji"] as? String, !e.isEmpty { emoji = e }
                     if let sites = json["websites"] as? [String] {
                         for site in sites where !websites.contains(site) {
                             websites.append(site)
@@ -709,25 +717,6 @@ struct BlockCardSheet: View {
                     aiLoading = false
                 }
             } else {
-                // Try to extract JSON from the response text
-                if let jsonStart = raw.firstIndex(of: "{"),
-                   let jsonEnd = raw.lastIndex(of: "}") {
-                    let jsonStr = String(raw[jsonStart...jsonEnd])
-                    if let data = jsonStr.data(using: .utf8),
-                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                        await MainActor.run {
-                            if let n = json["name"] as? String, !n.isEmpty { name = n }
-                            if let e = json["emoji"] as? String, !e.isEmpty { emoji = e }
-                            if let sites = json["websites"] as? [String] {
-                                for site in sites where !websites.contains(site) {
-                                    websites.append(site)
-                                }
-                            }
-                            aiLoading = false
-                        }
-                        return
-                    }
-                }
                 await MainActor.run { aiError = "AI returned unexpected format. Try again."; aiLoading = false }
             }
         } catch {
@@ -760,22 +749,40 @@ struct BlockCardSheet: View {
     }
 }
 
-// MARK: - Emoji Picker
-private struct EmojiPickerView: View {
+// MARK: - Icon Picker
+private struct IconPickerView: View {
     @Binding var selected: String
     @Binding var isPresented: Bool
-    private let emojis = ["🚫","🛡️","📵","⛔","🔒","🎮","📱","💬","📰","🎬","🎵","🛒","💰","🏃","📚","💡","🎯","⏰","🌙","☕","🧘","💪","🔥","⚡","🌊"]
+    private var theme: AppTheme { AppSettings.shared.appTheme }
+    private let icons = [
+        "nosign", "shield.fill", "phone.down.fill", "xmark.octagon.fill", "lock.fill",
+        "gamecontroller.fill", "iphone", "bubble.left.fill", "newspaper.fill", "film.fill",
+        "music.note", "cart.fill", "dollarsign.circle.fill", "figure.run", "books.vertical.fill",
+        "lightbulb.fill", "scope", "alarm.fill", "moon.fill", "cup.and.saucer.fill",
+        "figure.mind.and.body", "dumbbell.fill", "flame.fill", "bolt.fill", "water.waves"
+    ]
     var body: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.fixed(36)), count: 5), spacing: 4) {
-            ForEach(emojis, id: \.self) { e in
-                Button { selected = e; isPresented = false } label: {
-                    Text(e).font(.system(size: 22)).frame(width: 36, height: 36)
+        LazyVGrid(columns: Array(repeating: GridItem(.fixed(40)), count: 5), spacing: 4) {
+            ForEach(icons, id: \.self) { icon in
+                Button {
+                    selected = icon
+                    isPresented = false
+                } label: {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(selected == icon ? theme.accentColor.opacity(0.15) : Color.clear)
+                            .frame(width: 36, height: 36)
+                        Image(systemName: icon)
+                            .font(.system(size: 18))
+                            .foregroundStyle(selected == icon ? theme.accentColor : theme.primaryText)
+                    }
+                    .frame(width: 40, height: 40)
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(10)
-        .frame(width: 200)
+        .frame(width: 220)
     }
 }
 

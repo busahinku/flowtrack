@@ -908,27 +908,46 @@ private struct MarkdownPreviewView: NSViewRepresentable {
     }
 
     private func updateContent(_ tv: NSTextView) {
-        guard let data = text.data(using: .utf8) else { tv.string = text; return }
-        do {
-            let opts = AttributedString.MarkdownParsingOptions(interpretedSyntax: .full)
-            let attrStr = try AttributedString(markdown: data, options: opts)
-            let ns = try NSAttributedString(attrStr, including: \.appKit)
-            // Apply base font and color while preserving markdown formatting
-            let mutable = NSMutableAttributedString(attributedString: ns)
-            let range = NSRange(location: 0, length: mutable.length)
-            mutable.addAttribute(.foregroundColor, value: NSColor.labelColor, range: range)
-            // Only set font where not already overridden (e.g., code blocks use monospace)
-            mutable.enumerateAttribute(.font, in: range) { val, r, _ in
-                if val == nil {
-                    mutable.addAttribute(.font, value: NSFont.systemFont(ofSize: 14), range: r)
+        let mutable = NSMutableAttributedString()
+        let lines = text.components(separatedBy: "\n")
+        for (i, line) in lines.enumerated() {
+            let suffix = i < lines.count - 1 ? "\n" : ""
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if t.hasPrefix("# "), t.count > 2 {
+                mutable.append(headingAttr(String(t.dropFirst(2)) + suffix, size: 22))
+            } else if t.hasPrefix("## "), t.count > 3 {
+                mutable.append(headingAttr(String(t.dropFirst(3)) + suffix, size: 18))
+            } else if t.hasPrefix("### "), t.count > 4 {
+                mutable.append(headingAttr(String(t.dropFirst(4)) + suffix, size: 15))
+            } else if t == "---" || t == "***" || t == "___" {
+                mutable.append(NSAttributedString(string: "────────────────────────\n",
+                    attributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.separatorColor]))
+            } else {
+                // Use AttributedString(markdown:) for inline bold/italic/code on regular lines
+                let inline = line + suffix
+                if let attr = try? AttributedString(markdown: inline,
+                    options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)),
+                   let ns = try? NSAttributedString(attr, including: \.appKit) {
+                    let ms = NSMutableAttributedString(attributedString: ns)
+                    let r = NSRange(location: 0, length: ms.length)
+                    ms.addAttribute(.foregroundColor, value: NSColor.labelColor, range: r)
+                    ms.enumerateAttribute(.font, in: r) { v, rr, _ in
+                        if v == nil { ms.addAttribute(.font, value: NSFont.systemFont(ofSize: 14), range: rr) }
+                    }
+                    mutable.append(ms)
+                } else {
+                    mutable.append(NSAttributedString(string: inline,
+                        attributes: [.font: NSFont.systemFont(ofSize: 14), .foregroundColor: NSColor.labelColor]))
                 }
             }
-            tv.textStorage?.setAttributedString(mutable)
-        } catch {
-            // Fallback to plain text
-            tv.string = text
-            tv.font = .systemFont(ofSize: 14)
-            tv.textColor = .labelColor
         }
+        tv.textStorage?.setAttributedString(mutable)
+    }
+
+    private func headingAttr(_ s: String, size: CGFloat) -> NSAttributedString {
+        NSAttributedString(string: s, attributes: [
+            .font: NSFont.systemFont(ofSize: size, weight: .bold),
+            .foregroundColor: NSColor.labelColor
+        ])
     }
 }

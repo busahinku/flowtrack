@@ -61,6 +61,14 @@ struct ActivityRecord: Codable, FetchableRecord, PersistableRecord, Sendable {
     }
 }
 
+// MARK: - TimeSlotStatus
+enum TimeSlotStatus: Sendable {
+    case processed    // AI has analyzed this — real data
+    case processing   // Current in-progress window — placeholder
+    case continuous   // Current window, continuing previous session
+    case pending      // Past window, AI hasn't processed yet
+}
+
 // MARK: - TimeSlot (session-based)
 struct TimeSlot: Identifiable, Sendable {
     let id: String
@@ -69,10 +77,81 @@ struct TimeSlot: Identifiable, Sendable {
     let category: Category
     let activities: [ActivitySummary]
     let isIdle: Bool
+    var title: String?
+    var summary: String?
+    var status: TimeSlotStatus
 
     var duration: TimeInterval { endTime.timeIntervalSince(startTime) }
     /// Sum of all activity durations (excludes idle gaps between activities)
     var activeDuration: TimeInterval { activities.reduce(0) { $0 + $1.duration } }
+
+    init(id: String, startTime: Date, endTime: Date, category: Category,
+         activities: [ActivitySummary], isIdle: Bool,
+         title: String? = nil, summary: String? = nil,
+         status: TimeSlotStatus = .processed) {
+        self.id = id
+        self.startTime = startTime
+        self.endTime = endTime
+        self.category = category
+        self.activities = activities
+        self.isIdle = isIdle
+        self.title = title
+        self.summary = summary
+        self.status = status
+    }
+}
+
+// MARK: - WindowSegment (stored in DB)
+struct WindowSegment: Codable, FetchableRecord, PersistableRecord, Sendable {
+    var id: String            // "2026-03-06T10:00-0"
+    let windowId: String      // "2026-03-06T10:00"
+    let segmentStart: Date
+    let segmentEnd: Date
+    let category: Category
+    let title: String?
+    let summary: String?
+    let isIdle: Bool
+    let apps: String          // JSON array of app data
+    let processedAt: Date
+
+    static let databaseTableName = "window_segments"
+
+    enum Columns: String, ColumnExpression {
+        case id, windowId, segmentStart, segmentEnd, category, title, summary, isIdle, apps, processedAt
+    }
+
+    /// Decoded app summaries from the JSON `apps` column
+    var appSummaries: [ActivitySummary] {
+        guard let data = apps.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([CodableAppEntry].self, from: data) else {
+            return []
+        }
+        return decoded.enumerated().map { idx, entry in
+            ActivitySummary(appName: entry.appName, bundleID: entry.bundleID ?? "",
+                            title: entry.title ?? "", url: entry.url,
+                            duration: entry.duration)
+        }
+    }
+}
+
+/// Lightweight codable struct for the JSON `apps` column in window_segments
+struct CodableAppEntry: Codable, Sendable {
+    let appName: String
+    let bundleID: String?
+    let title: String?
+    let url: String?
+    let duration: TimeInterval
+}
+
+// MARK: - WindowSegmentResult (AI response, not stored directly)
+struct WindowSegmentResult: Sendable {
+    let segmentStart: Date
+    let segmentEnd: Date
+    let category: Category
+    let title: String?
+    let summary: String?
+    let isIdle: Bool
+    let apps: [CodableAppEntry]
 }
 
 // MARK: - ActivitySummary
@@ -383,6 +462,10 @@ struct TodoItem: Codable, Identifiable, Sendable {
     var dueDate: Date? = nil
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
+    var subtasks: [TodoItem] = []
+
+    var completedSubtaskCount: Int { subtasks.filter { $0.status == .done }.count }
+    var hasSubtasks: Bool { !subtasks.isEmpty }
 }
 
 // MARK: - Timer Models
@@ -442,7 +525,7 @@ struct BlockedApp: Codable, Identifiable, Sendable, Hashable {
 struct BlockCard: Codable, Identifiable, Sendable {
     var id: String = UUID().uuidString
     var name: String                    // "Social Media"
-    var emoji: String = "🚫"            // card icon
+    var iconName: String = "nosign"     // SF Symbol name for card icon
     var colorName: String = "purple"    // "purple","blue","red","orange","green","teal","pink","yellow"
     var isEnabled: Bool = true
     var websites: [String] = []         // ["reddit.com", "twitter.com"]

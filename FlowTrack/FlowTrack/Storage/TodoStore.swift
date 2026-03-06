@@ -100,7 +100,39 @@ final class TodoStore {
         timerSessions.filter { $0.todoId == todoId }.reduce(0) { $0 + $1.duration }
     }
 
-    // MARK: - Data Management
+    // MARK: - Subtask CRUD
+
+    func addSubtask(_ subtask: TodoItem, to parentId: String) {
+        guard let idx = todos.firstIndex(where: { $0.id == parentId }) else { return }
+        todos[idx].subtasks.append(subtask)
+        todos[idx].updatedAt = Date()
+        saveTodos()
+    }
+
+    func toggleSubtask(_ subtaskId: String, in parentId: String) {
+        guard let idx = todos.firstIndex(where: { $0.id == parentId }),
+              let sIdx = todos[idx].subtasks.firstIndex(where: { $0.id == subtaskId }) else { return }
+        let current = todos[idx].subtasks[sIdx].status
+        todos[idx].subtasks[sIdx].status = current == .done ? .pending : .done
+        todos[idx].subtasks[sIdx].updatedAt = Date()
+        saveTodos()
+    }
+
+    func deleteSubtask(_ subtaskId: String, from parentId: String) {
+        guard let idx = todos.firstIndex(where: { $0.id == parentId }) else { return }
+        todos[idx].subtasks.removeAll { $0.id == subtaskId }
+        saveTodos()
+    }
+
+    func updateSubtaskTitle(_ subtaskId: String, in parentId: String, newTitle: String) {
+        guard let idx = todos.firstIndex(where: { $0.id == parentId }),
+              let sIdx = todos[idx].subtasks.firstIndex(where: { $0.id == subtaskId }) else { return }
+        todos[idx].subtasks[sIdx].title = newTitle
+        todos[idx].subtasks[sIdx].updatedAt = Date()
+        saveTodos()
+    }
+
+
 
     func clearTimerSessions() {
         timerSessions.removeAll()
@@ -159,10 +191,13 @@ final class TodoStore {
                 return
             }
 
+            // Add as subtasks inside the parent todo, not as sibling todos
+            guard let idx = todos.firstIndex(where: { $0.id == todo.id }) else { return }
             for title in titles {
                 let sub = TodoItem(title: title, priority: todo.priority)
-                todos.insert(sub, at: (todos.firstIndex(where: { $0.id == todo.id }) ?? 0) + 1)
+                todos[idx].subtasks.append(sub)
             }
+            todos[idx].updatedAt = Date()
             saveTodos()
         } catch {
             breakdownError = error.localizedDescription

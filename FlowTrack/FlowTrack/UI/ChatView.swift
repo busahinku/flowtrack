@@ -468,8 +468,10 @@ private struct MarkdownRenderer: View {
         switch block {
         case .heading(let text, let level):
             inlineText(text, bold: true)
-                .font(level == 1 ? .system(size: 14, weight: .bold) : .system(size: 13, weight: .semibold))
-                .padding(.top, level == 1 ? 4 : 2)
+                .font(level == 1 ? .system(size: 16, weight: .bold) :
+                      level == 2 ? .system(size: 14, weight: .semibold) :
+                                   .system(size: 13, weight: .medium))
+                .padding(.top, level == 1 ? 6 : 3)
 
         case .bullet(let items):
             VStack(alignment: .leading, spacing: 3) {

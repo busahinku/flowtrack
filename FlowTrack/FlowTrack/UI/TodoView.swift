@@ -654,7 +654,11 @@ struct TodoRowView: View {
     let onSetTimer:  () -> Void
 
     @State private var isHovered = false
+    @State private var subtasksExpanded = true
+    @State private var newSubtaskTitle = ""
+    @State private var showingAddSubtask = false
     private var theme: AppTheme { AppSettings.shared.appTheme }
+    private var store: TodoStore { TodoStore.shared }
 
     private var isOverdue: Bool {
         guard let due = todo.dueDate, todo.status != .done else { return false }
@@ -662,101 +666,166 @@ struct TodoRowView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            // Status circle button
-            Button(action: onToggle) {
-                ZStack {
-                    Circle()
-                        .stroke(
-                            todo.status == .done ? theme.successColor :
-                            isOverdue ? theme.errorColor.opacity(0.6) :
-                            todo.priority.color.opacity(0.4),
-                            lineWidth: 1.5
-                        )
-                        .frame(width: 22, height: 22)
-                    if todo.status == .done {
-                        Circle().fill(theme.successColor).frame(width: 22, height: 22)
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(theme.selectedForeground)
-                    } else if todo.status == .inProgress {
-                        Circle().fill(todo.priority.color.opacity(0.15)).frame(width: 22, height: 22)
-                        Circle().fill(todo.priority.color).frame(width: 8, height: 8)
-                    } else if isOverdue {
-                        Circle().fill(theme.errorColor.opacity(0.06)).frame(width: 22, height: 22)
+        VStack(spacing: 0) {
+            // ── Main row ──────────────────────────────────────────────
+            HStack(spacing: 0) {
+                // Status circle button
+                Button(action: onToggle) {
+                    ZStack {
+                        Circle()
+                            .stroke(
+                                todo.status == .done ? theme.successColor :
+                                isOverdue ? theme.errorColor.opacity(0.6) :
+                                todo.priority.color.opacity(0.4),
+                                lineWidth: 1.5
+                            )
+                            .frame(width: 22, height: 22)
+                        if todo.status == .done {
+                            Circle().fill(theme.successColor).frame(width: 22, height: 22)
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(theme.selectedForeground)
+                        } else if todo.status == .inProgress {
+                            Circle().fill(todo.priority.color.opacity(0.15)).frame(width: 22, height: 22)
+                            Circle().fill(todo.priority.color).frame(width: 8, height: 8)
+                        } else if isOverdue {
+                            Circle().fill(theme.errorColor.opacity(0.06)).frame(width: 22, height: 22)
+                        }
                     }
+                    .frame(width: 38, height: 38)
+                    .contentShape(Rectangle())
                 }
-                .frame(width: 38, height: 38)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+                .buttonStyle(.plain)
 
-            // Main content
-            Button(action: onEdit) {
-                HStack(spacing: 8) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(todo.title)
-                            .font(.body.weight(todo.status == .inProgress ? .semibold : .regular))
-                            .foregroundStyle(todo.status == .done ? theme.secondaryText : theme.primaryText)
-                            .strikethrough(todo.status == .done, color: theme.secondaryText.opacity(0.5))
-                            .lineLimit(2)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                // Main content
+                Button(action: onEdit) {
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(todo.title)
+                                .font(.body.weight(todo.status == .inProgress ? .semibold : .regular))
+                                .foregroundStyle(todo.status == .done ? theme.secondaryText : theme.primaryText)
+                                .strikethrough(todo.status == .done, color: theme.secondaryText.opacity(0.5))
+                                .lineLimit(2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
 
-                        HStack(spacing: 6) {
-                            // Priority badge
-                            HStack(spacing: 3) {
-                                Image(systemName: todo.priority.icon).font(.system(size: 8, weight: .bold))
-                                Text(todo.priority.label).font(.system(size: 10, weight: .medium))
-                            }
-                            .foregroundStyle(todo.priority.color)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(todo.priority.color.opacity(0.1), in: Capsule())
-
-                            // Due date chip
-                            if let due = todo.dueDate {
-                                dueDateChip(due)
-                            }
-
-                            // Timer active badge
-                            if isTimerActive {
+                            HStack(spacing: 6) {
                                 HStack(spacing: 3) {
-                                    Image(systemName: "timer").font(.system(size: 8))
-                                    Text("Active").font(.system(size: 10, weight: .medium))
+                                    Image(systemName: todo.priority.icon).font(.system(size: 8, weight: .bold))
+                                    Text(todo.priority.label).font(.system(size: 10, weight: .medium))
                                 }
-                                .foregroundStyle(theme.accentColor)
+                                .foregroundStyle(todo.priority.color)
                                 .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(theme.accentColor.opacity(0.1), in: Capsule())
-                            }
+                                .background(todo.priority.color.opacity(0.1), in: Capsule())
 
-                            // Tracked time chip
-                            if trackedTime >= 60 {
-                                HStack(spacing: 3) {
-                                    Image(systemName: "clock.fill").font(.system(size: 8))
-                                    Text(formatDuration(trackedTime)).font(.system(size: 10, weight: .medium))
-                                }
-                                .foregroundStyle(theme.secondaryText)
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(.quaternary, in: Capsule())
-                            }
+                                if let due = todo.dueDate { dueDateChip(due) }
 
-                            // AI breakdown spinner
-                            if isBreakingDown {
-                                HStack(spacing: 3) {
-                                    Image(systemName: "sparkles").font(.system(size: 8))
-                                    Text("Breaking down…").font(.system(size: 10, weight: .medium))
+                                if isTimerActive {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "timer").font(.system(size: 8))
+                                        Text("Active").font(.system(size: 10, weight: .medium))
+                                    }
+                                    .foregroundStyle(theme.accentColor)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(theme.accentColor.opacity(0.1), in: Capsule())
                                 }
-                                .foregroundStyle(theme.infoColor)
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(theme.infoColor.opacity(0.1), in: Capsule())
+
+                                if trackedTime >= 60 {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "clock.fill").font(.system(size: 8))
+                                        Text(formatDuration(trackedTime)).font(.system(size: 10, weight: .medium))
+                                    }
+                                    .foregroundStyle(theme.secondaryText)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(.quaternary, in: Capsule())
+                                }
+
+                                if isBreakingDown {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "sparkles").font(.system(size: 8))
+                                        Text("Breaking down…").font(.system(size: 10, weight: .medium))
+                                    }
+                                    .foregroundStyle(theme.infoColor)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(theme.infoColor.opacity(0.1), in: Capsule())
+                                }
                             }
                         }
                     }
+                    .padding(.vertical, 10)
+                    .contentShape(Rectangle())
                 }
-                .padding(.vertical, 10)
-                .padding(.trailing, 12)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+
+                // Subtask progress + expand button
+                if todo.hasSubtasks {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { subtasksExpanded.toggle() }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("\(todo.completedSubtaskCount)/\(todo.subtasks.count)")
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(todo.completedSubtaskCount == todo.subtasks.count
+                                                 ? theme.successColor : theme.secondaryText)
+                            Image(systemName: subtasksExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(theme.secondaryText)
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(theme.dividerColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 8)
+                }
             }
-            .buttonStyle(.plain)
+
+            // ── Subtasks section ──────────────────────────────────────
+            if todo.hasSubtasks && subtasksExpanded {
+                VStack(spacing: 2) {
+                    ForEach(todo.subtasks) { subtask in
+                        SubtaskRowView(subtask: subtask, parentId: todo.id, theme: theme)
+                    }
+                    // Add subtask row
+                    if showingAddSubtask {
+                        HStack(spacing: 8) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 13))
+                                .foregroundStyle(theme.accentColor)
+                                .frame(width: 38)
+                            TextField("New subtask…", text: $newSubtaskTitle)
+                                .font(.system(size: 13))
+                                .textFieldStyle(.plain)
+                                .onSubmit { commitAddSubtask() }
+                            Button("Add") { commitAddSubtask() }
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(theme.accentColor)
+                                .disabled(newSubtaskTitle.trimmingCharacters(in: .whitespaces).isEmpty)
+                            Button("Cancel") {
+                                newSubtaskTitle = ""
+                                showingAddSubtask = false
+                            }
+                            .font(.caption)
+                            .foregroundStyle(theme.secondaryText)
+                        }
+                        .padding(.vertical, 6)
+                        .padding(.trailing, 12)
+                    } else {
+                        Button {
+                            withAnimation { showingAddSubtask = true }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "plus").font(.system(size: 10, weight: .semibold))
+                                Text("Add subtask").font(.system(size: 11))
+                            }
+                            .foregroundStyle(theme.secondaryText.opacity(0.6))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.leading, 38)
+                            .padding(.vertical, 5)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.bottom, 6)
+            }
         }
         .background {
             RoundedRectangle(cornerRadius: 10)
@@ -788,17 +857,28 @@ struct TodoRowView: View {
                 )
             }
             Divider()
-            Button(action: onSetTimer) { Label("Set in Timer", systemImage: "timer") }
+            Button { withAnimation { showingAddSubtask = true; subtasksExpanded = true } }
+                label: { Label("Add Subtask", systemImage: "plus.circle") }
             Button(action: onBreakdown) {
                 Label(
-                    isBreakingDown ? "Breaking down…" : "Break down with AI",
+                    isBreakingDown ? "Breaking down…" : "Break Down with AI",
                     systemImage: "sparkles"
                 )
             }
             .disabled(isBreakingDown)
             Divider()
+            Button(action: onSetTimer) { Label("Set in Timer", systemImage: "timer") }
+            Divider()
             Button("Delete", role: .destructive, action: onDelete)
         }
+    }
+
+    private func commitAddSubtask() {
+        let title = newSubtaskTitle.trimmingCharacters(in: .whitespaces)
+        guard !title.isEmpty else { return }
+        store.addSubtask(TodoItem(title: title), to: todo.id)
+        newSubtaskTitle = ""
+        showingAddSubtask = false
     }
 
     @ViewBuilder
@@ -844,7 +924,79 @@ struct TodoRowView: View {
     }
 }
 
-// MARK: - Add / Edit Sheet
+// MARK: - Subtask Row
+
+private struct SubtaskRowView: View {
+    let subtask: TodoItem
+    let parentId: String
+    let theme: AppTheme
+    @State private var isEditing = false
+    @State private var editTitle = ""
+
+    var body: some View {
+        HStack(spacing: 6) {
+            // indent line
+            Rectangle()
+                .fill(theme.dividerColor.opacity(0.25))
+                .frame(width: 1.5)
+                .padding(.leading, 19)
+
+            Button {
+                TodoStore.shared.toggleSubtask(subtask.id, in: parentId)
+            } label: {
+                ZStack {
+                    Circle()
+                        .stroke(subtask.status == .done ? theme.successColor : theme.dividerColor, lineWidth: 1.5)
+                        .frame(width: 16, height: 16)
+                    if subtask.status == .done {
+                        Circle().fill(theme.successColor).frame(width: 16, height: 16)
+                        Image(systemName: "checkmark").font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(theme.selectedForeground)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+
+            if isEditing {
+                TextField("", text: $editTitle)
+                    .font(.system(size: 13))
+                    .textFieldStyle(.plain)
+                    .onSubmit {
+                        let t = editTitle.trimmingCharacters(in: .whitespaces)
+                        if !t.isEmpty { TodoStore.shared.updateSubtaskTitle(subtask.id, in: parentId, newTitle: t) }
+                        isEditing = false
+                    }
+            } else {
+                Text(subtask.title)
+                    .font(.system(size: 13))
+                    .foregroundStyle(subtask.status == .done ? theme.secondaryText : theme.primaryText)
+                    .strikethrough(subtask.status == .done, color: theme.secondaryText.opacity(0.5))
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Spacer()
+        }
+        .padding(.vertical, 4)
+        .padding(.trailing, 12)
+        .contextMenu {
+            Button { editTitle = subtask.title; isEditing = true }
+                label: { Label("Rename", systemImage: "pencil") }
+            Button {
+                TodoStore.shared.toggleSubtask(subtask.id, in: parentId)
+            } label: {
+                Label(subtask.status == .done ? "Mark To Do" : "Mark Done",
+                      systemImage: subtask.status == .done ? "circle" : "checkmark.circle")
+            }
+            Divider()
+            Button("Delete", role: .destructive) {
+                TodoStore.shared.deleteSubtask(subtask.id, from: parentId)
+            }
+        }
+    }
+}
+
+
 
 struct TodoEditSheet: View {
     @Environment(\.dismiss) private var dismiss

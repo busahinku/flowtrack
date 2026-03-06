@@ -299,7 +299,7 @@ final class ActivityTracker: ObservableObject {
                     self.lastBrowserTitle = title
                     let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: title, url: url, isIdle: false)
                     self.checkDistractionAlert(category: cat)
-                    self.writeRecord(appName: appName, bundleID: bundleID, title: title, url: url, category: cat, isIdle: false, duration: 0)
+                    self.writeRecord(appName: appName, bundleID: bundleID, title: title, url: url, category: cat, isIdle: false, duration: 1)
                     self.lastSavedURL = url
                     self.lastSavedCategory = cat
                 }
@@ -308,7 +308,7 @@ final class ActivityTracker: ObservableObject {
             // Non-browser: write immediately so the switch is recorded at the right timestamp
             let cat = resolveCategory(appName: appName, bundleID: bundleID, title: title, url: nil, isIdle: false)
             checkDistractionAlert(category: cat)
-            writeRecord(appName: appName, bundleID: bundleID, title: title, url: nil, category: cat, isIdle: false, duration: 0)
+            writeRecord(appName: appName, bundleID: bundleID, title: title, url: nil, category: cat, isIdle: false, duration: 1)
             lastSavedCategory = cat
         }
     }
@@ -350,7 +350,7 @@ final class ActivityTracker: ObservableObject {
     }
 
     private func writeRecord(appName: String, bundleID: String, title: String, url: String?, category: Category, isIdle: Bool, duration: TimeInterval) {
-        guard duration >= 60 || isIdle else { return }  // skip sub-minute non-idle noise
+        guard duration >= 5 || isIdle else { return }  // capture all activity ≥5s for AI window analysis
         let record = ActivityRecord(
             timestamp: Date(), appName: appName, bundleID: bundleID,
             windowTitle: title, url: url, category: category,
