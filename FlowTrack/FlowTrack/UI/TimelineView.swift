@@ -327,10 +327,24 @@ struct SessionCardView: View {
 
     private var theme: AppTheme { AppSettings.shared.appTheme }
     private var catColor: Color { Theme.color(for: slot.category) }
-    private var summary: String? { AppState.shared.sessionSummaries[slot.id] }
 
     var body: some View {
-        Button { showDetail = true } label: { cardContent }
+        switch slot.status {
+        case .processed:
+            processedCard
+        case .processing:
+            placeholderCard(text: "Processing...", color: .gray, pulsing: true)
+        case .continuous:
+            placeholderCard(text: "Processing continuous", color: catColor, pulsing: false)
+        case .pending:
+            placeholderCard(text: "Analyzing...", color: .gray.opacity(0.5), pulsing: false, dashed: true)
+        }
+    }
+
+    // MARK: - Processed Card (full content)
+
+    private var processedCard: some View {
+        Button { showDetail = true } label: { processedCardContent }
             .buttonStyle(.plain)
             .onHover { isHovered = $0 }
             .sheet(isPresented: $showDetail) {
@@ -339,15 +353,13 @@ struct SessionCardView: View {
     }
 
     @ViewBuilder
-    private var cardContent: some View {
-        // Top-aligned: HStack with .top alignment so color bar and content both anchor at top
+    private var processedCardContent: some View {
         HStack(alignment: .top, spacing: 0) {
             Rectangle()
                 .fill(catColor)
                 .frame(width: 3)
 
             if isCompact {
-                // Single-line layout for short events
                 HStack(spacing: 5) {
                     if let first = slot.activities.first {
                         AppIconImage(bundleID: first.bundleID, size: 11)
@@ -364,7 +376,6 @@ struct SessionCardView: View {
                 .padding(.vertical, 3)
             } else {
                 VStack(alignment: .leading, spacing: 3) {
-                    // Row 1: title + time range
                     HStack(spacing: 4) {
                         Text(title)
                             .font(.system(size: 11, weight: .semibold))
@@ -376,7 +387,6 @@ struct SessionCardView: View {
                             .lineLimit(1)
                     }
 
-                    // Row 2: app icons + duration
                     HStack(spacing: 3) {
                         ForEach(slot.activities.prefix(5)) { app in
                             AppIconImage(bundleID: app.bundleID, size: 12)
@@ -392,8 +402,7 @@ struct SessionCardView: View {
                             .foregroundStyle(catColor.opacity(0.9))
                     }
 
-                    // Row 3: AI summary — only when card is tall enough (≥ 90pt ≈ 38 min)
-                    if let summary, !summary.isEmpty, cardHeight >= 90 {
+                    if let summary = slot.summary, !summary.isEmpty, cardHeight >= 90 {
                         Divider().opacity(0.4)
                         Text(summary)
                             .font(.system(size: 10))
@@ -421,5 +430,56 @@ struct SessionCardView: View {
         .shadow(color: catColor.opacity(isHovered ? 0.2 : 0.0), radius: 6, y: 2)
         .shadow(color: theme.shadowColor.opacity(0.06), radius: 2, y: 1)
         .animation(.easeOut(duration: 0.1), value: isHovered)
+    }
+
+    // MARK: - Placeholder Cards (processing / continuous / pending)
+
+    private func placeholderCard(text: String, color: Color, pulsing: Bool, dashed: Bool = false) -> some View {
+        HStack(alignment: .top, spacing: 0) {
+            Rectangle()
+                .fill(color)
+                .frame(width: 3)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    if pulsing {
+                        Circle()
+                            .fill(color)
+                            .frame(width: 6, height: 6)
+                            .opacity(0.7)
+                            .modifier(PulseModifier())
+                    }
+                    Text(text)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(theme.secondaryText)
+                    Spacer(minLength: 0)
+                    Text(Theme.formatTimeRange(slot.startTime, slot.endTime))
+                        .font(.system(size: 9))
+                        .foregroundStyle(theme.secondaryText.opacity(0.6))
+                }
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 5)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(theme.cardBg.opacity(0.6))
+        .clipShape(RoundedRectangle(cornerRadius: TL.cornerRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: TL.cornerRadius)
+                .stroke(color.opacity(0.25), lineWidth: 1)
+                .strokeBorder(style: dashed ? StrokeStyle(lineWidth: 1, dash: [4, 3]) : StrokeStyle(lineWidth: 1))
+        )
+    }
+}
+
+/// Subtle pulse animation modifier for processing indicator
+private struct PulseModifier: ViewModifier {
+    @State private var isPulsing = false
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(isPulsing ? 1.3 : 1.0)
+            .opacity(isPulsing ? 0.4 : 1.0)
+            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isPulsing)
+            .onAppear { isPulsing = true }
     }
 }

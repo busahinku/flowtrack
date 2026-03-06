@@ -1034,7 +1034,7 @@ struct PrivacyTab: View {
     @State private var clearResult: String?
     @State private var clearError: String?
     @State private var newBundleID = ""
-    @State private var storageStats: (activities: Int, aiRecords: Int, bytes: Int64) = (0, 0, 0)
+    @State private var storageStats: (activities: Int, aiRecords: Int, segments: Int, bytes: Int64) = (0, 0, 0, 0)
     private var theme: AppTheme { AppSettings.shared.appTheme }
 
     var body: some View {
@@ -1108,6 +1108,13 @@ struct PrivacyTab: View {
                     Label("AI Summaries", systemImage: "sparkles")
                     Spacer()
                     Text("\(storageStats.aiRecords)")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(theme.secondaryText)
+                }
+                HStack {
+                    Label("AI Segments", systemImage: "rectangle.split.3x1")
+                    Spacer()
+                    Text("\(storageStats.segments)")
                         .font(.system(.body, design: .monospaced))
                         .foregroundStyle(theme.secondaryText)
                 }
@@ -1252,8 +1259,8 @@ struct PrivacyTab: View {
             Button("Clear", role: .destructive) {
                 do {
                     try Database.shared.clearSessionAI()
-                    AppState.shared.sessionTitles.removeAll()
-                    AppState.shared.sessionSummaries.removeAll()
+                    try Database.shared.clearWindowSegments()
+                    Task { await AppState.shared.refreshData(force: true) }
                     refreshStats()
                     setResult("AI summaries cleared")
                 } catch { clearError = error.localizedDescription }
@@ -1265,9 +1272,7 @@ struct PrivacyTab: View {
             Button("Clear", role: .destructive) {
                 do {
                     try Database.shared.clearAllData()
-                    AppState.shared.sessionTitles.removeAll()
-                    AppState.shared.sessionSummaries.removeAll()
-                    Task { await AppState.shared.refreshData() }
+                    Task { await AppState.shared.refreshData(force: true) }
                     refreshStats()
                     setResult("All activity data cleared")
                     NotificationCenter.default.post(name: .init("FlowTrackDataCleared"), object: nil)
@@ -1289,9 +1294,7 @@ struct PrivacyTab: View {
                 do {
                     try Database.shared.clearAllData()
                     TodoStore.shared.clearAll()
-                    AppState.shared.sessionTitles.removeAll()
-                    AppState.shared.sessionSummaries.removeAll()
-                    Task { await AppState.shared.refreshData() }
+                    Task { await AppState.shared.refreshData(force: true) }
                     refreshStats()
                     setResult("Everything cleared")
                     NotificationCenter.default.post(name: .init("FlowTrackDataCleared"), object: nil)

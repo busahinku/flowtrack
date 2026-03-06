@@ -72,6 +72,23 @@ final class Database: Sendable {
             }
         }
 
+        migrator.registerMigration("v6_window_segments") { db in
+            try db.create(table: "window_segments", ifNotExists: true) { t in
+                t.column("id", .text).primaryKey()
+                t.column("windowId", .text).notNull()
+                t.column("segmentStart", .datetime).notNull()
+                t.column("segmentEnd", .datetime).notNull()
+                t.column("category", .text).notNull()
+                t.column("title", .text)
+                t.column("summary", .text)
+                t.column("isIdle", .boolean).notNull().defaults(to: false)
+                t.column("apps", .text).notNull().defaults(to: "[]")
+                t.column("processedAt", .datetime).notNull()
+            }
+            try db.create(index: "idx_ws_windowId", on: "window_segments", columns: ["windowId"])
+            try db.create(index: "idx_ws_date", on: "window_segments", columns: ["segmentStart"])
+        }
+
         try migrator.migrate(dbQueue)
     }
 
@@ -279,6 +296,268 @@ final class Database: Sendable {
     func sessionsForRange(from: Date, to: Date, gapThreshold: TimeInterval = 300) throws -> [TimeSlot] {
         let activities = try activitiesForRange(from: from, to: to)
         return buildSessions(from: activities, gapThreshold: gapThreshold)
+    }
+
+    // MARK: - Window Segments (30-minute AI blocks)
+
+    /// Generates a stable window ID for a given date, e.g. "2026-03-06T10:00"
+    static func windowId(for date: Date) -> String {
+        let cal = Calendar.current
+        let hour = cal.component(.hour, from: date)
+        let minute = cal.component(.minute, from: date)
+        let slot = minute < 30 ? 0 : 30
+        let slotDate = cal.date(bySettingHour: hour, minute: slot, second: 0, of: date)!
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd'T'HH:mm"
+        fmt.timeZone = cal.timeZone
+        return fmt.string(from: slotDate)
+    }
+
+    /// Returns the start/end dates for a given window ID
+    static func windowBounds(for windowId: String) -> (start: Date, end: Date)? {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd'T'HH:mm"
+        fmt.timeZone = Calendar.current.timeZone
+        guard let start = fmt.date(from: windowId) else { return nil }
+        let end = start.addingTimeInterval(30 * 60)
+        return (start, end)
+    }
+
+    /// All window IDs for a day (00:00, 00:30, ..., 23:30) — 48 total
+    static func allWindowIds(for date: Date) -> [String] {
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: date)
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd'T'HH:mm"
+        fmt.timeZone = cal.timeZone
+        return (0..<48).map { i in
+            fmt.string(from: start.addingTimeInterval(Double(i) * 30 * 60))
+        }
+    }
+
+    /// Save AI-analyzed segments for a given window
+    func saveWindowSegments(_ segments: [WindowSegment], windowId: String) throws {
+        try dbQueue.write { db in
+            // Remove existing segments for this window (re-analysis)
+            try db.execute(sql: "DELETE FROM window_segments WHERE windowId = ?", arguments: [windowId])
+            for seg in segments {
+                _ = try seg.inserted(db)
+            }
+        }
+    }
+
+    /// Fetch all processed segments for a specific date
+    func segmentsForDate(_ date: Date) throws -> [WindowSegment] {
+        let (start, end) = dayBounds(for: date)
+        return try dbQueue.read { db in
+            try WindowSegment
+                .filter(WindowSegment.Columns.segmentStart >= start && WindowSegment.Columns.segmentStart < end)
+                .order(WindowSegment.Columns.segmentStart)
+                .fetchAll(db)
+        }
+    }
+
+    /// Fetch raw activities within a 30-minute window (including idle)
+    func activitiesForWindow(windowId: String) throws -> [ActivityRecord] {
+        guard let bounds = Self.windowBounds(for: windowId) else { return [] }
+        return try dbQueue.read { db in
+            try ActivityRecord
+                .filter(ActivityRecord.Columns.timestamp >= bounds.start && ActivityRecord.Columns.timestamp < bounds.end)
+                .order(ActivityRecord.Columns.timestamp)
+                .fetchAll(db)
+        }
+    }
+
+    /// Set of window IDs that already have processed segments
+    func processedWindowIds(for date: Date) throws -> Set<String> {
+        let (start, end) = dayBounds(for: date)
+        return try dbQueue.read { db in
+            let rows = try String.fetchAll(db, sql: """
+                SELECT DISTINCT windowId FROM window_segments
+                WHERE segmentStart >= ? AND segmentStart < ?
+                """, arguments: [start, end])
+            return Set(rows)
+        }
+    }
+
+    /// Find completed (past) window IDs that have no segments — these need AI processing.
+    func unprocessedWindowIds(for date: Date, limit: Int = 48) throws -> [String] {
+        let cal = Calendar.current
+        let dayStart = cal.startOfDay(for: date)
+        let now = Date()
+        let currentWindowId = Self.windowId(for: now)
+        let processedIds = try processedWindowIds(for: date)
+
+        // Check which past windows have any activities
+        var unprocessed: [String] = []
+        let allIds = Self.allWindowIds(for: date)
+        for wid in allIds {
+            guard !processedIds.contains(wid) else { continue }
+            guard wid < currentWindowId else { continue } // only completed windows
+            guard let bounds = Self.windowBounds(for: wid) else { continue }
+            guard bounds.start >= dayStart && bounds.end <= now else { continue }
+            // Check if there are any activities in this window
+            let count = try dbQueue.read { db in
+                try ActivityRecord
+                    .filter(ActivityRecord.Columns.timestamp >= bounds.start && ActivityRecord.Columns.timestamp < bounds.end)
+                    .filter(ActivityRecord.Columns.isIdle == false)
+                    .fetchCount(db)
+            }
+            if count > 0 {
+                unprocessed.append(wid)
+            }
+            if unprocessed.count >= limit { break }
+        }
+        return unprocessed
+    }
+
+    /// Build timeline slots from window segments, merging adjacent same-category segments
+    /// and adding placeholder slots for unprocessed/current windows.
+    func timelineSlotsForDate(_ date: Date) throws -> [TimeSlot] {
+        let segments = try segmentsForDate(date)
+        let cal = Calendar.current
+        let now = Date()
+        let isToday = cal.isDateInToday(date)
+        let currentWindowId = isToday ? Self.windowId(for: now) : nil
+
+        // Convert segments to TimeSlots (skip idle and sub-60s segments)
+        var slots: [TimeSlot] = segments.compactMap { seg in
+            guard seg.segmentEnd.timeIntervalSince(seg.segmentStart) >= 60, !seg.isIdle else { return nil }
+            return TimeSlot(
+                id: seg.id,
+                startTime: seg.segmentStart,
+                endTime: seg.segmentEnd,
+                category: seg.category,
+                activities: seg.appSummaries,
+                isIdle: false,
+                title: seg.title,
+                summary: seg.summary,
+                status: .processed
+            )
+        }
+
+        // Add .pending placeholders for unprocessed past windows that have activities
+        let unprocessed = try unprocessedWindowIds(for: date)
+        for wid in unprocessed {
+            if let bounds = Self.windowBounds(for: wid) {
+                slots.append(TimeSlot(
+                    id: "pending-\(wid)",
+                    startTime: bounds.start,
+                    endTime: bounds.end,
+                    category: .uncategorized,
+                    activities: [],
+                    isIdle: false,
+                    status: .pending
+                ))
+            }
+        }
+
+        // Add current window placeholder (if today)
+        if isToday, let cwid = currentWindowId, let bounds = Self.windowBounds(for: cwid) {
+            // Check if the last processed segment's category matches the current foreground app
+            let lastProcessedSegment = segments.filter { !$0.isIdle }.last
+            let isContinuous = lastProcessedSegment != nil
+                && lastProcessedSegment!.segmentEnd.timeIntervalSince(bounds.start) > -120 // within 2 min of window start
+
+            slots.append(TimeSlot(
+                id: "current-\(cwid)",
+                startTime: bounds.start,
+                endTime: now,
+                category: lastProcessedSegment?.category ?? .uncategorized,
+                activities: [],
+                isIdle: false,
+                status: isContinuous ? .continuous : .processing
+            ))
+        }
+
+        // Sort by start time
+        slots.sort { $0.startTime < $1.startTime }
+
+        // Merge adjacent same-category processed slots
+        return mergeAdjacentProcessedSlots(slots)
+    }
+
+    /// Merges adjacent .processed TimeSlots with the same category into one visual card
+    private func mergeAdjacentProcessedSlots(_ slots: [TimeSlot]) -> [TimeSlot] {
+        guard !slots.isEmpty else { return [] }
+        var merged: [TimeSlot] = []
+        var current = slots[0]
+
+        for i in 1..<slots.count {
+            let next = slots[i]
+            // Only merge two processed, same-category, non-idle slots
+            if current.status == .processed && next.status == .processed
+                && current.category == next.category && !current.isIdle && !next.isIdle {
+                // Merge activities
+                var indexByName: [String: Int] = Dictionary(
+                    uniqueKeysWithValues: current.activities.enumerated().map { ($0.element.appName, $0.offset) }
+                )
+                var allActivities = current.activities
+                for a in next.activities {
+                    if let idx = indexByName[a.appName] {
+                        allActivities[idx] = ActivitySummary(
+                            appName: a.appName, bundleID: a.bundleID,
+                            title: allActivities[idx].title, url: allActivities[idx].url ?? a.url,
+                            duration: allActivities[idx].duration + a.duration,
+                            timestamps: allActivities[idx].timestamps + a.timestamps
+                        )
+                    } else {
+                        indexByName[a.appName] = allActivities.count
+                        allActivities.append(a)
+                    }
+                }
+                // Use first slot's title, combine summaries
+                let combinedSummary: String? = {
+                    if let s1 = current.summary, let s2 = next.summary { return s1 + " " + s2 }
+                    return current.summary ?? next.summary
+                }()
+                current = TimeSlot(
+                    id: current.id,
+                    startTime: current.startTime,
+                    endTime: next.endTime,
+                    category: current.category,
+                    activities: allActivities,
+                    isIdle: false,
+                    title: current.title ?? next.title,
+                    summary: combinedSummary,
+                    status: .processed
+                )
+            } else if current.status == .processed && next.status == .continuous
+                && current.category == next.category {
+                // Extend the previous card to cover the continuous window
+                current = TimeSlot(
+                    id: current.id,
+                    startTime: current.startTime,
+                    endTime: next.endTime,
+                    category: current.category,
+                    activities: current.activities,
+                    isIdle: false,
+                    title: current.title,
+                    summary: current.summary,
+                    status: .continuous
+                )
+            } else {
+                merged.append(current)
+                current = next
+            }
+        }
+        merged.append(current)
+        return merged
+    }
+
+    /// Delete all window segments (for re-analysis)
+    func clearWindowSegments() throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM window_segments")
+        }
+    }
+
+    /// Delete window segments for a specific date
+    func clearWindowSegments(for date: Date) throws {
+        let (start, end) = dayBounds(for: date)
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM window_segments WHERE segmentStart >= ? AND segmentStart < ?", arguments: [start, end])
+        }
     }
 
     private func buildSummaries(from records: [ActivityRecord]) -> [ActivitySummary] {
@@ -524,6 +803,7 @@ final class Database: Sendable {
         try dbQueue.write { db in
             try db.execute(sql: "DELETE FROM activities")
             try db.execute(sql: "DELETE FROM session_ai")
+            try db.execute(sql: "DELETE FROM window_segments")
         }
         try dbQueue.writeWithoutTransaction { db in
             try db.execute(sql: "VACUUM")
@@ -546,14 +826,15 @@ final class Database: Sendable {
         }
     }
 
-    /// Returns (activityCount, sessionAICount, fileSizeBytes)
-    func storageStats() -> (activities: Int, aiRecords: Int, bytes: Int64) {
+    /// Returns (activityCount, sessionAICount, segmentCount, fileSizeBytes)
+    func storageStats() -> (activities: Int, aiRecords: Int, segments: Int, bytes: Int64) {
         let actCount  = (try? dbQueue.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM activities") ?? 0 }) ?? 0
         let aiCount   = (try? dbQueue.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM session_ai") ?? 0 }) ?? 0
+        let segCount  = (try? dbQueue.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM window_segments") ?? 0 }) ?? 0
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let dbPath = appSupport.appendingPathComponent("FlowTrack/flowtrack.sqlite").path
         let bytes = (try? FileManager.default.attributesOfItem(atPath: dbPath)[.size] as? Int64) ?? 0
-        return (actCount, aiCount, bytes)
+        return (actCount, aiCount, segCount, bytes)
     }
 
 

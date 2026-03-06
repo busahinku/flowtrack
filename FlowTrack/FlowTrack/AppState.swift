@@ -14,8 +14,6 @@ final class AppState {
     var selectedDate: Date = Date()
     var isRunningAI = false
     var aiNextRunTime: Date?
-    var sessionTitles: [String: String] = [:]
-    var sessionSummaries: [String: String] = [:]
     /// Consecutive productive days (≥50% focus) ending today
     var streakDays: Int = 0
     /// Today's app switch count (context-switching metric)
@@ -29,15 +27,6 @@ final class AppState {
     private var refreshTimer: Timer?
     let settings = AppSettings.shared
 
-    // AI category cache: bundleID → category (prevents same app getting different categories)
-    // Capped at 500 entries to bound memory usage; evicts oldest entries first
-    private var aiCategoryCache: [String: Category] = [:]
-    private var aiCategoryCacheOrder: [String] = []  // insertion order for LRU eviction
-
-    // Insertion-order tracking for sessionTitles/sessionSummaries to ensure deterministic LRU eviction
-    private var sessionTitleOrder: [String] = []
-    private var sessionSummaryOrder: [String] = []
-
     // Session rebuild cache — skip expensive rebuild when nothing changed
     private var cachedSessionDate: Date?
     private var cachedActivityCount: Int = -1
@@ -47,7 +36,6 @@ final class AppState {
     private var cachedStreakValue: Int = 0
 
     private init() {
-        loadPersistedAIData()
         startTimers()
         Task {
             await reCategorizeWithRules()
@@ -87,8 +75,7 @@ final class AppState {
 
             guard force || count != cachedActivityCount || dateChanged else { return }
 
-            let gap = TimeInterval(settings.sessionGapSeconds)
-            timeSlots = try Database.shared.sessionsForDate(selectedDate, gapThreshold: gap)
+            timeSlots = try Database.shared.timelineSlotsForDate(selectedDate)
             categoryStats = try Database.shared.categoryStatsForDate(selectedDate)
             cachedActivityCount = count
             cachedSessionDate = selectedDate
@@ -111,25 +98,8 @@ final class AppState {
             } else {
                 streakDays = cachedStreakValue
             }
-
-            // Memory caps: keep only last 200 entries in AI caches
-            enforceAICacheLimit()
         } catch {
             log.error("Refresh error: \(error.localizedDescription)")
-        }
-    }
-
-    private func enforceAICacheLimit() {
-        let limit = 200
-        if sessionTitles.count > limit {
-            let toRemove = sessionTitleOrder.prefix(sessionTitles.count - limit)
-            toRemove.forEach { sessionTitles.removeValue(forKey: $0) }
-            sessionTitleOrder.removeFirst(toRemove.count)
-        }
-        if sessionSummaries.count > limit {
-            let toRemove = sessionSummaryOrder.prefix(sessionSummaries.count - limit)
-            toRemove.forEach { sessionSummaries.removeValue(forKey: $0) }
-            sessionSummaryOrder.removeFirst(toRemove.count)
         }
     }
 
@@ -198,183 +168,100 @@ final class AppState {
 
     // MARK: - AI Processing
 
-    /// Manual AI run — processes ALL unprocessed sessions
+    /// Manual AI run — processes ALL unprocessed windows for the selected day
     func runAINow() async {
         guard !isRunningAI else { return }
         isRunningAI = true
         defer { isRunningAI = false }
 
-        // First try rules (fast, free)
         await reCategorizeWithRules()
-        // Then AI for the rest
-        await categorizeBatch(limit: 500)
-        await generateAllSessionContent(maxTitles: 50, maxSummaries: 20)
+        await analyzeUnprocessedWindows(limit: 200)
         await refreshData(force: true)
     }
 
-    /// Timer-based AI batch — smaller limits
+    /// Timer-based AI batch — processes recent unprocessed windows
     func runAIBatch() async {
         guard !isRunningAI else { return }
         isRunningAI = true
         defer { isRunningAI = false }
 
         await reCategorizeWithRules()
-        await categorizeBatch(limit: settings.aiBatchSize)
-        await generateAllSessionContent(maxTitles: 8, maxSummaries: 5)
+        await analyzeUnprocessedWindows(limit: 4)
         await refreshData(force: true)
     }
 
-    func generateAllSessionContent(maxTitles: Int = 50, maxSummaries: Int = 20) async {
-        let slotsWithoutTitles = Array(timeSlots.filter { !$0.isIdle && sessionTitles[$0.id] == nil }.prefix(maxTitles))
-        let slotsWithoutSummaries = Array(timeSlots.filter { !$0.isIdle && sessionSummaries[$0.id] == nil && settings.aiSummariesEnabled }.prefix(maxSummaries))
-
-        // Parallel title generation
-        await withTaskGroup(of: (String, String)?.self) { group in
-            for slot in slotsWithoutTitles {
-                group.addTask {
-                    do {
-                        let title = try await self.withFallback { provider in
-                            try await provider.generateTitle(activities: slot.activities, category: slot.category)
-                        }
-                        return (slot.id, title)
-                    } catch {
-                        self.log.error("Title generation failed for \(slot.id, privacy: .private): \(error.localizedDescription, privacy: .private)")
-                        return nil
-                    }
-                }
-            }
-            for await result in group {
-                if let (id, title) = result {
-                    if sessionTitles[id] == nil { sessionTitleOrder.append(id) }
-                    sessionTitles[id] = title
-                    try? Database.shared.saveSessionAI(sessionId: id, title: title, summary: sessionSummaries[id])
-                }
-            }
-        }
-
-        // Parallel summary generation
-        await withTaskGroup(of: (String, String)?.self) { group in
-            for slot in slotsWithoutSummaries {
-                group.addTask {
-                    do {
-                        let summary = try await self.withFallback { provider in
-                            try await provider.summarize(activities: slot.activities)
-                        }
-                        return (slot.id, summary)
-                    } catch {
-                        self.log.error("Summary generation failed for \(slot.id, privacy: .private): \(error.localizedDescription, privacy: .private)")
-                        return nil
-                    }
-                }
-            }
-            for await result in group {
-                if let (id, summary) = result {
-                    if sessionSummaries[id] == nil { sessionSummaryOrder.append(id) }
-                    sessionSummaries[id] = summary
-                    try? Database.shared.saveSessionAI(sessionId: id, title: sessionTitles[id], summary: summary)
-                }
-            }
-        }
-    }
-
-    private func categorizeBatch(limit: Int) async {
+    /// Core window analysis: find completed 30-min windows without segments, analyze via AI
+    private func analyzeUnprocessedWindows(limit: Int) async {
         do {
-            let uncategorized = try Database.shared.uncategorizedActivities(limit: limit)
-            guard !uncategorized.isEmpty else { return }
+            let windowIds = try Database.shared.unprocessedWindowIds(for: selectedDate, limit: limit)
+            guard !windowIds.isEmpty else { return }
 
-            var allUpdates: [(id: Int64, category: Category)] = []
+            log.info("Analyzing \(windowIds.count) unprocessed windows")
 
-            // First: apply cached AI categories (instant, no API calls)
-            var needsAI: [ActivityRecord] = []
-            for record in uncategorized {
-                guard let id = record.id else { continue }
-                if let cached = aiCategoryCache[record.bundleID.lowercased()] {
-                    allUpdates.append((id: id, category: cached))
-                } else {
-                    needsAI.append(record)
-                }
-            }
+            for windowId in windowIds {
+                let activities = try Database.shared.activitiesForWindow(windowId: windowId)
+                let nonIdle = activities.filter { !$0.isIdle }
+                guard !nonIdle.isEmpty else { continue }
 
-            // Then: batch AI categorize the rest
-            let batchSize = 10
-            for batchStart in stride(from: 0, to: needsAI.count, by: batchSize) {
-                let end = min(batchStart + batchSize, needsAI.count)
-                let batchRecords = Array(needsAI[batchStart..<end])
-
-                let items = batchRecords.enumerated().map { (idx, record) in
-                    BatchCategorizeItem(
-                        index: idx,
-                        appName: record.appName,
-                        bundleID: record.bundleID,
-                        windowTitle: record.windowTitle,
-                        url: record.url
-                    )
-                }
+                guard let bounds = Database.windowBounds(for: windowId) else { continue }
 
                 do {
                     let results = try await withFallback { provider in
-                        try await provider.categorizeBatch(items: items)
+                        try await provider.analyzeActivityWindow(
+                            activities: activities,
+                            windowStart: bounds.start,
+                            windowEnd: bounds.end
+                        )
                     }
 
-                    for (idx, record) in batchRecords.enumerated() {
-                        guard let id = record.id else { continue }
-                        if let category = results[idx] {
-                            allUpdates.append((id: id, category: category))
-                            // Cache and learn
-                            learnCategory(category, for: record)
-                        }
+                    // Convert WindowSegmentResult → WindowSegment for storage
+                    let encoder = JSONEncoder()
+                    let segments = results.enumerated().map { idx, result -> WindowSegment in
+                        let appsJSON = (try? String(data: encoder.encode(result.apps), encoding: .utf8)) ?? "[]"
+                        return WindowSegment(
+                            id: "\(windowId)-\(idx)",
+                            windowId: windowId,
+                            segmentStart: result.segmentStart,
+                            segmentEnd: result.segmentEnd,
+                            category: result.category,
+                            title: result.title,
+                            summary: result.summary,
+                            isIdle: result.isIdle,
+                            apps: appsJSON,
+                            processedAt: Date()
+                        )
                     }
+
+                    try Database.shared.saveWindowSegments(segments, windowId: windowId)
+                    log.info("Saved \(segments.count) segments for window \(windowId)")
                 } catch {
-                    log.warning("Batch categorization failed, falling back to individual: \(error.localizedDescription)")
-                    for record in batchRecords {
-                        guard let id = record.id else { continue }
-                        do {
-                            let category = try await withFallback { provider in
-                                try await provider.categorize(
-                                    appName: record.appName,
-                                    bundleID: record.bundleID,
-                                    windowTitle: record.windowTitle,
-                                    url: record.url
-                                )
-                            }
-                            allUpdates.append((id: id, category: category))
-                            learnCategory(category, for: record)
-                        } catch {
-                            log.warning("Individual categorization failed for \(record.appName, privacy: .private): \(error.localizedDescription, privacy: .private)")
-                        }
+                    log.error("Window analysis failed for \(windowId): \(error.localizedDescription)")
+                    // On AI failure, create a fallback segment with rule-engine dominant category
+                    let fallbackResults = AIPromptBuilder.fallbackSegment(
+                        windowStart: bounds.start, windowEnd: bounds.end, activities: nonIdle
+                    )
+                    let encoder = JSONEncoder()
+                    let segments = fallbackResults.enumerated().map { idx, result -> WindowSegment in
+                        let appsJSON = (try? String(data: encoder.encode(result.apps), encoding: .utf8)) ?? "[]"
+                        return WindowSegment(
+                            id: "\(windowId)-\(idx)",
+                            windowId: windowId,
+                            segmentStart: result.segmentStart,
+                            segmentEnd: result.segmentEnd,
+                            category: result.category,
+                            title: nil,
+                            summary: nil,
+                            isIdle: result.isIdle,
+                            apps: appsJSON,
+                            processedAt: Date()
+                        )
                     }
+                    try? Database.shared.saveWindowSegments(segments, windowId: windowId)
                 }
             }
-
-            if !allUpdates.isEmpty {
-                try Database.shared.updateCategoriesBatch(allUpdates)
-                log.info("Categorized \(allUpdates.count) activities")
-            }
         } catch {
-            log.error("Batch error: \(error.localizedDescription)")
+            log.error("Window analysis error: \(error.localizedDescription)")
         }
-    }
-
-    /// Cache AI result and teach the rule engine
-    private func learnCategory(_ category: Category, for record: ActivityRecord) {
-        guard category != .uncategorized, category != .idle else { return }
-        let bid = record.bundleID.lowercased()
-        let browserBIDs = ["safari", "chrome", "firefox", "arc", "brave", "edge", "opera", "vivaldi", "browser"]
-        let isBrowser = browserBIDs.contains(where: { bid.contains($0) })
-        if !isBrowser {
-            // Non-browser: cache by bundleID
-            if aiCategoryCache.count >= 500 {
-                let evictCount = 50
-                let toRemove = aiCategoryCacheOrder.prefix(evictCount)
-                for key in toRemove { aiCategoryCache.removeValue(forKey: key) }
-                aiCategoryCacheOrder.removeFirst(min(evictCount, aiCategoryCacheOrder.count))
-            }
-            aiCategoryCache[bid] = category
-            aiCategoryCacheOrder.append(bid)
-        }
-        // Always call learnFromAI — it handles browser vs non-browser internally,
-        // and for browsers it will learn a domain rule (if URL is available)
-        RuleEngine.shared.learnFromAI(appName: record.appName, bundleID: record.bundleID, category: category, url: record.url)
     }
 
     // MARK: - AI Fallback Chain
@@ -428,8 +315,8 @@ final class AppState {
     // MARK: - Session Helpers
 
     func sessionTitle(for slot: TimeSlot) -> String {
-        if let title = sessionTitles[slot.id] { return title }
-        // Better fallback: show category + top app
+        if let title = slot.title { return title }
+        // Fallback: show category + top app
         if let topApp = slot.activities.first {
             if slot.activities.count > 1 {
                 return "\(topApp.appName) + \(slot.activities.count - 1) more"
@@ -437,26 +324,6 @@ final class AppState {
             return topApp.appName
         }
         return slot.category.rawValue
-    }
-
-    // MARK: - Persistence
-
-    private func loadPersistedAIData() {
-        do {
-            let data = try Database.shared.loadAllSessionAI()
-            for item in data {
-                if let title = item.title {
-                    if sessionTitles[item.sessionId] == nil { sessionTitleOrder.append(item.sessionId) }
-                    sessionTitles[item.sessionId] = title
-                }
-                if let summary = item.summary {
-                    if sessionSummaries[item.sessionId] == nil { sessionSummaryOrder.append(item.sessionId) }
-                    sessionSummaries[item.sessionId] = summary
-                }
-            }
-        } catch {
-            log.error("Failed to load persisted AI data: \(error.localizedDescription)")
-        }
     }
 
     // MARK: - Deep Work Detection

@@ -11,15 +11,32 @@ struct SessionDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            headerStrip
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 12) {
-                    if let summary = appState.sessionSummaries[slot.id] {
-                        summaryCard(summary)
+            if slot.status == .processed {
+                headerStrip
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if let summary = slot.summary {
+                            summaryCard(summary)
+                        }
+                        appsCard
                     }
-                    appsCard
+                    .padding(16)
                 }
-                .padding(16)
+            } else {
+                headerStrip
+                Spacer()
+                VStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 28))
+                        .foregroundStyle(theme.secondaryText.opacity(0.5))
+                    Text("This block is being analyzed")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(theme.secondaryText)
+                    Text("AI will process this time window shortly.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.secondaryText.opacity(0.7))
+                }
+                Spacer()
             }
         }
         .frame(width: 420)

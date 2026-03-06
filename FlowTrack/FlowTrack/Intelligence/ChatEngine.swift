@@ -206,7 +206,6 @@ final class ChatEngine {
 
         // --- Session timeline ---
         // Only sessions ≥ 3 min active time; capped at 25 to save tokens
-        let appState = AppState.shared
         let significant = active.filter { $0.activeDuration >= 180 }.prefix(25)
         if !significant.isEmpty {
             lines.append("\n## Sessions")
@@ -214,7 +213,7 @@ final class ChatEngine {
                 let t     = Self.timeFormatter.string(from: slot.startTime)
                 let e     = Self.timeFormatter.string(from: slot.endTime)
                 let dur   = Self.dur(slot.activeDuration)
-                let title = appState.sessionTitles[slot.id]
+                let title = slot.title
                 // Only domain-stripped URLs, max 3 apps per session
                 let topApps = slot.activities.prefix(3).map { a -> String in
                     if let url = a.url { return "\(a.appName)(\(AIPromptBuilder.domainOnly(from: url)))" }
@@ -223,7 +222,7 @@ final class ChatEngine {
                 var line = "\(t)–\(e) \(slot.category.rawValue) \(dur)"
                 if let ti = title { line += " \"\(ti)\"" }
                 line += " [\(topApps)]"
-                if let sum = appState.sessionSummaries[slot.id] {
+                if let sum = slot.summary {
                     line += " → \(sum)"
                 }
                 lines.append(line)

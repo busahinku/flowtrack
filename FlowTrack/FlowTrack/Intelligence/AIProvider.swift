@@ -50,6 +50,8 @@ protocol AIProvider: Sendable {
     func checkHealth() async throws -> Bool
     /// Multi-turn chat with a system prompt providing activity context.
     func chat(messages: [ChatTurn], systemPrompt: String) async throws -> String
+    /// Analyze a 30-minute activity window and return structured segments.
+    func analyzeActivityWindow(activities: [ActivityRecord], windowStart: Date, windowEnd: Date) async throws -> [WindowSegmentResult]
 }
 
 extension AIProvider {
@@ -81,6 +83,18 @@ extension AIProvider {
             results[item.index] = cat
         }
         return results
+    }
+
+    /// Default window analysis: sends prompt to AI via chat, parses JSON response.
+    /// Falls back to a single segment with dominant category on failure.
+    func analyzeActivityWindow(activities: [ActivityRecord], windowStart: Date, windowEnd: Date) async throws -> [WindowSegmentResult] {
+        guard !activities.isEmpty else { return [] }
+        let prompt = AIPromptBuilder.windowAnalysisPrompt(activities: activities, windowStart: windowStart, windowEnd: windowEnd)
+        let response = try await chat(
+            messages: [ChatTurn(role: "user", content: prompt)],
+            systemPrompt: "You are a productivity analysis AI. Respond with JSON only."
+        )
+        return AIPromptBuilder.parseWindowSegments(response, windowStart: windowStart, windowEnd: windowEnd, activities: activities)
     }
 }
 
@@ -224,6 +238,160 @@ struct AIPromptBuilder {
             return Category(rawValue: match.name)
         }
         return nil
+    }
+
+    // MARK: - Window Analysis Prompt
+
+    static func windowAnalysisPrompt(activities: [ActivityRecord], windowStart: Date, windowEnd: Date) -> String {
+        let timeFmt = DateFormatter()
+        timeFmt.dateFormat = "HH:mm:ss"
+        timeFmt.timeZone = Calendar.current.timeZone
+        let windowStartStr = timeFmt.string(from: windowStart)
+        let windowEndStr = timeFmt.string(from: windowEnd)
+
+        // Build compact activity list
+        var lines: [String] = []
+        for a in activities {
+            let time = timeFmt.string(from: a.timestamp)
+            var line = "\(time) \(a.appName)"
+            if !a.windowTitle.isEmpty { line += " \"\(a.windowTitle.prefix(80))\"" }
+            if let url = a.url { line += " [\(domainOnly(from: url))]" }
+            line += " \(Int(a.duration))s"
+            if a.isIdle { line += " [IDLE]" }
+            lines.append(line)
+        }
+
+        let categoriesList = CategoryManager.shared.allCategories.map { $0.name }.joined(separator: ", ")
+
+        return """
+        Analyze this \(windowStartStr)–\(windowEndStr) activity window. Return a JSON array of time segments.
+
+        Activities (format: HH:mm:ss AppName "WindowTitle" [domain] duration_seconds):
+        \(lines.joined(separator: "\n"))
+
+        Rules:
+        - Group consecutive related activities into segments (minimum 60 seconds per segment)
+        - Detect idle gaps (periods with [IDLE] markers or no activity for >2 minutes)
+        - Available categories: \(categoriesList)
+        - Each segment needs: start (HH:mm), end (HH:mm), category, title (5-10 words describing what was done), isIdle (boolean)
+        - Add a summary field (1-2 sentences) for segments longer than 10 minutes
+        - Merge very short app switches (<30s) into the surrounding segment
+        - Start must be >= \(windowStartStr.prefix(5)) and end must be <= \(windowEndStr.prefix(5))
+
+        Respond with ONLY a JSON array, no markdown fences, no explanation:
+        [{"start":"HH:mm","end":"HH:mm","category":"Work","title":"Short description","summary":null,"isIdle":false}]
+        """
+    }
+
+    /// Parse AI JSON response into WindowSegmentResult array.
+    /// Falls back to a single segment with dominant category on parse failure.
+    static func parseWindowSegments(_ text: String, windowStart: Date, windowEnd: Date, activities: [ActivityRecord]) -> [WindowSegmentResult] {
+        let cleaned = text
+            .replacingOccurrences(of: "```json", with: "")
+            .replacingOccurrences(of: "```", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let data = cleaned.data(using: .utf8),
+              let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            aiLogger.warning("Failed to parse window analysis JSON, falling back to single segment")
+            return fallbackSegment(windowStart: windowStart, windowEnd: windowEnd, activities: activities)
+        }
+
+        let cal = Calendar.current
+        let timeFmt = DateFormatter()
+        timeFmt.dateFormat = "HH:mm"
+        timeFmt.timeZone = cal.timeZone
+
+        // Base date for constructing segment times
+        let dayStart = cal.startOfDay(for: windowStart)
+
+        var results: [WindowSegmentResult] = []
+        for obj in jsonArray {
+            guard let startStr = obj["start"] as? String,
+                  let endStr = obj["end"] as? String,
+                  let catStr = obj["category"] as? String else { continue }
+
+            guard let startTime = timeFmt.date(from: startStr),
+                  let endTime = timeFmt.date(from: endStr) else { continue }
+
+            // Reconstruct full dates from HH:mm relative to the window's day
+            let startComps = cal.dateComponents([.hour, .minute], from: startTime)
+            let endComps = cal.dateComponents([.hour, .minute], from: endTime)
+            let segStart = cal.date(bySettingHour: startComps.hour ?? 0, minute: startComps.minute ?? 0, second: 0, of: dayStart)!
+            var segEnd = cal.date(bySettingHour: endComps.hour ?? 0, minute: endComps.minute ?? 0, second: 0, of: dayStart)!
+
+            // Handle midnight crossover
+            if segEnd <= segStart { segEnd = cal.date(byAdding: .day, value: 1, to: segEnd)! }
+
+            // Clamp to window bounds
+            let clampedStart = max(segStart, windowStart)
+            let clampedEnd = min(segEnd, windowEnd)
+            guard clampedEnd > clampedStart else { continue }
+
+            let category = parseCategory(catStr) ?? .uncategorized
+            let title = obj["title"] as? String
+            let summary = obj["summary"] as? String
+            let isIdle = obj["isIdle"] as? Bool ?? false
+
+            // Collect apps that fall within this segment's time range
+            let segActivities = activities.filter { a in
+                a.timestamp >= clampedStart && a.timestamp < clampedEnd && !a.isIdle
+            }
+            let apps = buildAppEntries(from: segActivities)
+
+            results.append(WindowSegmentResult(
+                segmentStart: clampedStart,
+                segmentEnd: clampedEnd,
+                category: category,
+                title: title,
+                summary: summary,
+                isIdle: isIdle,
+                apps: apps
+            ))
+        }
+
+        if results.isEmpty {
+            return fallbackSegment(windowStart: windowStart, windowEnd: windowEnd, activities: activities)
+        }
+        return results
+    }
+
+    /// Build CodableAppEntry list from activities (grouped by app)
+    private static func buildAppEntries(from activities: [ActivityRecord]) -> [CodableAppEntry] {
+        var grouped: [String: (bundleID: String, title: String, url: String?, duration: TimeInterval)] = [:]
+        for a in activities where !a.isIdle {
+            var entry = grouped[a.appName] ?? (bundleID: a.bundleID, title: a.windowTitle, url: a.url, duration: 0)
+            entry.duration += a.duration
+            if entry.title.isEmpty && !a.windowTitle.isEmpty { entry.title = a.windowTitle }
+            if entry.url == nil && a.url != nil { entry.url = a.url }
+            grouped[a.appName] = entry
+        }
+        return grouped.map { (name, e) in
+            CodableAppEntry(appName: name, bundleID: e.bundleID, title: e.title, url: e.url, duration: e.duration)
+        }.sorted { $0.duration > $1.duration }
+    }
+
+    /// Fallback: create a single segment covering the full window with dominant category
+    static func fallbackSegment(windowStart: Date, windowEnd: Date, activities: [ActivityRecord]) -> [WindowSegmentResult] {
+        let nonIdle = activities.filter { !$0.isIdle }
+        guard !nonIdle.isEmpty else { return [] }
+
+        // Find dominant category by total duration
+        var totals: [String: TimeInterval] = [:]
+        for a in nonIdle { totals[a.category.rawValue, default: 0] += a.duration }
+        let best = totals.max { $0.value < $1.value }
+        let category = Category(rawValue: best?.key ?? Category.work.rawValue)
+        let apps = buildAppEntries(from: nonIdle)
+
+        return [WindowSegmentResult(
+            segmentStart: windowStart,
+            segmentEnd: windowEnd,
+            category: category,
+            title: nil,
+            summary: nil,
+            isIdle: false,
+            apps: apps
+        )]
     }
 }
 
