@@ -781,24 +781,14 @@ struct TodoRowView: View {
             // ── Subtasks section ──────────────────────────────────────
             if todo.hasSubtasks && subtasksExpanded {
                 VStack(spacing: 2) {
-                    ForEach(todo.subtasks) { subtask in
-                        SubtaskRowView(subtask: subtask, parentId: todo.id, theme: theme)
-                            .draggable(subtask.id) {
-                                // Drag preview
-                                Text(subtask.title)
-                                    .font(.system(size: 12))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 4)
-                                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
-                            }
-                            .dropDestination(for: String.self) { droppedIds, _ in
-                                guard let fromId = droppedIds.first,
-                                      let fromIdx = todo.subtasks.firstIndex(where: { $0.id == fromId }),
-                                      let toIdx = todo.subtasks.firstIndex(where: { $0.id == subtask.id }),
-                                      fromIdx != toIdx else { return false }
-                                TodoStore.shared.moveSubtask(in: todo.id, fromIndex: fromIdx, toIndex: toIdx)
-                                return true
-                            }
+                    ForEach(Array(todo.subtasks.enumerated()), id: \.element.id) { index, subtask in
+                        SubtaskRowView(
+                            subtask: subtask,
+                            parentId: todo.id,
+                            index: index,
+                            count: todo.subtasks.count,
+                            theme: theme
+                        )
                     }
                     // Add subtask row
                     if showingAddSubtask {
@@ -945,9 +935,12 @@ struct TodoRowView: View {
 private struct SubtaskRowView: View {
     let subtask: TodoItem
     let parentId: String
+    let index: Int
+    let count: Int
     let theme: AppTheme
     @State private var isEditing = false
     @State private var editTitle = ""
+    @State private var isHovered = false
 
     private var statusColor: Color {
         switch subtask.status {
@@ -959,20 +952,55 @@ private struct SubtaskRowView: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            // indent line
+            // Reorder arrows — visible on hover
+            VStack(spacing: 0) {
+                Button {
+                    guard index > 0 else { return }
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        TodoStore.shared.moveSubtask(in: parentId, fromIndex: index, toIndex: index - 1)
+                    }
+                } label: {
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 8, weight: .semibold))
+                        .frame(width: 16, height: 12)
+                        .foregroundStyle(index > 0 ? theme.secondaryText : theme.secondaryText.opacity(0.15))
+                }
+                .buttonStyle(.plain)
+                .disabled(index == 0)
+
+                Button {
+                    guard index < count - 1 else { return }
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        TodoStore.shared.moveSubtask(in: parentId, fromIndex: index, toIndex: index + 1)
+                    }
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                        .frame(width: 16, height: 12)
+                        .foregroundStyle(index < count - 1 ? theme.secondaryText : theme.secondaryText.opacity(0.15))
+                }
+                .buttonStyle(.plain)
+                .disabled(index >= count - 1)
+            }
+            .opacity(isHovered ? 1 : 0)
+            .frame(width: 16)
+            .padding(.leading, 6)
+
+            // Indent line
             Rectangle()
                 .fill(theme.dividerColor.opacity(0.25))
                 .frame(width: 1.5)
-                .padding(.leading, 19)
 
             // Status button — cycles: pending → inProgress → done → pending
             Button {
-                let next: TodoStatus = switch subtask.status {
-                case .pending: .inProgress
-                case .inProgress: .done
-                case .done: .pending
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    let next: TodoStatus = switch subtask.status {
+                    case .pending: .inProgress
+                    case .inProgress: .done
+                    case .done: .pending
+                    }
+                    TodoStore.shared.setSubtaskStatus(subtask.id, in: parentId, status: next)
                 }
-                TodoStore.shared.setSubtaskStatus(subtask.id, in: parentId, status: next)
             } label: {
                 ZStack {
                     Circle()
@@ -987,6 +1015,7 @@ private struct SubtaskRowView: View {
                         Circle().fill(statusColor).frame(width: 8, height: 8)
                     }
                 }
+                .contentShape(Circle().size(width: 24, height: 24))
             }
             .buttonStyle(.plain)
 
@@ -1008,7 +1037,7 @@ private struct SubtaskRowView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            // Status label for in-progress
+            // Status badge for in-progress
             if subtask.status == .inProgress {
                 Text("In Progress")
                     .font(.system(size: 9, weight: .medium))
@@ -1019,15 +1048,11 @@ private struct SubtaskRowView: View {
             }
 
             Spacer()
-
-            // Drag handle
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: 9))
-                .foregroundStyle(theme.secondaryText.opacity(0.35))
-                .padding(.trailing, 4)
         }
         .padding(.vertical, 4)
         .padding(.trailing, 12)
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
         .contextMenu {
             Button { editTitle = subtask.title; isEditing = true }
                 label: { Label("Rename", systemImage: "pencil") }
@@ -1048,6 +1073,15 @@ private struct SubtaskRowView: View {
                 } label: {
                     Label("Done", systemImage: subtask.status == .done ? "checkmark" : "checkmark.circle")
                 }
+            }
+            Divider()
+            if index > 0 {
+                Button { withAnimation { TodoStore.shared.moveSubtask(in: parentId, fromIndex: index, toIndex: index - 1) } }
+                    label: { Label("Move Up", systemImage: "arrow.up") }
+            }
+            if index < count - 1 {
+                Button { withAnimation { TodoStore.shared.moveSubtask(in: parentId, fromIndex: index, toIndex: index + 1) } }
+                    label: { Label("Move Down", systemImage: "arrow.down") }
             }
             Divider()
             Button("Delete", role: .destructive) {
