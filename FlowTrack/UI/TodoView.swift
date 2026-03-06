@@ -781,7 +781,7 @@ struct TodoRowView: View {
 
             // ── Subtasks section ──────────────────────────────────────
             if (todo.hasSubtasks || showingAddSubtask) && subtasksExpanded {
-                VStack(spacing: 2) {
+                VStack(spacing: 0) {
                     ForEach(Array(todo.subtasks.enumerated()), id: \.element.id) { index, subtask in
                         SubtaskRowView(
                             subtask: subtask,
@@ -791,6 +791,7 @@ struct TodoRowView: View {
                             theme: theme
                         )
                     }
+                    .animation(.easeInOut(duration: 0.2), value: todo.subtasks.map(\.id))
                     // Add subtask row
                     if showingAddSubtask {
                         HStack(spacing: 8) {
@@ -956,7 +957,15 @@ private struct SubtaskRowView: View {
     }
 
     var body: some View {
-        HStack(spacing: 6) {
+        VStack(spacing: 0) {
+            // Insertion indicator — shown when drag is hovering over this row
+            Rectangle()
+                .fill(isDropTarget ? theme.accentColor : Color.clear)
+                .frame(height: isDropTarget ? 2 : 0)
+                .animation(.easeInOut(duration: 0.12), value: isDropTarget)
+                .padding(.leading, 38)
+
+            HStack(spacing: 6) {
             // Drag handle — visible on hover
             Image(systemName: "line.3.horizontal")
                 .font(.system(size: 10, weight: .medium))
@@ -966,7 +975,7 @@ private struct SubtaskRowView: View {
 
             // Indent line
             Rectangle()
-                .fill(isDropTarget ? theme.accentColor : theme.dividerColor.opacity(0.25))
+                .fill(theme.dividerColor.opacity(0.25))
                 .frame(width: 1.5)
 
             // Status button — cycles: pending → inProgress → done → pending
@@ -1100,6 +1109,7 @@ private struct SubtaskRowView: View {
                 TodoStore.shared.deleteSubtask(subtask.id, from: parentId)
             }
         }
+        } // end VStack
     }
     private func formatDuration(_ seconds: TimeInterval) -> String {
         let h = Int(seconds) / 3600

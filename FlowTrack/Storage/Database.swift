@@ -811,6 +811,7 @@ final class Database: Sendable {
     func remapCategory(from oldCategory: String, to newCategory: String) {
         try? dbQueue.write { db in
             try db.execute(sql: "UPDATE activities SET category = ? WHERE category = ?", arguments: [newCategory, oldCategory])
+            try db.execute(sql: "UPDATE window_segments SET category = ? WHERE category = ?", arguments: [newCategory, oldCategory])
         }
     }
 
@@ -844,7 +845,7 @@ final class Database: Sendable {
     }
 
     func clearActivitiesOlderThan(days: Int) throws {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date())!
+        guard let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) else { return }
         try dbQueue.write { db in
             try db.execute(sql: "DELETE FROM activities WHERE timestamp < ?", arguments: [cutoff])
             try db.execute(sql: "DELETE FROM session_ai WHERE updatedAt < ?", arguments: [cutoff])
