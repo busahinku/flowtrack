@@ -127,20 +127,28 @@ struct AIPromptBuilder {
     }
 
     static func categorizationPrompt(appName: String, bundleID: String, windowTitle: String, url: String?) -> String {
+        let categories = CategoryManager.shared.allCategories
+        let categoryLines = categories.map { cat in
+            if !cat.aiPrompt.isEmpty {
+                return "- \(cat.name): \(cat.aiPrompt)"
+            }
+            if cat.isSystem { return "- \(cat.name)" }
+            return "- \(cat.name): \(cat.isProductive ? "productive" : "non-productive") activity"
+        }.joined(separator: "\n")
+        let categoryNames = categories.map(\.name).joined(separator: ", ")
+
         var prompt = """
         You are a productivity tracker AI. Categorize this computer activity into EXACTLY one category.
 
         Categories:
-        - Work: coding, writing code, terminal/shell, IDEs, professional tools, databases, APIs, project management, documentation, business communication (Slack, Teams, email), cloud consoles, deployment tools, design tools (Figma, Photoshop), video editing, music production, creative work, online learning, tutorials, educational content
-        - Distraction: social media (LinkedIn, Twitter, Instagram, Reddit, Facebook, TikTok), news sites, forums, random browsing, streaming video (Netflix, YouTube entertainment, Disney+), gaming, music streaming, shopping, banking, maps, travel, food ordering, personal apps, system settings, Finder
-        - Uncategorized: cannot determine from available information
+        \(categoryLines)
 
         Activity to categorize:
         App: \(appName) (\(bundleID))
         Window Title: \(windowTitle)
         """
         if let url = url { prompt += "\nURL/Domain: \(domainOnly(from: url))" }
-        prompt += "\n\nRespond with ONLY the category name (Work, Distraction, or Uncategorized), nothing else."
+        prompt += "\n\nRespond with ONLY the category name (\(categoryNames)), nothing else."
         return prompt
     }
 

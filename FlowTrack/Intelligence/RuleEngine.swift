@@ -80,8 +80,25 @@ final class RuleEngine: @unchecked Sendable {
             learnedRules = []
             return
         }
-        learnedRules = rules
-        // Populate cache from learned rules (browsers are excluded by cleanBrowserLearnedRules)
+        // Migrate stale category names to valid CategoryManager categories
+        let validNames = Set(CategoryManager.shared.allCategories.map { $0.name.lowercased() })
+        let legacyMap: [String: String] = [
+            "productivity": "Work", "creative": "Work", "creativity": "Work",
+            "learning": "Work", "communication": "Work",
+            "entertainment": "Distraction", "personal": "Distraction", "health": "Distraction"
+        ]
+        var migrated = false
+        learnedRules = rules.map { rule in
+            let lower = rule.category.lowercased()
+            if validNames.contains(lower) { return rule }
+            if let mapped = legacyMap[lower] {
+                migrated = true
+                return Rule(matchType: rule.matchType, pattern: rule.pattern, category: mapped)
+            }
+            migrated = true
+            return Rule(matchType: rule.matchType, pattern: rule.pattern, category: "Work")
+        }
+        if migrated { saveLearnedRules() }
         for rule in learnedRules where rule.matchType == .bundleID {
             categoryCache[rule.pattern.lowercased()] = Category(rawValue: rule.category)
         }
@@ -369,6 +386,22 @@ final class RuleEngine: @unchecked Sendable {
                browserBIDs.contains(where: { bundleID.lowercased().contains($0) })
     }
 
+    /// Ensure a category name maps to a valid CategoryManager category.
+    /// Unknown legacy names are remapped; completely unknown names default to Work.
+    private func validatedCategory(_ name: String) -> Category {
+        let validNames = CategoryManager.shared.allCategories.map { $0.name }
+        if validNames.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) {
+            return Category(rawValue: name)
+        }
+        let legacyMap: [String: String] = [
+            "productivity": "Work", "creative": "Work", "creativity": "Work",
+            "learning": "Work", "communication": "Work",
+            "entertainment": "Distraction", "personal": "Distraction", "health": "Distraction"
+        ]
+        if let mapped = legacyMap[name.lowercased()] { return Category(rawValue: mapped) }
+        return .work
+    }
+
     // MARK: - Rule Matching
     private func matchRules(_ rules: [Rule], appName: String, bundleID: String, windowTitle: String, url: String?) -> Category? {
         for rule in rules {
@@ -392,7 +425,7 @@ final class RuleEngine: @unchecked Sendable {
                 matched = windowTitle.lowercased().contains(rule.pattern.lowercased())
             }
             if matched {
-                return Category(rawValue: rule.category)
+                return validatedCategory(rule.category)
             }
         }
         return nil
@@ -402,6 +435,8 @@ final class RuleEngine: @unchecked Sendable {
     /// Called when AI categorizes an app. Learns domain rules for browsers, bundleID rules for other apps.
     func learnFromAI(appName: String, bundleID: String, category: Category, url: String? = nil) {
         guard !bundleID.isEmpty, category != .uncategorized, category != .idle else { return }
+        // Validate category against CategoryManager — don't learn invalid categories
+        let validated = validatedCategory(category.rawValue)
 
         let bid = bundleID.lowercased()
 
@@ -411,7 +446,7 @@ final class RuleEngine: @unchecked Sendable {
             if let url = url {
                 let domain = RuleEngine.extractDomain(from: url)
                 if !domain.isEmpty && domain != "unknown" {
-                    learnDomainFromAI(domain: domain, category: category)
+                    learnDomainFromAI(domain: domain, category: validated)
                 }
             }
             // If no URL available, don't learn anything — can't associate a browser app with a single category
@@ -429,15 +464,16 @@ final class RuleEngine: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard categoryCache[bid] == nil else { return }
-        let rule = Rule(matchType: .bundleID, pattern: bundleID, category: category.rawValue)
+        let rule = Rule(matchType: .bundleID, pattern: bundleID, category: validated.rawValue)
         learnedRules.append(rule)
-        categoryCache[bid] = category
+        categoryCache[bid] = validated
         saveLearnedRules()
     }
 
     /// Learn a domain → category mapping from AI results.
     private func learnDomainFromAI(domain: String, category: Category) {
         let d = domain.lowercased()
+        let validated = validatedCategory(category.rawValue)
         // Don't learn if already covered by default/custom domain rules
         let fakeURL = "https://\(d)"
         lock.lock()
@@ -451,7 +487,7 @@ final class RuleEngine: @unchecked Sendable {
         defer { lock.unlock() }
         // Check if this domain already has a learned rule
         guard !learnedRules.contains(where: { $0.matchType == .domain && $0.pattern.lowercased() == d }) else { return }
-        let rule = Rule(matchType: .domain, pattern: domain, category: category.rawValue)
+        let rule = Rule(matchType: .domain, pattern: domain, category: validated.rawValue)
         learnedRules.append(rule)
         saveLearnedRules()
     }
