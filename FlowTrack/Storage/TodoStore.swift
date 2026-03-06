@@ -132,6 +132,25 @@ final class TodoStore {
         saveTodos()
     }
 
+    func setSubtaskStatus(_ subtaskId: String, in parentId: String, status: TodoStatus) {
+        guard let idx = todos.firstIndex(where: { $0.id == parentId }),
+              let sIdx = todos[idx].subtasks.firstIndex(where: { $0.id == subtaskId }) else { return }
+        todos[idx].subtasks[sIdx].status = status
+        todos[idx].subtasks[sIdx].updatedAt = Date()
+        saveTodos()
+    }
+
+    func moveSubtask(in parentId: String, fromIndex: Int, toIndex: Int) {
+        guard let idx = todos.firstIndex(where: { $0.id == parentId }),
+              todos[idx].subtasks.indices.contains(fromIndex),
+              todos[idx].subtasks.indices.contains(toIndex),
+              fromIndex != toIndex else { return }
+        let item = todos[idx].subtasks.remove(at: fromIndex)
+        todos[idx].subtasks.insert(item, at: toIndex)
+        todos[idx].updatedAt = Date()
+        saveTodos()
+    }
+
 
 
     func clearTimerSessions() {
