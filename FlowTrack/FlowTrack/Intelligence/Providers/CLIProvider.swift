@@ -1,4 +1,4 @@
-import Foundation
+@preconcurrency import Foundation
 
 struct CLIProvider: AIProvider, Sendable {
     let command: String
@@ -136,28 +136,26 @@ struct CLIProvider: AIProvider, Sendable {
 
             // Use terminationHandler to avoid blocking a cooperative thread pool thread.
             // waitUntilExit() would block for up to 30s — terminationHandler is event-driven.
-            var didTimeout = false
+            // Timeout is detected via proc.terminationReason == .uncaughtSignal (SIGTERM we sent).
+            let commandName = command
             let timeoutItem = DispatchWorkItem {
-                if process.isRunning {
-                    didTimeout = true
-                    process.terminate()
-                }
+                if process.isRunning { process.terminate() }
             }
             DispatchQueue.global().asyncAfter(deadline: .now() + 30, execute: timeoutItem)
 
-            process.terminationHandler = { _ in
+            process.terminationHandler = { proc in
                 timeoutItem.cancel()
                 let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
                 let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
                 let stdout = String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 let stderr = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
-                if didTimeout {
-                    continuation.resume(throwing: AIError.cliError("\(self.command) timed out after 30s"))
+                if proc.terminationReason == .uncaughtSignal {
+                    continuation.resume(throwing: AIError.cliError("\(commandName) timed out after 30s"))
                     return
                 }
-                if process.terminationStatus != 0 {
-                    let errorMsg = !stderr.isEmpty ? stderr : (!stdout.isEmpty ? stdout : "CLI exited with code \(process.terminationStatus)")
+                if proc.terminationStatus != 0 {
+                    let errorMsg = !stderr.isEmpty ? stderr : (!stdout.isEmpty ? stdout : "CLI exited with code \(proc.terminationStatus)")
                     continuation.resume(throwing: AIError.cliError(errorMsg))
                     return
                 }

@@ -511,47 +511,13 @@ private struct MarkdownRenderer: View {
         }
     }
 
-    // Inline bold/italic/code parsing
+    // Inline markdown rendering via Apple's AttributedString parser (handles bold/italic/code/links correctly)
     private func inlineText(_ raw: String, bold: Bool = false) -> Text {
-        var result = Text("")
-        var remaining = raw
-        while !remaining.isEmpty {
-            // **bold**
-            if let r = findPair(in: remaining, open: "**", close: "**") {
-                result = result + Text(r.before)
-                result = result + Text(r.inner).bold()
-                remaining = r.after
-            // *italic*
-            } else if let r = findPair(in: remaining, open: "*", close: "*") {
-                result = result + Text(r.before)
-                result = result + Text(r.inner).italic()
-                remaining = r.after
-            // `code`
-            } else if let r = findPair(in: remaining, open: "`", close: "`") {
-                result = result + Text(r.before)
-                result = result + Text(r.inner).font(.system(size: 12, design: .monospaced))
-                remaining = r.after
-            } else {
-                result = result + Text(remaining)
-                break
-            }
+        let opts = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        if let attr = try? AttributedString(markdown: raw, options: opts) {
+            return bold ? Text(attr).bold() : Text(attr)
         }
-        return bold ? result.bold() : result
-    }
-
-    private struct ParseResult {
-        let before: String; let inner: String; let after: String
-    }
-
-    private func findPair(in s: String, open: String, close: String) -> ParseResult? {
-        guard let start = s.range(of: open) else { return nil }
-        let afterOpen = s[start.upperBound...]
-        guard let end = afterOpen.range(of: close) else { return nil }
-        return ParseResult(
-            before: String(s[s.startIndex..<start.lowerBound]),
-            inner: String(afterOpen[afterOpen.startIndex..<end.lowerBound]),
-            after: String(afterOpen[end.upperBound...])
-        )
+        return bold ? Text(raw).bold() : Text(raw)
     }
 
     // MARK: Parse into blocks

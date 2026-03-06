@@ -514,6 +514,8 @@ final class Database: Sendable {
     func clearSessionAI() throws {
         try dbQueue.write { db in
             try db.execute(sql: "DELETE FROM session_ai")
+        }
+        try dbQueue.writeWithoutTransaction { db in
             try db.execute(sql: "VACUUM")
         }
     }
@@ -522,6 +524,8 @@ final class Database: Sendable {
         try dbQueue.write { db in
             try db.execute(sql: "DELETE FROM activities")
             try db.execute(sql: "DELETE FROM session_ai")
+        }
+        try dbQueue.writeWithoutTransaction { db in
             try db.execute(sql: "VACUUM")
         }
     }
@@ -538,6 +542,8 @@ final class Database: Sendable {
         let cutoff = Calendar.current.date(byAdding: .day, value: -keepDays, to: Date())!
         try? dbQueue.write { db in
             try db.execute(sql: "DELETE FROM activities WHERE timestamp < ?", arguments: [cutoff])
+        }
+        try? dbQueue.writeWithoutTransaction { db in
             try db.execute(sql: "VACUUM")
         }
         dbLogger.info("Auto-cleanup: removed data older than \(keepDays) days (DB was \(sizeMB) MB)")

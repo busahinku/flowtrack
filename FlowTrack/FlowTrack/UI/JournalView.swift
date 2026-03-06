@@ -831,6 +831,13 @@ private struct MarkdownEditorNSView: NSViewRepresentable {
         tv.textColor   = .labelColor
         tv.backgroundColor = .clear
         tv.drawsBackground = false
+        // Ensure vertical growth works inside scroll view
+        tv.isVerticallyResizable = true
+        tv.isHorizontallyResizable = false
+        tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        tv.textContainer?.widthTracksTextView = true
+        sv.hasVerticalScroller = true
+        sv.autohidesScrollers = true
         tv.string = text
         context.coordinator.lastText = text
         // Pass reference to parent for toolbar actions
@@ -862,6 +869,14 @@ private struct MarkdownEditorNSView: NSViewRepresentable {
             guard let tv = notification.object as? NSTextView else { return }
             lastText = tv.string
             binding.wrappedValue = tv.string
+        }
+        // Explicitly handle Return so SwiftUI focus system doesn't swallow it
+        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                textView.insertText("\n", replacementRange: textView.selectedRange())
+                return true
+            }
+            return false
         }
     }
 }
