@@ -53,11 +53,12 @@ struct ActivityRecord: Codable, FetchableRecord, PersistableRecord, Sendable {
     var category: Category
     let isIdle: Bool
     let duration: TimeInterval
+    let contentMetadata: String?
 
     static let databaseTableName = "activities"
 
     enum Columns: String, ColumnExpression {
-        case id, timestamp, appName, bundleID, windowTitle, url, category, isIdle, duration
+        case id, timestamp, appName, bundleID, windowTitle, url, category, isIdle, duration, contentMetadata
     }
 }
 
@@ -141,6 +142,16 @@ struct CodableAppEntry: Codable, Sendable {
     let title: String?
     let url: String?
     let duration: TimeInterval
+    let contentMetadata: String?
+
+    init(appName: String, bundleID: String?, title: String?, url: String?, duration: TimeInterval, contentMetadata: String? = nil) {
+        self.appName = appName
+        self.bundleID = bundleID
+        self.title = title
+        self.url = url
+        self.duration = duration
+        self.contentMetadata = contentMetadata
+    }
 }
 
 // MARK: - WindowSegmentResult (AI response, not stored directly)

@@ -208,9 +208,10 @@ final class ActivityTracker: ObservableObject {
                     guard !Task.isCancelled else { return }
                     self.cachedBrowserURL = url
                     self.lastBrowserTitle = capturedTitle
-                    let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: capturedTitle, url: url, isIdle: recordIsIdle)
+                    let metadata = ContentMetadataExtractor.extract(url: url, windowTitle: capturedTitle, appName: appName)
+                    let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: capturedTitle, url: url, isIdle: recordIsIdle, contentMetadata: metadata)
                     self.checkDistractionAlert(category: cat)
-                    self.writeRecord(appName: appName, bundleID: bundleID, title: capturedTitle, url: url, category: cat, isIdle: recordIsIdle, duration: capturedElapsed)
+                    self.writeRecord(appName: appName, bundleID: bundleID, title: capturedTitle, url: url, category: cat, isIdle: recordIsIdle, duration: capturedElapsed, contentMetadata: metadata)
                     self.lastSavedBundleID = bundleID; self.lastSavedTitle = capturedTitle
                     self.lastSavedAppName = appName; self.lastSavedCategory = cat
                     self.lastSavedURL = url; self.lastSavedIsIdle = recordIsIdle
@@ -219,9 +220,10 @@ final class ActivityTracker: ObservableObject {
             } else {
                 // Same tab — dedup: only write if ≥60s since last write (liveness pulse)
                 guard elapsed >= 60 else { return }
-                let cat = resolveCategory(appName: appName, bundleID: bundleID, title: newTitle, url: cachedBrowserURL, isIdle: recordIsIdle)
+                let metadata = ContentMetadataExtractor.extract(url: cachedBrowserURL, windowTitle: newTitle, appName: appName)
+                let cat = resolveCategory(appName: appName, bundleID: bundleID, title: newTitle, url: cachedBrowserURL, isIdle: recordIsIdle, contentMetadata: metadata)
                 checkDistractionAlert(category: cat)
-                writeRecord(appName: appName, bundleID: bundleID, title: newTitle, url: cachedBrowserURL, category: cat, isIdle: recordIsIdle, duration: elapsed)
+                writeRecord(appName: appName, bundleID: bundleID, title: newTitle, url: cachedBrowserURL, category: cat, isIdle: recordIsIdle, duration: elapsed, contentMetadata: metadata)
                 lastSavedBundleID = bundleID; lastSavedTitle = newTitle; lastSavedIsIdle = recordIsIdle
                 lastSavedAppName = appName; lastSavedCategory = cat
                 lastWriteDate = Date()
@@ -290,16 +292,17 @@ final class ActivityTracker: ObservableObject {
 
         let isBrowser = knownBrowsers.contains(where: { appName.contains($0) })
         if isBrowser {
-            // Fetch URL async — only write ONE record (after URL is known)
+            // Fetch URL async — don't write a record here (duration: 1 < 5s minimum).
+            // The next heartbeat writes the first browser record with accurate duration + URL.
             Task.detached(priority: .utility) {
                 let url = await ActivityTracker.fetchBrowserURL(appName: appName)
                 await MainActor.run { [weak self] in
                     guard let self else { return }
                     self.cachedBrowserURL = url
                     self.lastBrowserTitle = title
-                    let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: title, url: url, isIdle: false)
+                    let metadata = ContentMetadataExtractor.extract(url: url, windowTitle: title, appName: appName)
+                    let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: title, url: url, isIdle: false, contentMetadata: metadata)
                     self.checkDistractionAlert(category: cat)
-                    self.writeRecord(appName: appName, bundleID: bundleID, title: title, url: url, category: cat, isIdle: false, duration: 1)
                     self.lastSavedURL = url
                     self.lastSavedCategory = cat
                 }
@@ -344,20 +347,30 @@ final class ActivityTracker: ObservableObject {
 
     // MARK: - Helpers
 
-    private func resolveCategory(appName: String, bundleID: String, title: String, url: String?, isIdle: Bool) -> Category {
+    private func resolveCategory(appName: String, bundleID: String, title: String, url: String?, isIdle: Bool, contentMetadata: ContentMetadata? = nil) -> Category {
         if isIdle { return .idle }
-        return RuleEngine.shared.categorize(appName: appName, bundleID: bundleID, windowTitle: title, url: url) ?? .uncategorized
+        return RuleEngine.shared.categorize(appName: appName, bundleID: bundleID, windowTitle: title, url: url, contentMetadata: contentMetadata) ?? .uncategorized
     }
 
-    private func writeRecord(appName: String, bundleID: String, title: String, url: String?, category: Category, isIdle: Bool, duration: TimeInterval) {
+    private func writeRecord(appName: String, bundleID: String, title: String, url: String?, category: Category, isIdle: Bool, duration: TimeInterval, contentMetadata: ContentMetadata? = nil) {
         guard duration >= 5 || isIdle else { return }  // capture all activity ≥5s for AI window analysis
+        let metadataJSON: String?
+        if let metadata = contentMetadata, let data = try? JSONEncoder().encode(metadata) {
+            metadataJSON = String(data: data, encoding: .utf8)
+        } else {
+            metadataJSON = nil
+        }
         let record = ActivityRecord(
             timestamp: Date(), appName: appName, bundleID: bundleID,
             windowTitle: title, url: url, category: category,
-            isIdle: isIdle, duration: duration
+            isIdle: isIdle, duration: duration, contentMetadata: metadataJSON
         )
         Task(priority: .utility) {
-            try? Database.shared.saveActivity(record)
+            do {
+                try Database.shared.saveActivity(record)
+            } catch {
+                trackerLogger.error("DB write failed: \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 
@@ -393,11 +406,21 @@ final class ActivityTracker: ObservableObject {
         let appElement = AXUIElementCreateApplication(pid)
         var value: AnyObject?
         let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &value)
-        guard result == .success, let rawValue = value else { return "" }
+        if result != .success {
+            // .cannotComplete is normal during app transitions — only log other failures
+            if result != .cannotComplete {
+                trackerLogger.debug("AX focused window failed for PID \(pid): \(result.rawValue)")
+            }
+            return ""
+        }
+        guard let rawValue = value else { return "" }
         // CoreFoundation bridging: AXUIElement is always an AXUIElement when result == .success
         let axElement = rawValue as! AXUIElement
         var titleValue: AnyObject?
-        AXUIElementCopyAttributeValue(axElement, kAXTitleAttribute as CFString, &titleValue)
+        let titleResult = AXUIElementCopyAttributeValue(axElement, kAXTitleAttribute as CFString, &titleValue)
+        if titleResult != .success && titleResult != .cannotComplete {
+            trackerLogger.debug("AX title fetch failed for PID \(pid): \(titleResult.rawValue)")
+        }
         return titleValue as? String ?? ""
     }
 

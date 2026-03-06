@@ -111,7 +111,7 @@ final class RuleEngine: @unchecked Sendable {
     }
 
     // MARK: - Categorize
-    func categorize(appName: String, bundleID: String, windowTitle: String, url: String?) -> Category? {
+    func categorize(appName: String, bundleID: String, windowTitle: String, url: String?, contentMetadata: ContentMetadata? = nil) -> Category? {
         lock.lock()
         let customSnap = customRules
         let defaultSnap = defaultRules
@@ -133,11 +133,36 @@ final class RuleEngine: @unchecked Sendable {
         }
         // 4. Cache lookup by bundle ID
         if let cached { return cached }
-        // 5. Smart fallback based on bundle ID patterns + window title heuristics
+        // 5. Content metadata categorization (browser content awareness)
+        if let metadata = contentMetadata, let cat = metadataCategory(metadata) {
+            return cat
+        }
+        // 6. Smart fallback based on bundle ID patterns + window title heuristics
         if let cat = smartCategorize(appName: appName, bundleID: bundleID, windowTitle: windowTitle) {
             return cat
         }
         return nil
+    }
+
+    // MARK: - Metadata-Aware Categorization
+    private func metadataCategory(_ metadata: ContentMetadata) -> Category? {
+        switch metadata.siteName {
+        case "YouTube":
+            return metadata.detail == "educational" ? .work : .distraction
+        case "Reddit":
+            return metadata.detail == "work-related" ? .work : .distraction
+        case "GitHub", "Stack Overflow", "Documentation":
+            return .work
+        case "LinkedIn":
+            return metadata.detail == "work" ? .work : .distraction
+        case "Twitter/X", "Hacker News":
+            return .distraction
+        default:
+            // News sites and others with detail == "distraction"
+            if metadata.detail == "distraction" { return .distraction }
+            if metadata.detail == "work" { return .work }
+            return nil
+        }
     }
 
     // MARK: - Smart Categorization Fallback

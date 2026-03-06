@@ -270,7 +270,8 @@ final class TimerStore {
             url: nil,
             category: Category("Work"),
             isIdle: false,
-            duration: session.duration
+            duration: session.duration,
+            contentMetadata: nil
         )
         Task(priority: .utility) { try? Database.shared.saveActivity(record) }
     }

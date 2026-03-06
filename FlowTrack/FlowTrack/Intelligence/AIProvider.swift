@@ -256,6 +256,17 @@ struct AIPromptBuilder {
             var line = "\(time) \(a.appName)"
             if !a.windowTitle.isEmpty { line += " \"\(a.windowTitle.prefix(80))\"" }
             if let url = a.url { line += " [\(domainOnly(from: url))]" }
+            // Append metadata hints when available
+            if let metaJSON = a.contentMetadata,
+               let metaData = metaJSON.data(using: .utf8),
+               let meta = try? JSONDecoder().decode(ContentMetadata.self, from: metaData) {
+                var hints: [String] = []
+                if let ct = meta.contentType { hints.append(ct) }
+                if let ct = meta.contentTitle { hints.append("\"\(ct.prefix(40))\"") }
+                if let sub = meta.subcategory { hints.append(sub) }
+                if let d = meta.detail { hints.append(d) }
+                if !hints.isEmpty { line += " {\(hints.joined(separator: ", "))}" }
+            }
             line += " \(Int(a.duration))s"
             if a.isIdle { line += " [IDLE]" }
             lines.append(line)

@@ -89,6 +89,12 @@ final class Database: Sendable {
             try db.create(index: "idx_ws_date", on: "window_segments", columns: ["segmentStart"])
         }
 
+        migrator.registerMigration("v7_content_metadata") { db in
+            try db.alter(table: "activities") { t in
+                t.add(column: "contentMetadata", .text)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 
