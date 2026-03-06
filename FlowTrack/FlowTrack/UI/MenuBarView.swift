@@ -29,7 +29,8 @@ struct MenuBarView: View {
                     .padding(.vertical, 4)
             }
 
-            Divider()
+            theme.dividerColor.opacity(0.3)
+                .frame(height: 1)
 
             ScrollView {
                 VStack(spacing: 8) {
@@ -57,10 +58,12 @@ struct MenuBarView: View {
                 .padding(.bottom, 10)
             }
 
-            Divider()
+            theme.dividerColor.opacity(0.3)
+                .frame(height: 1)
 
             footerRow
         }
+        .background(theme.sidebarBg)
         .frame(width: 360)
         .onReceive(sessionTimer) { _ in updateSessionDuration() }
         .onAppear { updateSessionDuration() }
@@ -75,6 +78,7 @@ struct MenuBarView: View {
                     ThemeAwareMenuIcon(size: 13)
                     Text("FlowTrack")
                         .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(theme.primaryText)
                 }
                 HStack(spacing: 5) {
                     Circle()
@@ -466,6 +470,7 @@ struct MenuBarView: View {
             Text(tracker.currentApp)
                 .font(.caption.weight(.medium))
                 .lineLimit(1)
+                .foregroundStyle(theme.primaryText)
             Spacer()
             if !currentSessionDuration.isEmpty {
                 Text(currentSessionDuration)
@@ -583,6 +588,7 @@ struct StatPill: View {
                 }
                 Text(value)
                     .font(.caption.bold())
+                    .foregroundStyle(theme.primaryText)
             }
             Text(label)
                 .font(.caption2)
@@ -590,8 +596,7 @@ struct StatPill: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 6)
-        .background(theme.accentColor.opacity(0.08))
-        .cornerRadius(8)
+        .background(theme.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 

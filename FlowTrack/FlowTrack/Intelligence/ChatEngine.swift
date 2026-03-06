@@ -117,10 +117,23 @@ final class ChatEngine {
         // Core persona — kept concise to save tokens
         var parts: [String] = [
             """
-            You are FlowTrack AI, a personal productivity coach with access to the user's activity tracking data.
-            Data includes: app names, website domains, session durations, and AI-generated summaries.
-            Window contents, file names, and full URLs are never collected — privacy is respected by design.
-            Be direct, specific, and actionable. Use bullet points. Keep responses under 400 words unless asked for more.
+            You are FlowTrack AI, a personal productivity coach embedded in the FlowTrack app.
+            You have access to the user's activity tracking data for the date shown.
+
+            FlowTrack features you can discuss and help with:
+            - Timeline: Visual hour-by-hour activity log with session cards
+            - Statistics: Charts for category breakdown, top apps, productivity trends
+            - Focus Shield (App Blocker): Create "block cards" grouping sites/apps to block during focus time
+            - Timer: Pomodoro, countdown, or stopwatch modes — can attach to tasks
+            - Tasks (Todos): Task list with status (active/done), priority, and due dates
+            - Journal: Private encrypted daily journal with markdown support
+            - Settings: AI provider config, categories, themes, tracking preferences
+
+            Data collected: app names, website domains, window titles (optional), session durations.
+            Window contents, file names, personal data, and full URLs are NEVER collected — privacy first.
+
+            Be direct, specific, and actionable. Use bullet points. Keep responses under 400 words unless asked.
+            Only mention categories that have data. Use only: Work and Distraction (not Creative/Personal/Entertainment).
             Date: \(dateStr)\(isToday ? " (Today)" : "")
             """
         ]
@@ -132,6 +145,10 @@ final class ChatEngine {
             """)
         } else {
             parts.append(try buildActivityContext(for: date))
+            // Add tasks context if available
+            if let todoContext = buildTodoContext(for: date), !todoContext.isEmpty {
+                parts.append(todoContext)
+            }
         }
 
         let prompt = parts.joined(separator: "\n\n")
@@ -139,6 +156,22 @@ final class ChatEngine {
         _cachedContextDate = date
         _cachedContextBuiltAt = Date()
         return prompt
+    }
+
+    private func buildTodoContext(for date: Date) -> String? {
+        let todos = TodoStore.shared.todos
+        guard !todos.isEmpty else { return nil }
+        let active = todos.filter { $0.status == .pending || $0.status == .inProgress }
+        let done = todos.filter { $0.status == .done }
+        var lines: [String] = ["\n## Tasks"]
+        if !active.isEmpty {
+            let activeTitles = active.prefix(6).map { "- \($0.title) (\($0.priority == .high ? "high" : $0.priority == .medium ? "medium" : "low"))" }.joined(separator: "\n")
+            lines.append("Active (\(active.count)): \n\(activeTitles)")
+        }
+        if !done.isEmpty {
+            lines.append("Completed today: \(done.count)")
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func buildActivityContext(for date: Date) throws -> String {
@@ -150,8 +183,8 @@ final class ChatEngine {
         }
 
         let active       = sessions.filter { !$0.isIdle }
-        let totalActive  = active.reduce(0.0) { $0 + $1.duration }
-        let totalAll     = sessions.reduce(0.0) { $0 + $1.duration }
+        // Use activeDuration (sum of activity durations) — excludes idle gaps within sessions
+        let totalActive  = active.reduce(0.0) { $0 + $1.activeDuration }
         let focusTime    = stats.filter { $0.category.isProductive }.reduce(0.0) { $0 + $1.totalSeconds }
         let distractTime = stats.filter { $0.category.rawValue == "Distraction" }.reduce(0.0) { $0 + $1.totalSeconds }
         let focusPct     = totalActive > 0 ? Int(focusTime / totalActive * 100) : 0
@@ -160,26 +193,27 @@ final class ChatEngine {
 
         // --- Overview (compact) ---
         lines.append("## Overview")
-        lines.append("Tracked: \(Self.dur(totalAll)) | Active: \(Self.dur(totalActive)) | Focus: \(Self.dur(focusTime)) (\(focusPct)%)\(distractTime > 0 ? " | Distraction: \(Self.dur(distractTime)) (\(Int(distractTime / max(1,totalActive) * 100))%)" : "")")
+        lines.append("Active time: \(Self.dur(totalActive)) | Work: \(Self.dur(focusTime)) (\(focusPct)%)\(distractTime > 0 ? " | Distraction: \(Self.dur(distractTime)) (\(Int(distractTime / max(1,totalActive) * 100))%)" : "")")
 
-        // --- Category breakdown ---
-        if !stats.isEmpty {
+        // --- Category breakdown (non-idle, non-uncategorized with data) ---
+        let meaningfulStats = stats.filter { $0.category != .idle && $0.totalSeconds > 60 }
+        if !meaningfulStats.isEmpty {
             lines.append("\n## Time by Category")
-            for s in stats.prefix(8) {
+            for s in meaningfulStats.prefix(6) {
                 lines.append("\(s.category.rawValue): \(Self.dur(s.totalSeconds)) (\(Int(s.percentage))%)")
             }
         }
 
         // --- Session timeline ---
-        // Only sessions ≥ 3 min to reduce noise; capped at 25 to save tokens
+        // Only sessions ≥ 3 min active time; capped at 25 to save tokens
         let appState = AppState.shared
-        let significant = active.filter { $0.duration >= 180 }.prefix(25)
+        let significant = active.filter { $0.activeDuration >= 180 }.prefix(25)
         if !significant.isEmpty {
             lines.append("\n## Sessions")
             for slot in significant {
                 let t     = Self.timeFormatter.string(from: slot.startTime)
                 let e     = Self.timeFormatter.string(from: slot.endTime)
-                let dur   = Self.dur(slot.duration)
+                let dur   = Self.dur(slot.activeDuration)
                 let title = appState.sessionTitles[slot.id]
                 // Only domain-stripped URLs, max 3 apps per session
                 let topApps = slot.activities.prefix(3).map { a -> String in
@@ -232,13 +266,15 @@ final class ChatEngine {
 
 extension ChatEngine {
     static let suggestions: [(label: String, icon: String, prompt: String)] = [
-        ("Summarize my day",     "doc.text",                    "Give me a summary of my day — what I worked on, focus quality, and key highlights."),
-        ("Focus analysis",       "brain",                       "Analyze my focus patterns. When was I most productive? What triggered distraction?"),
-        ("Distraction report",   "exclamationmark.triangle",    "What were my biggest distractions? How much time did I lose and what caused them?"),
-        ("Productivity score",   "chart.line.uptrend.xyaxis",   "Give me a productivity score out of 10 with honest reasoning."),
-        ("Plan tomorrow",        "calendar.badge.plus",         "Help me plan an optimal schedule for tomorrow with focus blocks and breaks."),
-        ("Context switching",    "arrow.left.arrow.right",      "How often did I context-switch? Is it hurting my deep work?"),
-        ("Wins & regrets",       "trophy",                      "What went well today? What do I regret and how can I fix it tomorrow?"),
-        ("Best work hours",      "clock",                       "When are my peak productive hours? When should I schedule deep work?"),
+        ("Summarize my day",      "doc.text",                 "Give me a summary of my day — what I worked on, focus quality, and key highlights."),
+        ("Productivity score",    "chart.line.uptrend.xyaxis","Give me a productivity score out of 10 with honest, specific reasoning based on my actual data."),
+        ("Distraction report",    "exclamationmark.triangle", "What were my biggest distractions today? How much time did I lose and what can I do about it?"),
+        ("Focus analysis",        "brain",                    "Analyze my focus patterns today. When was I most productive? What disrupted deep work?"),
+        ("What to block?",        "shield.lefthalf.filled",   "Based on my activity data, which websites or apps should I add to my Focus Shield to protect my focus time?"),
+        ("Task recommendations",  "checkmark.circle",         "Based on how I spent my time today, what tasks should I prioritize tomorrow?"),
+        ("Best work hours",       "clock",                    "Based on my session data, when are my peak productive hours? When should I schedule deep work?"),
+        ("Plan tomorrow",         "calendar.badge.plus",      "Help me plan an optimal schedule for tomorrow with focus blocks and structured break times."),
+        ("Context switching",     "arrow.left.arrow.right",   "How often did I context-switch today? Is it hurting my deep work and how can I improve?"),
+        ("Journal prompt",        "pencil.line",              "Based on my activity today, give me 3 thoughtful journal prompts to reflect on my progress and mindset."),
     ]
 }
