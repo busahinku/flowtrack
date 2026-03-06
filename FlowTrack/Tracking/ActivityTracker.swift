@@ -47,6 +47,7 @@ final class ActivityTracker: ObservableObject {
     // Browser URL cache — only re-fetch AppleScript when title actually changes
     private var lastBrowserTitle: String = ""
     private var cachedBrowserURL: String? = nil
+    private var browserFetchTask: Task<Void, Never>?
 
     // Browser URL debounce — cancel pending fetch when title changes rapidly
     private var browserURLTask: Task<Void, Never>?
@@ -287,8 +288,9 @@ final class ActivityTracker: ObservableObject {
 
         let isBrowser = knownBrowsers.contains(where: { appName.contains($0) })
         if isBrowser {
-            // Fetch URL + page title async for the new browser tab
-            Task.detached(priority: .utility) {
+            // Cancel any in-flight fetch from a prior browser switch, then start a fresh one
+            browserFetchTask?.cancel()
+            browserFetchTask = Task.detached(priority: .utility) {
                 let info = await ActivityTracker.fetchBrowserInfo(appName: appName)
                 await MainActor.run { [weak self] in
                     guard let self else { return }
@@ -542,8 +544,8 @@ final class ActivityTracker: ObservableObject {
             }
             return ""
         }
-        guard let rawValue = value else { return "" }
-        // CoreFoundation bridging: AXUIElement is always an AXUIElement when result == .success
+        guard let rawValue = value,
+              CFGetTypeID(rawValue as CFTypeRef) == AXUIElementGetTypeID() else { return "" }
         let axElement = rawValue as! AXUIElement
         var titleValue: AnyObject?
         let titleResult = AXUIElementCopyAttributeValue(axElement, kAXTitleAttribute as CFString, &titleValue)
@@ -645,7 +647,8 @@ final class ActivityTracker: ObservableObject {
         guard let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "org.mozilla.firefox" }) else { return nil }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         var windowRef: AnyObject?
-        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowRef) == .success else { return nil }
+        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowRef) == .success,
+              let windowRef, CFGetTypeID(windowRef as CFTypeRef) == AXUIElementGetTypeID() else { return nil }
         let window = windowRef as! AXUIElement
         // Traverse toolbar → address bar (search field with URL value)
         if let url = searchAXForURL(element: window, depth: 0) {
@@ -670,12 +673,15 @@ final class ActivityTracker: ObservableObject {
             }
         }
 
-        // Recurse into children
+        // Recurse into children — CF bridging returns [AnyObject], not [AXUIElement] directly
         var childrenRef: AnyObject?
         guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef) == .success,
-              let children = childrenRef as? [AXUIElement] else { return nil }
-        for child in children {
-            if let found = searchAXForURL(element: child, depth: depth + 1) { return found }
+              let childArray = childrenRef as? [AnyObject] else { return nil }
+        let axTypeID = AXUIElementGetTypeID()
+        for child in childArray {
+            guard CFGetTypeID(child as CFTypeRef) == axTypeID else { continue }
+            let axChild = child as! AXUIElement
+            if let found = searchAXForURL(element: axChild, depth: depth + 1) { return found }
         }
         return nil
     }

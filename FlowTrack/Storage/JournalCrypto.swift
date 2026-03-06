@@ -17,7 +17,7 @@ enum JournalCrypto {
     // MARK: - Key Derivation
 
     /// Derive a 256-bit symmetric key from a password + random salt using PBKDF2-SHA256.
-    nonisolated static func deriveKey(password: String, salt: Data) -> SymmetricKey {
+    nonisolated static func deriveKey(password: String, salt: Data) throws -> SymmetricKey {
         var derivedKeyData = Data(repeating: 0, count: keyLength)
         let passwordData   = Data(password.utf8)
         let result: Int32  = derivedKeyData.withUnsafeMutableBytes { derivedPtr in
@@ -37,15 +37,18 @@ enum JournalCrypto {
                 }
             }
         }
-        precondition(result == kCCSuccess, "PBKDF2 failed: \(result)")
+        guard result == kCCSuccess else {
+            throw JournalCryptoError.derivationFailed(code: result)
+        }
         return SymmetricKey(data: derivedKeyData)
     }
 
     /// Generate a cryptographically random salt.
-    nonisolated static func randomSalt() -> Data {
+    nonisolated static func randomSalt() throws -> Data {
         var bytes = [UInt8](repeating: 0, count: saltLength)
-        let status = SecRandomCopyBytes(kSecRandomDefault, saltLength, &bytes)
-        precondition(status == errSecSuccess)
+        guard SecRandomCopyBytes(kSecRandomDefault, saltLength, &bytes) == errSecSuccess else {
+            throw JournalCryptoError.randomBytesUnavailable
+        }
         return Data(bytes)
     }
 
@@ -100,12 +103,16 @@ enum JournalCryptoError: LocalizedError {
     case invalidCiphertext
     case invalidUTF8
     case decryptionFailed
+    case derivationFailed(code: Int32)
+    case randomBytesUnavailable
 
     var errorDescription: String? {
         switch self {
-        case .invalidCiphertext: return "Journal entry data is corrupted."
-        case .invalidUTF8:       return "Journal entry contains invalid text encoding."
-        case .decryptionFailed:  return "Failed to decrypt journal entry. Wrong password?"
+        case .invalidCiphertext:       return "Journal entry data is corrupted."
+        case .invalidUTF8:             return "Journal entry contains invalid text encoding."
+        case .decryptionFailed:        return "Failed to decrypt journal entry. Wrong password?"
+        case .derivationFailed(let c): return "Key derivation failed (code \(c))."
+        case .randomBytesUnavailable:  return "System random bytes unavailable."
         }
     }
 }

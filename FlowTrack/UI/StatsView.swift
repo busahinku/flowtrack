@@ -31,6 +31,7 @@ struct StatsView: View {
     @State private var searchText = ""
     @State private var showAllApps = false
     @State private var showDatePicker = false
+    @State private var loadTask: Task<Void, Never>?
     @State private var sevenDayActivities: [(date: Date, score: Double)] = []
     @State private var previousPeriodActive: Double = 0
     @State private var previousPeriodFocus: Double = 0
@@ -65,9 +66,9 @@ struct StatsView: View {
         }
         .background(theme.timelineBg)
         .toolbarBackground(.hidden, for: .windowToolbar)
-        .onAppear { loadData() }
-        .onChange(of: selectedDate) { Task { loadData() } }
-        .onChange(of: period) { selectedHourStat = nil; selectedFlowHour = nil; Task { loadData() } }
+        .onAppear { loadTask?.cancel(); loadTask = Task { loadData() } }
+        .onChange(of: selectedDate) { loadTask?.cancel(); loadTask = Task { loadData() } }
+        .onChange(of: period) { selectedHourStat = nil; selectedFlowHour = nil; loadTask?.cancel(); loadTask = Task { loadData() } }
         .onChange(of: statsSection) { selectedHourStat = nil; selectedFlowHour = nil }
         .sheet(item: $selectedApp) { app in
             AppDetailSheet(app: app, allActivities: allActivities)

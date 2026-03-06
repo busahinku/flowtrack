@@ -111,7 +111,9 @@ final class AppBlockerStore {
         if !domains.isEmpty {
             let lines = domains.flatMap { d -> [String] in
                 let d = d.lowercased().trimmingCharacters(in: .init(charactersIn: "/ "))
-                return ["127.0.0.1 \(d)", "127.0.0.1 www.\(d)"]
+                // Strip leading www. before adding both bare and www. entries to avoid www.www. duplication
+                let bare = d.hasPrefix("www.") ? String(d.dropFirst(4)) : d
+                return ["127.0.0.1 \(bare)", "127.0.0.1 www.\(bare)"]
             }.joined(separator: "\n")
             newSection = "\(hostsBegin)\n\(lines)\n\(hostsEnd)"
         }
@@ -137,6 +139,7 @@ final class AppBlockerStore {
         } else {
             // Write pf rule to a temp file too
             let pfTmp = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("flowtrack_pf_\(UUID().uuidString).conf")
+            defer { try? FileManager.default.removeItem(at: pfTmp) }
             let pfRule = "rdr pass on lo0 proto tcp from any to 127.0.0.1 port {80,443} -> 127.0.0.1 port 8080\n"
             if let _ = try? pfRule.write(to: pfTmp, atomically: true, encoding: .utf8) {
                 pfPart = "pfctl -a com.flowtrack -f \(pfTmp.path) 2>/dev/null; pfctl -e 2>/dev/null; true"

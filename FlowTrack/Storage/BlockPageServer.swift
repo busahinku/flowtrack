@@ -87,7 +87,14 @@ final class BlockPageServer {
     // MARK: - Block page HTML
 
     nonisolated static func blockPageHTML(for host: String) -> String {
-        let domain = host.isEmpty ? "this site" : host
+        let rawDomain = host.isEmpty ? "this site" : host
+        // HTML-escape the host to prevent XSS via crafted Host headers
+        let domain = rawDomain
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&#39;")
         return """
         <!DOCTYPE html>
         <html lang="en">

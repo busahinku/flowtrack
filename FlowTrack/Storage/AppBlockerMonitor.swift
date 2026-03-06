@@ -13,6 +13,9 @@ final class AppBlockerMonitor {
 
     private var tickTimer: Timer?
     private var lastTickDate: Date = Date()
+    /// Cards for which we've already sent a notification today — resets on new day.
+    private var notifiedCardIds: Set<String> = []
+    private var lastNotifResetDay: Int = Calendar.current.component(.day, from: Date())
 
     private var store:   AppBlockerStore  { AppBlockerStore.shared }
     private var tracker: ActivityTracker  { ActivityTracker.shared }
@@ -44,8 +47,13 @@ final class AppBlockerMonitor {
 
     private func tick() {
         let now     = Date()
-        let elapsed = Int(now.timeIntervalSince(lastTickDate))
+        // Cap elapsed to the tick interval to prevent sleep-wake time inflation
+        let elapsed = min(Int(now.timeIntervalSince(lastTickDate)), 10)
         lastTickDate = now
+
+        // Reset per-day notification dedup set when the calendar day rolls over
+        let today = Calendar.current.component(.day, from: now)
+        if today != lastNotifResetDay { notifiedCardIds.removeAll(); lastNotifResetDay = today }
 
         let currentBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
 
@@ -76,7 +84,10 @@ final class AppBlockerMonitor {
                 let limit = card.dailyLimitMinutes * 60
                 if used >= limit {
                     store.blockCardNow(cardId: card.id)
-                    sendBlockNotification(name: card.name, limitMinutes: card.dailyLimitMinutes)
+                    if !notifiedCardIds.contains(card.id) {
+                        notifiedCardIds.insert(card.id)
+                        sendBlockNotification(name: card.name, limitMinutes: card.dailyLimitMinutes)
+                    }
                 }
             }
         }
@@ -88,7 +99,10 @@ final class AppBlockerMonitor {
         for app in NSRunningApplication.runningApplications(withBundleIdentifier: bundleID) {
             app.forceTerminate()
         }
-        sendBlockNotification(name: cardName, limitMinutes: limitMinutes)
+        if !notifiedCardIds.contains(cardName) {
+            notifiedCardIds.insert(cardName)
+            sendBlockNotification(name: cardName, limitMinutes: limitMinutes)
+        }
         monitorLog.info("Terminated \(bundleID) (card: \(cardName))")
     }
 

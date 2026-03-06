@@ -63,15 +63,9 @@ extension AIProvider {
     }
     func checkHealth() async throws -> Bool { true }
 
-    /// Default chat: flatten history + system prompt and forward to `categorize`-style call.
-    /// Providers that support native multi-turn chat should override this method.
+    /// Default: providers without native chat support throw — the ChatEngine falls back to the next provider.
     func chat(messages: [ChatTurn], systemPrompt: String) async throws -> String {
-        guard let last = messages.last(where: { $0.role == "user" }) else {
-            throw AIError.invalidResponse("No user message in chat history")
-        }
-        // Fall back to a single-shot prompt combining system context and the last user message.
-        let combined = systemPrompt.isEmpty ? last.content : systemPrompt + "\n\n---\n" + last.content
-        return try await categorize(appName: "chat", bundleID: "chat", windowTitle: combined, url: nil).rawValue
+        throw AIError.invalidResponse("Chat not implemented for this provider")
     }
 
     // Default: fall back to individual calls
@@ -348,10 +342,14 @@ struct AIPromptBuilder {
 
             let startComps = cal.dateComponents([.hour, .minute], from: startTime)
             let endComps = cal.dateComponents([.hour, .minute], from: endTime)
-            let segStart = cal.date(bySettingHour: startComps.hour ?? 0, minute: startComps.minute ?? 0, second: 0, of: dayStart)!
-            var segEnd = cal.date(bySettingHour: endComps.hour ?? 0, minute: endComps.minute ?? 0, second: 0, of: dayStart)!
+            let segStart = cal.date(bySettingHour: startComps.hour ?? 0, minute: startComps.minute ?? 0, second: 0, of: dayStart)
+                ?? dayStart.addingTimeInterval(TimeInterval((startComps.hour ?? 0) * 3600 + (startComps.minute ?? 0) * 60))
+            var segEnd = cal.date(bySettingHour: endComps.hour ?? 0, minute: endComps.minute ?? 0, second: 0, of: dayStart)
+                ?? dayStart.addingTimeInterval(TimeInterval((endComps.hour ?? 0) * 3600 + (endComps.minute ?? 0) * 60))
 
-            if segEnd <= segStart { segEnd = cal.date(byAdding: .day, value: 1, to: segEnd)! }
+            if segEnd <= segStart {
+                segEnd = cal.date(byAdding: .day, value: 1, to: segEnd) ?? segEnd.addingTimeInterval(86400)
+            }
 
             let clampedStart = max(segStart, windowStart)
             let clampedEnd = min(segEnd, windowEnd)

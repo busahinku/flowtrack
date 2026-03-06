@@ -119,7 +119,7 @@ final class Database: Sendable {
     func dayBounds(for date: Date) -> (start: Date, end: Date) {
         let cal = Calendar.current
         let start = cal.startOfDay(for: date)
-        let end = cal.date(byAdding: .day, value: 1, to: start)!
+        let end = cal.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86400)
         return (start, end)
     }
 
@@ -312,7 +312,8 @@ final class Database: Sendable {
         let hour = cal.component(.hour, from: date)
         let minute = cal.component(.minute, from: date)
         let slot = minute < 30 ? 0 : 30
-        let slotDate = cal.date(bySettingHour: hour, minute: slot, second: 0, of: date)!
+        let slotDate = cal.date(bySettingHour: hour, minute: slot, second: 0, of: date)
+            ?? cal.startOfDay(for: date).addingTimeInterval(TimeInterval(hour * 3600 + slot * 60))
         let fmt = DateFormatter()
         fmt.dateFormat = "yyyy-MM-dd'T'HH:mm"
         fmt.timeZone = cal.timeZone
@@ -674,9 +675,16 @@ final class Database: Sendable {
                 cats[a.category.rawValue, default: 0] += a.duration / 60.0
                 hourCats[startHour] = cats
             } else {
-                // Spans hour boundary: split proportionally
-                let nextHourBoundary = cal.date(bySettingHour: startHour + 1, minute: 0, second: 0, of: a.timestamp)
-                    ?? a.timestamp.addingTimeInterval(a.duration)
+                // Spans hour boundary: split proportionally, handling hour 23 → midnight
+                let nextHourBoundary: Date
+                if startHour == 23 {
+                    let tomorrow = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: a.timestamp)) ?? a.timestamp
+                    nextHourBoundary = cal.date(bySettingHour: 0, minute: 0, second: 0, of: tomorrow)
+                        ?? a.timestamp.addingTimeInterval(3600)
+                } else {
+                    nextHourBoundary = cal.date(bySettingHour: startHour + 1, minute: 0, second: 0, of: a.timestamp)
+                        ?? a.timestamp.addingTimeInterval(3600)
+                }
                 let firstPortion = nextHourBoundary.timeIntervalSince(a.timestamp)
                 let secondPortion = a.duration - firstPortion
 

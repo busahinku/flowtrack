@@ -194,8 +194,9 @@ final class AppState {
 
     /// Core window analysis: find completed 30-min windows without segments, analyze via AI
     private func analyzeUnprocessedWindows(limit: Int) async {
+        let analysisDate = selectedDate  // capture once — user may navigate while batch runs
         do {
-            let windowIds = try Database.shared.unprocessedWindowIds(for: selectedDate, limit: limit)
+            let windowIds = try Database.shared.unprocessedWindowIds(for: analysisDate, limit: limit)
             guard !windowIds.isEmpty else { return }
 
             log.info("Analyzing \(windowIds.count) unprocessed windows")

@@ -42,8 +42,8 @@ final class JournalPasswordManager {
     /// Returns the derived `SymmetricKey` so the caller can immediately unlock without a second PBKDF2 round.
     nonisolated func setupAndDeriveKey(password: String) throws -> SymmetricKey {
         lock.lock(); defer { lock.unlock() }
-        let salt     = JournalCrypto.randomSalt()
-        let key      = JournalCrypto.deriveKey(password: password, salt: salt)
+        let salt     = try JournalCrypto.randomSalt()
+        let key      = try JournalCrypto.deriveKey(password: password, salt: salt)
         let verifier = JournalCrypto.verifier(for: key)
         // Store salt(32) + verifier(32) as a single 64-byte Keychain item → one prompt instead of two
         var blob = Data()
@@ -71,7 +71,7 @@ final class JournalPasswordManager {
         let stored = Data(blob.suffix(32))
         lock.unlock()
 
-        let key = JournalCrypto.deriveKey(password: password, salt: salt)
+        let key = try JournalCrypto.deriveKey(password: password, salt: salt)
         guard JournalCrypto.isKeyValid(key, verifier: stored) else {
             throw JournalPasswordError.wrongPassword
         }
