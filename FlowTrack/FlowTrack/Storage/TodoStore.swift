@@ -100,6 +100,30 @@ final class TodoStore {
         timerSessions.filter { $0.todoId == todoId }.reduce(0) { $0 + $1.duration }
     }
 
+    // MARK: - Data Management
+
+    func clearTimerSessions() {
+        timerSessions.removeAll()
+        saveSessions()
+    }
+
+    func clearCompletedTodos() {
+        todos.removeAll { $0.status == .done }
+        saveTodos()
+    }
+
+    func clearAllTodos() {
+        todos.removeAll()
+        saveTodos()
+    }
+
+    func clearAll() {
+        todos.removeAll()
+        timerSessions.removeAll()
+        saveTodos()
+        saveSessions()
+    }
+
     // MARK: - AI Task Breakdown
 
     func breakdown(todo: TodoItem) async {

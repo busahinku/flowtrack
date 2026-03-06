@@ -10,9 +10,9 @@ enum JournalCrypto {
 
     // MARK: - Constants
 
-    static let saltLength      = 32   // bytes
-    static let pbkdf2Rounds    = 200_000
-    static let keyLength       = 32   // AES-256
+    nonisolated static let saltLength      = 32   // bytes
+    nonisolated static let pbkdf2Rounds    = 200_000
+    nonisolated static let keyLength       = 32   // AES-256
 
     // MARK: - Key Derivation
 

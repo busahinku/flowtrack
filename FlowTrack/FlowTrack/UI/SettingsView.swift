@@ -1026,9 +1026,15 @@ struct PrivacyTab: View {
     @Bindable var settings = AppSettings.shared
     @State private var showClearConfirm = false
     @State private var showClearAIConfirm = false
+    @State private var showClearTodayConfirm = false
+    @State private var showClearOldConfirm = false
+    @State private var showClearTasksConfirm = false
+    @State private var showClearEverythingConfirm = false
+    @State private var clearDaysOption: Int = 30
     @State private var clearResult: String?
     @State private var clearError: String?
     @State private var newBundleID = ""
+    @State private var storageStats: (activities: Int, aiRecords: Int, bytes: Int64) = (0, 0, 0)
     private var theme: AppTheme { AppSettings.shared.appTheme }
 
     var body: some View {
@@ -1089,45 +1095,158 @@ struct PrivacyTab: View {
                 }
             }
 
-            Section("Manage Data") {
-                Button("Clear AI-Generated Data") {
-                    showClearAIConfirm = true
+            // ── Storage Stats ──────────────────────────────────────────────────
+            Section("Storage") {
+                HStack {
+                    Label("Activity Records", systemImage: "clock.arrow.circlepath")
+                    Spacer()
+                    Text("\(storageStats.activities)")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(theme.secondaryText)
+                }
+                HStack {
+                    Label("AI Summaries", systemImage: "sparkles")
+                    Spacer()
+                    Text("\(storageStats.aiRecords)")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(theme.secondaryText)
+                }
+                HStack {
+                    Label("Tasks", systemImage: "checklist")
+                    Spacer()
+                    Text("\(TodoStore.shared.todos.count) tasks · \(TodoStore.shared.timerSessions.count) sessions")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(theme.secondaryText)
+                }
+                HStack {
+                    Label("Database Size", systemImage: "internaldrive")
+                    Spacer()
+                    Text(formatBytes(storageStats.bytes))
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(theme.secondaryText)
+                }
+                Button("Refresh") { refreshStats() }
+                    .font(.caption)
+                    .foregroundStyle(theme.accentColor)
+            }
+            .onAppear { refreshStats() }
+
+            // ── Activity Data ──────────────────────────────────────────────────
+            Section("Activity Data") {
+                Button("Clear Today's Activity") {
+                    showClearTodayConfirm = true
                 }
                 .foregroundStyle(theme.warningColor)
 
-                Button("Clear ALL Activity Data") {
+                HStack {
+                    Text("Clear older than")
+                        .font(.callout)
+                    Spacer()
+                    Picker("", selection: $clearDaysOption) {
+                        Text("7 days").tag(7)
+                        Text("30 days").tag(30)
+                        Text("90 days").tag(90)
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    Button("Clear") { showClearOldConfirm = true }
+                        .foregroundStyle(theme.warningColor)
+                }
+
+                Button("Clear All Activity Data") {
                     showClearConfirm = true
                 }
                 .foregroundStyle(theme.errorColor)
 
-                if let result = clearResult {
-                    Text(result)
-                        .font(.caption)
-                        .foregroundStyle(theme.successColor)
+                Button("Clear AI Summaries Only") {
+                    showClearAIConfirm = true
                 }
+                .foregroundStyle(theme.secondaryText)
             }
 
+            // ── Tasks & Timer ──────────────────────────────────────────────────
+            Section("Tasks & Timer") {
+                Button("Clear Completed Tasks") {
+                    TodoStore.shared.clearCompletedTodos()
+                    setResult("Completed tasks cleared")
+                }
+                .foregroundStyle(theme.warningColor)
+
+                Button("Clear Timer Sessions") {
+                    TodoStore.shared.clearTimerSessions()
+                    setResult("Timer sessions cleared")
+                }
+                .foregroundStyle(theme.warningColor)
+
+                Button("Clear All Tasks & Sessions") {
+                    showClearTasksConfirm = true
+                }
+                .foregroundStyle(theme.errorColor)
+            }
+
+            // ── API Keys ───────────────────────────────────────────────────────
             Section("API Keys") {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("API keys are stored securely in the macOS Keychain.")
                         .font(.caption)
                         .foregroundStyle(theme.secondaryText)
-                    Text("Keys never touch disk and are protected by your login credentials.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
                 }
-
                 Button("Remove All API Keys") {
                     for provider in AIProviderType.allCases where provider.needsAPIKey {
                         SecureStore.shared.deleteKey(for: provider.rawValue)
                     }
-                    clearResult = "All API keys removed"
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { clearResult = nil }
+                    setResult("All API keys removed")
                 }
                 .foregroundStyle(theme.errorColor)
             }
+
+            // ── Nuclear Option ─────────────────────────────────────────────────
+            Section {
+                Button(role: .destructive) {
+                    showClearEverythingConfirm = true
+                } label: {
+                    Label("Clear Everything", systemImage: "trash.fill")
+                        .font(.body.weight(.semibold))
+                }
+            } footer: {
+                Text("Permanently deletes all activities, AI data, tasks, and timer sessions. Cannot be undone.")
+                    .font(.caption)
+                    .foregroundStyle(theme.errorColor.opacity(0.7))
+            }
+
+            if let result = clearResult {
+                Section {
+                    Label(result, systemImage: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(theme.successColor)
+                }
+            }
         }
         .formStyle(.grouped)
+        // ── Alerts ────────────────────────────────────────────────────────────
+        .alert("Clear Today's Activity?", isPresented: $showClearTodayConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear", role: .destructive) {
+                do {
+                    try Database.shared.clearTodaysActivities()
+                    Task { await AppState.shared.refreshData() }
+                    setResult("Today's activity cleared")
+                } catch { clearError = error.localizedDescription }
+            }
+        } message: { Text("This will delete all activity records for today.") }
+
+        .alert("Clear Old Data?", isPresented: $showClearOldConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear", role: .destructive) {
+                do {
+                    try Database.shared.clearActivitiesOlderThan(days: clearDaysOption)
+                    Task { await AppState.shared.refreshData() }
+                    refreshStats()
+                    setResult("Data older than \(clearDaysOption) days cleared")
+                } catch { clearError = error.localizedDescription }
+            }
+        } message: { Text("This will permanently delete all activity records older than \(clearDaysOption) days.") }
+
         .alert("Clear AI Data?", isPresented: $showClearAIConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Clear", role: .destructive) {
@@ -1135,39 +1254,70 @@ struct PrivacyTab: View {
                     try Database.shared.clearSessionAI()
                     AppState.shared.sessionTitles.removeAll()
                     AppState.shared.sessionSummaries.removeAll()
-                    clearResult = "AI data cleared"
-                    NotificationCenter.default.post(name: .init("FlowTrackDataCleared"), object: nil)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { clearResult = nil }
-                } catch {
-                    clearError = "Failed to clear AI data: \(error.localizedDescription)"
-                }
+                    refreshStats()
+                    setResult("AI summaries cleared")
+                } catch { clearError = error.localizedDescription }
             }
-        } message: {
-            Text("This will remove all AI-generated titles and summaries. Activity data will be kept.")
-        }
-        .alert("Clear ALL Data?", isPresented: $showClearConfirm) {
+        } message: { Text("This will remove all AI-generated titles and summaries. Activity data will be kept.") }
+
+        .alert("Clear All Activity Data?", isPresented: $showClearConfirm) {
             Button("Cancel", role: .cancel) {}
-            Button("Clear Everything", role: .destructive) {
+            Button("Clear", role: .destructive) {
                 do {
                     try Database.shared.clearAllData()
                     AppState.shared.sessionTitles.removeAll()
                     AppState.shared.sessionSummaries.removeAll()
                     Task { await AppState.shared.refreshData() }
-                    clearResult = "All data cleared"
+                    refreshStats()
+                    setResult("All activity data cleared")
                     NotificationCenter.default.post(name: .init("FlowTrackDataCleared"), object: nil)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { clearResult = nil }
-                } catch {
-                    clearError = "Failed to clear data: \(error.localizedDescription)"
-                }
+                } catch { clearError = error.localizedDescription }
             }
-        } message: {
-            Text("This will permanently delete all activity records and AI data. This cannot be undone.")
-        }
+        } message: { Text("This will permanently delete all activity records and AI summaries. Tasks and timer sessions will NOT be affected.") }
+
+        .alert("Clear All Tasks?", isPresented: $showClearTasksConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear", role: .destructive) {
+                TodoStore.shared.clearAll()
+                setResult("All tasks and timer sessions cleared")
+            }
+        } message: { Text("This will delete all tasks and timer sessions. Activity tracking data will NOT be affected.") }
+
+        .alert("Clear Everything?", isPresented: $showClearEverythingConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete All Data", role: .destructive) {
+                do {
+                    try Database.shared.clearAllData()
+                    TodoStore.shared.clearAll()
+                    AppState.shared.sessionTitles.removeAll()
+                    AppState.shared.sessionSummaries.removeAll()
+                    Task { await AppState.shared.refreshData() }
+                    refreshStats()
+                    setResult("Everything cleared")
+                    NotificationCenter.default.post(name: .init("FlowTrackDataCleared"), object: nil)
+                } catch { clearError = error.localizedDescription }
+            }
+        } message: { Text("This will permanently delete ALL activities, AI summaries, tasks, and timer sessions. This cannot be undone.") }
+
         .alert("Error", isPresented: Binding(get: { clearError != nil }, set: { if !$0 { clearError = nil } })) {
             Button("OK", role: .cancel) { clearError = nil }
-        } message: {
-            Text(clearError ?? "")
-        }
+        } message: { Text(clearError ?? "") }
+    }
+
+    private func setResult(_ msg: String) {
+        clearResult = msg
+        refreshStats()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { clearResult = nil }
+    }
+
+    private func refreshStats() {
+        storageStats = Database.shared.storageStats()
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        if bytes < 1024 { return "\(bytes) B" }
+        if bytes < 1024 * 1024 { return String(format: "%.1f KB", Double(bytes) / 1024) }
+        return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
     }
 }
 

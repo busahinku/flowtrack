@@ -3,7 +3,7 @@ import KeychainSwift
 import CryptoKit
 import OSLog
 
-nonisolated(unsafe) private let pmLog = Logger(subsystem: "com.flowtrack", category: "JournalPasswordManager")
+private let pmLog = Logger(subsystem: "com.flowtrack", category: "JournalPasswordManager")
 
 // MARK: - JournalPasswordManager
 /// Manages Journal password lifecycle: setup, verification, and reset.
@@ -14,12 +14,12 @@ nonisolated(unsafe) private let pmLog = Logger(subsystem: "com.flowtrack", categ
 ///   - All Keychain items are `.thisDeviceOnly` — no iCloud sync, no device transfer.
 ///   - Thread-safe via NSLock.
 final class JournalPasswordManager {
-    nonisolated(unsafe) static let shared = JournalPasswordManager()
+    static let shared = JournalPasswordManager()
 
     nonisolated(unsafe) private let keychain: KeychainSwift
-    nonisolated(unsafe) private let lock = NSLock()
+    private let lock = NSLock()
     /// Single Keychain item holding both salt + verifier as a 64-byte blob (32+32).
-    nonisolated(unsafe) private let credsKey = "journal_creds_v3"
+    private let credsKey = "journal_creds_v3"
 
     private init() {
         keychain = KeychainSwift(keyPrefix: "FlowTrackJournal_")
@@ -50,10 +50,10 @@ final class JournalPasswordManager {
         blob.append(salt)
         blob.append(verifier)
         guard keychain.set(blob, forKey: credsKey, withAccess: .accessibleWhenUnlockedThisDeviceOnly) else {
-            pmLog.error("Keychain write failed for journal credentials")
+            Logger(subsystem: "com.flowtrack", category: "JournalPasswordManager").error("Keychain write failed for journal credentials")
             throw JournalPasswordError.keychainFailed
         }
-        pmLog.info("Journal password set up successfully")
+        Logger(subsystem: "com.flowtrack", category: "JournalPasswordManager").info("Journal password set up successfully")
         return key
     }
 

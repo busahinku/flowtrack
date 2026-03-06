@@ -3,7 +3,7 @@ import AppKit
 import UserNotifications
 import OSLog
 
-nonisolated(unsafe) private let blockerLog = Logger(subsystem: "com.flowtrack", category: "AppBlocker")
+private let blockerLog = Logger(subsystem: "com.flowtrack", category: "AppBlocker")
 
 // MARK: - AppBlockerStore
 @MainActor @Observable
@@ -152,10 +152,12 @@ final class AppBlockerStore {
         if let appleScript = NSAppleScript(source: script) {
             appleScript.executeAndReturnError(&errDict)
             if errDict == nil {
-                blockerLog.info("Hosts file updated: \(domains.count) domain(s) blocked")
+                let log = Logger(subsystem: "com.flowtrack", category: "AppBlocker")
+                log.info("Hosts file updated: \(domains.count) domain(s) blocked")
                 Task { @MainActor in BlockPageServer.shared.start() }
             } else {
-                blockerLog.error("Failed to update hosts/pfctl: \(String(describing: errDict))")
+                let log = Logger(subsystem: "com.flowtrack", category: "AppBlocker")
+                log.error("Failed to update hosts/pfctl: \(String(describing: errDict))")
             }
         }
         try? FileManager.default.removeItem(at: tmp)

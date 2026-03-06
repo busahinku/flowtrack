@@ -530,7 +530,33 @@ final class Database: Sendable {
         }
     }
 
-    // MARK: - Auto Cleanup
+    func clearActivitiesOlderThan(days: Int) throws {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date())!
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM activities WHERE timestamp < ?", arguments: [cutoff])
+            try db.execute(sql: "DELETE FROM session_ai WHERE session_id NOT IN (SELECT DISTINCT session_id FROM activities)")
+        }
+        try dbQueue.writeWithoutTransaction { db in try db.execute(sql: "VACUUM") }
+    }
+
+    func clearTodaysActivities() throws {
+        let (start, end) = dayBounds(for: Date())
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM activities WHERE timestamp >= ? AND timestamp < ?", arguments: [start, end])
+        }
+    }
+
+    /// Returns (activityCount, sessionAICount, fileSizeBytes)
+    func storageStats() -> (activities: Int, aiRecords: Int, bytes: Int64) {
+        let actCount  = (try? dbQueue.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM activities") ?? 0 }) ?? 0
+        let aiCount   = (try? dbQueue.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM session_ai") ?? 0 }) ?? 0
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dbPath = appSupport.appendingPathComponent("FlowTrack/flowtrack.sqlite").path
+        let bytes = (try? FileManager.default.attributesOfItem(atPath: dbPath)[.size] as? Int64) ?? 0
+        return (actCount, aiCount, bytes)
+    }
+
+
     /// Deletes data older than `days` when DB exceeds `maxSizeMB`
     func autoCleanupIfNeeded(maxSizeMB: Int = 3072, keepDays: Int = 90) {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!

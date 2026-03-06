@@ -205,10 +205,11 @@ private struct JournalSetupView: View {
         guard password == confirm else { errorMessage = "Passwords do not match."; return }
         isWorking = true; errorMessage = ""
         let pwd = password
+        let mgr = JournalPasswordManager.shared
         Task.detached(priority: .userInitiated) {
             do {
                 // PBKDF2 runs off main thread here
-                let key = try JournalPasswordManager.shared.setupAndDeriveKey(password: pwd)
+                let key = try mgr.setupAndDeriveKey(password: pwd)
                 await MainActor.run {
                     JournalStore.shared.unlockWithKey(key)
                     isWorking = false
@@ -298,9 +299,10 @@ private struct JournalUnlockView: View {
         guard !password.isEmpty else { return }
         isWorking = true; errorMessage = ""
         let pwd = password
+        let mgr = JournalPasswordManager.shared
         Task.detached(priority: .userInitiated) {
             do {
-                let key = try JournalPasswordManager.shared.verifyAndDeriveKey(password: pwd)
+                let key = try mgr.verifyAndDeriveKey(password: pwd)
                 await MainActor.run {
                     JournalStore.shared.unlockWithKey(key)
                     isWorking = false
