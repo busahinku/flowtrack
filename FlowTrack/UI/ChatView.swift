@@ -510,6 +510,16 @@ private struct MarkdownRenderer: View {
 
         case .divider:
             Divider().opacity(0.5)
+
+        case .codeBlock(let code):
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(code)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
         }
     }
 
@@ -529,6 +539,8 @@ private struct MarkdownRenderer: View {
         var bulletBuffer: [String] = []
         var numberedBuffer: [String] = []
         var paragraphBuffer: [String] = []
+        var inCodeBlock = false
+        var codeBuffer: [String] = []
 
         func flushBullets() {
             if !bulletBuffer.isEmpty { result.append(.bullet(bulletBuffer)); bulletBuffer = [] }
@@ -541,13 +553,32 @@ private struct MarkdownRenderer: View {
             if !joined.isEmpty { result.append(.paragraph(joined)) }
             paragraphBuffer = []
         }
+        func flushCode() {
+            if !codeBuffer.isEmpty { result.append(.codeBlock(codeBuffer.joined(separator: "\n"))); codeBuffer = [] }
+        }
 
         for line in lines {
             let t = line.trimmingCharacters(in: .whitespaces)
-            if t.hasPrefix("### ") || t.hasPrefix("## ") || t.hasPrefix("# ") {
+
+            // Code fence toggle
+            if t.hasPrefix("```") {
+                if inCodeBlock {
+                    flushCode()
+                    inCodeBlock = false
+                } else {
+                    flushBullets(); flushNumbered(); flushParagraph()
+                    inCodeBlock = true
+                }
+                continue
+            }
+            if inCodeBlock { codeBuffer.append(line); continue }
+
+            // Headings: support both "# Text" and "#Text" (no space)
+            if t.range(of: "^#{1,3}\\s*\\S", options: .regularExpression) != nil {
                 flushBullets(); flushNumbered(); flushParagraph()
-                let level = t.hasPrefix("### ") ? 3 : t.hasPrefix("## ") ? 2 : 1
-                let heading = t.replacingOccurrences(of: "^#+\\s*", with: "", options: .regularExpression)
+                let hashCount = t.prefix(while: { $0 == "#" }).count
+                let level = min(hashCount, 3)
+                let heading = t.replacingOccurrences(of: "^#{1,6}\\s*", with: "", options: .regularExpression)
                 result.append(.heading(heading, level))
             } else if t.hasPrefix("- ") || t.hasPrefix("• ") || t.hasPrefix("* ") {
                 flushNumbered(); flushParagraph()
@@ -565,7 +596,7 @@ private struct MarkdownRenderer: View {
                 paragraphBuffer.append(t)
             }
         }
-        flushBullets(); flushNumbered(); flushParagraph()
+        flushBullets(); flushNumbered(); flushParagraph(); flushCode()
         return result
     }
 }
@@ -576,6 +607,7 @@ private enum MDBlock: Equatable {
     case numbered([String])
     case paragraph(String)
     case divider
+    case codeBlock(String)
 }
 
 // MARK: - ThinkingIndicator

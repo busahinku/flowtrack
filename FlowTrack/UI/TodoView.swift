@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Due Section
 
@@ -779,7 +780,7 @@ struct TodoRowView: View {
             }
 
             // ── Subtasks section ──────────────────────────────────────
-            if todo.hasSubtasks && subtasksExpanded {
+            if (todo.hasSubtasks || showingAddSubtask) && subtasksExpanded {
                 VStack(spacing: 2) {
                     ForEach(Array(todo.subtasks.enumerated()), id: \.element.id) { index, subtask in
                         SubtaskRowView(
@@ -941,6 +942,10 @@ private struct SubtaskRowView: View {
     @State private var isEditing = false
     @State private var editTitle = ""
     @State private var isHovered = false
+    @State private var isDropTarget = false
+
+    private var store: TodoStore { TodoStore.shared }
+    private var subtaskTrackedTime: TimeInterval { store.trackedTime(for: subtask.id) }
 
     private var statusColor: Color {
         switch subtask.status {
@@ -952,43 +957,16 @@ private struct SubtaskRowView: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            // Reorder arrows — visible on hover
-            VStack(spacing: 0) {
-                Button {
-                    guard index > 0 else { return }
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        TodoStore.shared.moveSubtask(in: parentId, fromIndex: index, toIndex: index - 1)
-                    }
-                } label: {
-                    Image(systemName: "chevron.up")
-                        .font(.system(size: 8, weight: .semibold))
-                        .frame(width: 16, height: 12)
-                        .foregroundStyle(index > 0 ? theme.secondaryText : theme.secondaryText.opacity(0.15))
-                }
-                .buttonStyle(.plain)
-                .disabled(index == 0)
-
-                Button {
-                    guard index < count - 1 else { return }
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        TodoStore.shared.moveSubtask(in: parentId, fromIndex: index, toIndex: index + 1)
-                    }
-                } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .semibold))
-                        .frame(width: 16, height: 12)
-                        .foregroundStyle(index < count - 1 ? theme.secondaryText : theme.secondaryText.opacity(0.15))
-                }
-                .buttonStyle(.plain)
-                .disabled(index >= count - 1)
-            }
-            .opacity(isHovered ? 1 : 0)
-            .frame(width: 16)
-            .padding(.leading, 6)
+            // Drag handle — visible on hover
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(theme.secondaryText.opacity(isHovered ? 0.45 : 0))
+                .frame(width: 16)
+                .padding(.leading, 6)
 
             // Indent line
             Rectangle()
-                .fill(theme.dividerColor.opacity(0.25))
+                .fill(isDropTarget ? theme.accentColor : theme.dividerColor.opacity(0.25))
                 .frame(width: 1.5)
 
             // Status button — cycles: pending → inProgress → done → pending
@@ -1047,15 +1025,49 @@ private struct SubtaskRowView: View {
                     .background(theme.accentColor.opacity(0.1), in: Capsule())
             }
 
+            // Tracked time chip
+            if subtaskTrackedTime >= 60 {
+                HStack(spacing: 3) {
+                    Image(systemName: "clock.fill").font(.system(size: 8))
+                    Text(formatDuration(subtaskTrackedTime)).font(.system(size: 9, weight: .medium))
+                }
+                .foregroundStyle(theme.secondaryText)
+                .padding(.horizontal, 5).padding(.vertical, 2)
+                .background(.quaternary, in: Capsule())
+            }
+
             Spacer()
         }
         .padding(.vertical, 4)
         .padding(.trailing, 12)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
+        .onDrag {
+            NSItemProvider(object: "\(parentId):\(index)" as NSString)
+        }
+        .onDrop(of: [.text], isTargeted: $isDropTarget) { providers in
+            guard let item = providers.first else { return false }
+            _ = item.loadObject(ofClass: NSString.self) { value, _ in
+                guard let str = value as? String else { return }
+                let parts = str.components(separatedBy: ":")
+                guard parts.count == 2, parts[0] == parentId,
+                      let fromIndex = Int(parts[1]), fromIndex != index else { return }
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        TodoStore.shared.moveSubtask(in: parentId, fromIndex: fromIndex, toIndex: index)
+                    }
+                }
+            }
+            return true
+        }
         .contextMenu {
             Button { editTitle = subtask.title; isEditing = true }
                 label: { Label("Rename", systemImage: "pencil") }
+            Button {
+                TimerStore.shared.setTodo(subtask.id)
+            } label: {
+                Label("Set in Timer", systemImage: "timer")
+            }
             Divider()
             Menu("Set Status") {
                 Button {
@@ -1088,6 +1100,12 @@ private struct SubtaskRowView: View {
                 TodoStore.shared.deleteSubtask(subtask.id, from: parentId)
             }
         }
+    }
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let h = Int(seconds) / 3600
+        let m = (Int(seconds) % 3600) / 60
+        if h > 0 { return "\(h)h \(m)m" }
+        return "\(m)m"
     }
 }
 

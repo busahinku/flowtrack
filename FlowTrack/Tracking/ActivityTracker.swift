@@ -287,17 +287,23 @@ final class ActivityTracker: ObservableObject {
 
         let isBrowser = knownBrowsers.contains(where: { appName.contains($0) })
         if isBrowser {
-            // Fetch URL async for the new browser tab
+            // Fetch URL + page title async for the new browser tab
             Task.detached(priority: .utility) {
-                let url = await ActivityTracker.fetchBrowserURL(appName: appName)
+                let info = await ActivityTracker.fetchBrowserInfo(appName: appName)
                 await MainActor.run { [weak self] in
                     guard let self else { return }
-                    self.cachedBrowserURL = url
+                    self.cachedBrowserURL = info.url
                     self.lastBrowserTitle = title
-                    let metadata = ContentMetadataExtractor.extract(url: url, windowTitle: title, appName: appName)
-                    let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: title, url: url, isIdle: false, contentMetadata: metadata)
+                    // Use AppleScript page title if AX title was empty (page was loading)
+                    let resolvedTitle = info.pageTitle.flatMap { $0.isEmpty ? nil : $0 } ?? title
+                    if self.lastSavedTitle == title || self.lastSavedTitle.isEmpty {
+                        self.currentTitle = resolvedTitle
+                        self.lastSavedTitle = resolvedTitle
+                    }
+                    let metadata = ContentMetadataExtractor.extract(url: info.url, windowTitle: resolvedTitle, appName: appName)
+                    let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: resolvedTitle, url: info.url, isIdle: false, contentMetadata: metadata)
                     self.checkDistractionAlert(category: cat)
-                    self.lastSavedURL = url
+                    self.lastSavedURL = info.url
                     self.lastSavedCategory = cat
                 }
             }
@@ -409,9 +415,13 @@ final class ActivityTracker: ObservableObject {
 
         trackerLogger.debug("AX title change: \"\(newTitle.prefix(60), privacy: .public)\"")
 
-        // End current segment (old title), start new one (new title)
-        endCurrentSegment()
-        currentSegmentStart = Date()
+        // If the previous title was empty (page was loading when segment started),
+        // update title in-place without ending the segment — avoids recording a blank-title record.
+        let previousTitleWasEmpty = lastSavedTitle.isEmpty
+        if !previousTitleWasEmpty {
+            endCurrentSegment()
+            currentSegmentStart = Date()
+        }
 
         currentTitle = newTitle
         lastSavedTitle = newTitle
@@ -427,12 +437,18 @@ final class ActivityTracker: ObservableObject {
                 // Small debounce to avoid AppleScript on rapid tab switches
                 try? await Task.sleep(for: .seconds(1.0))
                 guard !Task.isCancelled else { return }
-                let url = await ActivityTracker.fetchBrowserURL(appName: appName)
+                let info = await ActivityTracker.fetchBrowserInfo(appName: appName)
                 guard !Task.isCancelled else { return }
-                self.cachedBrowserURL = url
-                self.lastSavedURL = url
-                let metadata = ContentMetadataExtractor.extract(url: url, windowTitle: capturedTitle, appName: appName)
-                let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: capturedTitle, url: url, isIdle: false, contentMetadata: metadata)
+                // Use AppleScript page title if AX title was empty or just got replaced
+                let resolvedTitle = info.pageTitle.flatMap { $0.isEmpty ? nil : $0 } ?? capturedTitle
+                self.cachedBrowserURL = info.url
+                self.lastSavedURL = info.url
+                if self.lastSavedTitle == capturedTitle {
+                    self.currentTitle = resolvedTitle
+                    self.lastSavedTitle = resolvedTitle
+                }
+                let metadata = ContentMetadataExtractor.extract(url: info.url, windowTitle: resolvedTitle, appName: appName)
+                let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: resolvedTitle, url: info.url, isIdle: false, contentMetadata: metadata)
                 self.checkDistractionAlert(category: cat)
                 self.lastSavedCategory = cat
             }
@@ -537,41 +553,67 @@ final class ActivityTracker: ObservableObject {
         return titleValue as? String ?? ""
     }
 
-    /// Runs AppleScript to get the active browser tab URL.
-    /// Firefox uses AXUIElement instead (no AppleScript support for URL).
-    /// Async — suspends the calling task without blocking any thread pool thread.
-    nonisolated static func fetchBrowserURL(appName: String) async -> String? {
-        // Firefox doesn't expose URL via AppleScript — use AXUIElement address bar
+    /// Fetches both the URL and page title for the active browser tab.
+    /// Returns (url, pageTitle) — Firefox only returns url (no AppleScript access).
+    nonisolated static func fetchBrowserInfo(appName: String) async -> (url: String?, pageTitle: String?) {
         if appName.contains("Firefox") {
-            return fetchFirefoxURL()
+            return (fetchFirefoxURL(), nil)
         }
 
+        // AppleScript that returns "url|||title" in a single call to avoid two round-trips.
         let script: String
         if appName.contains("Safari") {
-            script = "tell application \"Safari\" to get URL of current tab of front window"
+            script = """
+            tell application "Safari"
+                set t to current tab of front window
+                return (URL of t) & "|||" & (name of t)
+            end tell
+            """
         } else if appName.contains("Chrome") {
-            script = "tell application \"Google Chrome\" to get URL of active tab of front window"
+            script = """
+            tell application "Google Chrome"
+                set t to active tab of front window
+                return (URL of t) & "|||" & (title of t)
+            end tell
+            """
         } else if appName.contains("Brave") {
-            script = "tell application \"Brave Browser\" to get URL of active tab of front window"
+            script = """
+            tell application "Brave Browser"
+                set t to active tab of front window
+                return (URL of t) & "|||" & (title of t)
+            end tell
+            """
         } else if appName.contains("Edge") {
-            script = "tell application \"Microsoft Edge\" to get URL of active tab of front window"
+            script = """
+            tell application "Microsoft Edge"
+                set t to active tab of front window
+                return (URL of t) & "|||" & (title of t)
+            end tell
+            """
         } else if appName.contains("Opera") {
-            script = "tell application \"Opera\" to get URL of active tab of front window"
+            script = """
+            tell application "Opera"
+                set t to active tab of front window
+                return (URL of t) & "|||" & (title of t)
+            end tell
+            """
         } else if appName.contains("Arc") {
-            script = "tell application \"Arc\" to get URL of active tab of front window"
+            script = """
+            tell application "Arc"
+                set t to active tab of front window
+                return (URL of t) & "|||" & (title of t)
+            end tell
+            """
         } else {
-            return nil
+            return (nil, nil)
         }
 
-        // Use withCheckedContinuation so the calling async task suspends (not blocks a thread).
-        // Two GCD dispatches race: the actual AppleScript and a 3-second timeout.
-        // A one-shot flag guarantees the continuation is resumed exactly once.
         return await withCheckedContinuation { continuation in
             let once = _Once()
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 3) {
                 if once.fulfill() {
                     trackerLogger.warning("AppleScript timed out for \(appName, privacy: .public)")
-                    continuation.resume(returning: nil)
+                    continuation.resume(returning: (nil, nil))
                 }
             }
             DispatchQueue.global(qos: .utility).async {
@@ -579,10 +621,22 @@ final class ActivityTracker: ObservableObject {
                 var error: NSDictionary?
                 let output = appleScript?.executeAndReturnError(&error)
                 if once.fulfill() {
-                    continuation.resume(returning: output?.stringValue)
+                    guard let raw = output?.stringValue else {
+                        continuation.resume(returning: (nil, nil)); return
+                    }
+                    let parts = raw.components(separatedBy: "|||")
+                    let url   = parts.count > 0 ? parts[0].trimmingCharacters(in: .whitespaces) : nil
+                    let title = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : nil
+                    continuation.resume(returning: (url?.isEmpty == true ? nil : url,
+                                                    title?.isEmpty == true ? nil : title))
                 }
             }
         }
+    }
+
+    /// Legacy wrapper — used by code that only needs the URL.
+    nonisolated static func fetchBrowserURL(appName: String) async -> String? {
+        await fetchBrowserInfo(appName: appName).url
     }
 
     /// Reads Firefox URL from the AXUIElement address bar (toolbar item with URL role).

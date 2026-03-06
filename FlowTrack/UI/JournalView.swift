@@ -910,15 +910,40 @@ private struct MarkdownPreviewView: NSViewRepresentable {
     private func updateContent(_ tv: NSTextView) {
         let mutable = NSMutableAttributedString()
         let lines = text.components(separatedBy: "\n")
+        var inCodeBlock = false
+        var codeBuffer: [String] = []
+
+        func flushCode() {
+            guard !codeBuffer.isEmpty else { return }
+            let code = codeBuffer.joined(separator: "\n")
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+                .foregroundColor: NSColor.labelColor,
+                .backgroundColor: NSColor.tertiarySystemFill
+            ]
+            let block = NSMutableAttributedString(string: "\n" + code + "\n", attributes: attrs)
+            mutable.append(block)
+            codeBuffer = []
+        }
+
         for (i, line) in lines.enumerated() {
             let suffix = i < lines.count - 1 ? "\n" : ""
             let t = line.trimmingCharacters(in: .whitespaces)
-            if t.hasPrefix("# "), t.count > 2 {
-                mutable.append(headingAttr(String(t.dropFirst(2)) + suffix, size: 22))
-            } else if t.hasPrefix("## "), t.count > 3 {
-                mutable.append(headingAttr(String(t.dropFirst(3)) + suffix, size: 18))
-            } else if t.hasPrefix("### "), t.count > 4 {
-                mutable.append(headingAttr(String(t.dropFirst(4)) + suffix, size: 15))
+
+            // Code fence toggle
+            if t.hasPrefix("```") {
+                if inCodeBlock { flushCode(); inCodeBlock = false }
+                else { inCodeBlock = true }
+                continue
+            }
+            if inCodeBlock { codeBuffer.append(line); continue }
+
+            // Headings — match "# Text", "## Text", "### Text", and "#Text" (no space)
+            if t.range(of: "^#{1,3}\\s*\\S", options: .regularExpression) != nil {
+                let hashCount = min(t.prefix(while: { $0 == "#" }).count, 3)
+                let headingText = t.replacingOccurrences(of: "^#{1,6}\\s*", with: "", options: .regularExpression)
+                let size: CGFloat = hashCount == 1 ? 22 : hashCount == 2 ? 18 : 15
+                mutable.append(headingAttr(headingText + suffix, size: size))
             } else if t == "---" || t == "***" || t == "___" {
                 mutable.append(NSAttributedString(string: "────────────────────────\n",
                     attributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.separatorColor]))
@@ -941,6 +966,7 @@ private struct MarkdownPreviewView: NSViewRepresentable {
                 }
             }
         }
+        if inCodeBlock { flushCode() }
         tv.textStorage?.setAttributedString(mutable)
     }
 
