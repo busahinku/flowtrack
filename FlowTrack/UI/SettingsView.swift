@@ -34,7 +34,6 @@ struct GeneralTab: View {
     @Bindable var settings = AppSettings.shared
     @State private var hasAccessibility = PermissionChecker.hasAccessibility
     @State private var dbSizeText = "Calculating..."
-    @State private var accessibilityTimer: Timer?
     private var theme: AppTheme { AppSettings.shared.appTheme }
 
     var body: some View {
@@ -137,18 +136,10 @@ struct GeneralTab: View {
         }
         .formStyle(.grouped)
         .onAppear {
-            accessibilityTimer?.invalidate()
-            accessibilityTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
-                Task { @MainActor in
-                    hasAccessibility = PermissionChecker.hasAccessibility
-                }
-            }
+            hasAccessibility = PermissionChecker.hasAccessibility
             updateDBSize()
         }
-        .onDisappear {
-            accessibilityTimer?.invalidate()
-            accessibilityTimer = nil
-        }
+        .onDisappear {}
         .onReceive(NotificationCenter.default.publisher(for: .init("FlowTrackDataCleared"))) { _ in
             updateDBSize()
         }

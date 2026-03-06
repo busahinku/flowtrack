@@ -12,7 +12,7 @@ struct MenuBarView: View {
     @State private var quickAddText: String = ""
     @State private var hoveredTodoId: String?
     @Namespace private var modeNS
-    private let sessionTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+    private let sessionTimer = Timer.publish(every: 15, on: .main, in: .common).autoconnect()
     private var theme: AppTheme { AppSettings.shared.appTheme }
 
     private var phaseColor: Color {
@@ -604,6 +604,7 @@ struct StatPill: View {
 
 struct MenuBarLabelView: View {
     @Bindable private var timer = TimerStore.shared
+    private var theme: AppTheme { AppSettings.shared.appTheme }
 
     var body: some View {
         if timer.isRunning {
@@ -613,6 +614,7 @@ struct MenuBarLabelView: View {
                 Text(timer.formattedTime)
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
             }
+            .foregroundStyle(timer.mode == .pomodoro ? timer.phase.color : theme.accentColor)
         } else {
             MenuBarIconView(size: 16)
         }

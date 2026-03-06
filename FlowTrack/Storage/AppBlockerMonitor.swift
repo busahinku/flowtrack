@@ -20,12 +20,22 @@ final class AppBlockerMonitor {
     private init() {}
 
     func start() {
-        guard tickTimer == nil else { return }
-        tickTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor in self.tick() }
-        }
+        updateActive()
         monitorLog.info("AppBlockerMonitor started")
+    }
+
+    /// Call after any change to store.cards (add/remove/enable) to start/stop the timer appropriately.
+    func updateActive() {
+        let hasActiveBlocks = store.cards.contains(where: \.isEnabled)
+        if hasActiveBlocks && tickTimer == nil {
+            tickTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                Task { @MainActor in self.tick() }
+            }
+            tickTimer?.tolerance = 1
+        } else if !hasActiveBlocks {
+            stop()
+        }
     }
 
     func stop() { tickTimer?.invalidate(); tickTimer = nil }

@@ -51,6 +51,7 @@ final class AppState {
                 await self?.refreshData()
             }
         }
+        refreshTimer?.tolerance = 12
         resetAITimer()
     }
 
@@ -64,6 +65,7 @@ final class AppState {
                 self?.aiNextRunTime = Date().addingTimeInterval(interval)
             }
         }
+        aiTimer?.tolerance = max(30, interval * 0.05)
     }
 
     func refreshData(force: Bool = false) async {
