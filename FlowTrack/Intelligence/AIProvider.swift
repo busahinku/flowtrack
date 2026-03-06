@@ -257,24 +257,33 @@ struct AIPromptBuilder {
         let windowStartStr = timeFmt.string(from: windowStart)
         let windowEndStr = timeFmt.string(from: windowEnd)
 
-        // Build compact activity list (idle already filtered upstream)
+        // Build segment list showing precise start–end times per focus period
+        // (with the segment model, each record has timestamp=segmentStart and duration=actual time)
         var lines: [String] = []
         for a in activities {
-            let time = timeFmt.string(from: a.timestamp)
-            var line = "\(time) \(a.appName)"
-            if !a.windowTitle.isEmpty { line += " \"\(a.windowTitle.prefix(80))\"" }
+            let start = timeFmt.string(from: a.timestamp)
+            let end = timeFmt.string(from: a.timestamp.addingTimeInterval(a.duration))
+            let durationStr = a.duration >= 60
+                ? "\(Int(a.duration / 60))m\(Int(a.duration.truncatingRemainder(dividingBy: 60)))s"
+                : "\(Int(a.duration))s"
+
+            var line = "\(start)–\(end) | \(a.appName)"
+            if !a.windowTitle.isEmpty { line += " | \"\(a.windowTitle.prefix(80))\"" }
             if let url = a.url { line += " [\(domainOnly(from: url))]" }
+
+            // Rich metadata hints
+            var hints: [String] = []
             if let metaJSON = a.contentMetadata,
                let metaData = metaJSON.data(using: .utf8),
                let meta = try? JSONDecoder().decode(ContentMetadata.self, from: metaData) {
-                var hints: [String] = []
+                if let site = meta.siteName { hints.append(site) }
                 if let ct = meta.contentType { hints.append(ct) }
-                if let ct = meta.contentTitle { hints.append("\"\(ct.prefix(40))\"") }
+                if let ct = meta.contentTitle { hints.append("\"\(ct.prefix(50))\"") }
                 if let sub = meta.subcategory { hints.append(sub) }
                 if let d = meta.detail { hints.append(d) }
-                if !hints.isEmpty { line += " {\(hints.joined(separator: ", "))}" }
             }
-            line += " \(Int(a.duration))s"
+            if !hints.isEmpty { line += " {\(hints.joined(separator: ", "))}" }
+            line += " (\(durationStr))"
             lines.append(line)
         }
 
@@ -284,23 +293,25 @@ struct AIPromptBuilder {
             .joined(separator: ", ")
 
         return """
-        Analyze this \(windowStartStr)–\(windowEndStr) activity window. Return a JSON array of time segments.
+        Analyze this \(windowStartStr)–\(windowEndStr) activity block. Group focus periods into meaningful work segments.
 
-        Activities (only active periods, idle time already removed):
-        \(lines.joined(separator: "\n"))
+        Focus periods (start–end | App | "Title" {metadata} (duration)):
+        \(lines.isEmpty ? "(no activity)" : lines.joined(separator: "\n"))
 
+        TASK: Group consecutive related focus periods into segments.
         RULES:
-        - Create segments that cover ONLY the time ranges where activities occurred
-        - Do NOT fill the entire window — leave gaps where there was no activity
-        - Group consecutive related activities into segments (minimum 60 seconds)
-        - Merge brief app switches (<30s) into the surrounding segment
+        - Use the exact start/end times from the focus periods above
+        - Merge brief switches (<90s) into the surrounding segment if contextually related
+        - Keep distinct activities separate (coding vs. email vs. video = different segments)
+        - Skip periods with no activity — do NOT invent segments to fill gaps
+        - Minimum segment duration: 60 seconds
         - Available categories: \(categoriesList)
-        - Segments must NOT overlap
-        - Each segment: start (HH:mm), end (HH:mm), category, title (5-10 word description)
-        - Add summary (1-2 sentences) for segments longer than 10 minutes, otherwise null
-        - start >= \(windowStartStr.prefix(5)), end <= \(windowEndStr.prefix(5))
+        - Segments must NOT overlap and must stay within \(windowStartStr.prefix(5))–\(windowEndStr.prefix(5))
+        - title: 5-8 words, specific (e.g. "SwiftUI database layer development" not "Coding work")
+        - summary: 1-2 sentences only for segments >10 min, otherwise null
+        - isIdle: true only for clear idle/break periods with no app usage
 
-        Respond ONLY with a JSON array:
+        Respond ONLY with a JSON array (no markdown, no explanation):
         [{"start":"HH:mm","end":"HH:mm","category":"Work","title":"...","summary":null,"isIdle":false}]
         """
     }

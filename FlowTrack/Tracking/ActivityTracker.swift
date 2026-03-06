@@ -21,7 +21,7 @@ final class ActivityTracker: ObservableObject {
     private(set) var todaySwitchCount: Int = 0
 
     // MARK: - Private State
-    private var heartbeatTimer: Timer?
+    private var heartbeatTimer: Timer?  // kept for legacy compatibility; use idleTimer instead
     private var powerSourceCallback: CFRunLoopSource?
     private var lastActivity: Date = Date()
     private var idleThreshold: TimeInterval { TimeInterval(AppSettings.shared.idleThresholdSeconds) }
@@ -69,6 +69,21 @@ final class ActivityTracker: ObservableObject {
     private var lastDistractionAlertFired: Date?
 
     private let knownBrowsers = ["Safari", "Google Chrome", "Firefox", "Arc", "Brave Browser", "Microsoft Edge", "Opera"]
+
+    // MARK: - Segment Tracking State
+    /// When the current focus segment started — used as timestamp for the segment's DB record
+    private var currentSegmentStart: Date = Date()
+    /// Idle timer — lightweight 30s check of CGEventSource only (no AX calls, no AppleScript)
+    private var idleTimer: Timer?
+    /// Checkpoint timer — writes partial segment every 5 min for crash recovery
+    private var checkpointTimer: Timer?
+    /// Whether we are currently in an idle period (no user input)
+    private var isCurrentlyIdle: Bool = false
+
+    // MARK: - AXObserver State (event-driven title change detection)
+    private var axObserver: AXObserver?
+    private var axObserverContext: UnsafeMutableRawPointer?
+    private var observedPID: pid_t = 0
 
     private init() {}
 
@@ -120,7 +135,8 @@ final class ActivityTracker: ObservableObject {
             Task { @MainActor [weak self] in self?.handleScreenWake() }
         }
 
-        scheduleHeartbeat()
+        scheduleIdleTimer()
+        scheduleCheckpointTimer()
         scheduleBatteryMonitor()
         captureCurrentApp()
         Database.shared.autoCleanupIfNeeded()
@@ -128,7 +144,9 @@ final class ActivityTracker: ObservableObject {
 
     func stopTracking() {
         isTracking = false
-        heartbeatTimer?.invalidate(); heartbeatTimer = nil
+        idleTimer?.invalidate(); idleTimer = nil
+        checkpointTimer?.invalidate(); checkpointTimer = nil
+        unregisterAXObserver()
         if let source = powerSourceCallback {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .defaultMode)
             powerSourceCallback = nil
@@ -144,106 +162,81 @@ final class ActivityTracker: ObservableObject {
         systemSleepObserver = nil; systemWakeObserver = nil
     }
 
-    // MARK: - Heartbeat (30s interval for duration + title change detection)
+    // MARK: - Idle Timer (replaces heartbeat — 30s, only checks CGEventSource, zero AX overhead)
 
-    private func scheduleHeartbeat() {
-        heartbeatTimer?.invalidate()
-        let interval: TimeInterval = cachedOnBattery ? 30 : 15
-        heartbeatTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
-            Task { @MainActor [weak self] in self?.heartbeat() }
+    private func scheduleIdleTimer() {
+        idleTimer?.invalidate()
+        // 30s interval with 20% tolerance for OS timer coalescing (saves energy)
+        idleTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
+            Task { @MainActor [weak self] in self?.idleTimerFired() }
         }
-        heartbeatTimer?.tolerance = interval * 0.1  // allow 10% coalescing to save energy
+        idleTimer?.tolerance = 6
     }
 
-    private func heartbeat() {
-        guard !isScreenAsleep else { return }
-        guard let frontApp = NSWorkspace.shared.frontmostApplication else { return }
-        let appName = frontApp.localizedName ?? "Unknown"
-        let bundleID = frontApp.bundleIdentifier ?? ""
+    private func idleTimerFired() {
+        guard isTracking, !isScreenAsleep else { return }
+        let idleSecs = min(
+            CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: .mouseMoved),
+            CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: .keyDown)
+        )
+        let nowIdle = idleSecs > idleThreshold
 
-        if AppSettings.shared.excludedBundleIDs.contains(bundleID) { return }
+        if nowIdle && !isCurrentlyIdle {
+            // Transition: active → idle. End the current active segment.
+            isCurrentlyIdle = true
+            endCurrentSegment(forceIdle: false)
+            trackerLogger.debug("Idle detected after \(Int(idleSecs))s — segment closed")
+        } else if !nowIdle && isCurrentlyIdle {
+            // Transition: idle → active. Start fresh segment.
+            isCurrentlyIdle = false
+            currentSegmentStart = Date()
+            trackerLogger.debug("Activity resumed — new segment started")
+        }
+        // Update lastActivity for distraction alert timing
+        if !nowIdle { lastActivity = Date() }
+    }
 
-        // loginwindow = macOS screen lock/login screen — treat as idle, don't track as activity
-        let isSystemIdle = bundleID == "com.apple.loginwindow" || appName.lowercased() == "loginwindow"
+    // MARK: - Checkpoint Timer (5-min crash recovery writes for long sessions)
 
-        let isIdle = checkIdle()
-        if isIdle { consecutiveIdleCount += 1 } else { consecutiveIdleCount = 0; lastActivity = Date() }
+    private func scheduleCheckpointTimer() {
+        checkpointTimer?.invalidate()
+        checkpointTimer = Timer.scheduledTimer(withTimeInterval: 5 * 60, repeats: true) { _ in
+            Task { @MainActor [weak self] in self?.writeCheckpoint() }
+        }
+        checkpointTimer?.tolerance = 30
+    }
 
-        let idleDuration = Date().timeIntervalSince(lastActivity)
-        let recordIsIdle = isSystemIdle || idleDuration > idleThreshold
+    /// Write a partial record every 5 minutes for the in-progress segment.
+    /// This ensures at most 5 min of data is lost on crash, without ending the segment.
+    private func writeCheckpoint() {
+        guard isTracking, !isScreenAsleep, !isCurrentlyIdle else { return }
+        guard !lastSavedBundleID.isEmpty else { return }
+        let elapsed = Date().timeIntervalSince(currentSegmentStart)
+        guard elapsed >= 60 else { return }  // Don't checkpoint very short segments
+        writeRecord(appName: lastSavedAppName, bundleID: lastSavedBundleID,
+                    title: lastSavedTitle, url: lastSavedURL,
+                    category: lastSavedCategory, isIdle: false,
+                    duration: elapsed, segmentStart: currentSegmentStart)
+        // Don't reset currentSegmentStart — the segment continues; this is just a safety write
+        trackerLogger.debug("Checkpoint write for \(self.lastSavedAppName, privacy: .public) (\(Int(elapsed))s)")
+    }
 
-        if recordIsIdle && consecutiveIdleCount > 3 { return }
+    // MARK: - Segment Management
 
-        // AX title fetch optimization — skip when PID unchanged and title is fresh
-        let pid = frontApp.processIdentifier
+    /// End the current focus segment and write one accurate DB record.
+    /// Called on: app switch, AX title change, idle, screen sleep.
+    private func endCurrentSegment(forceIdle: Bool = false) {
         let now = Date()
-        let pidChanged = pid != lastFrontmostPID
-        let titleStale = now.timeIntervalSince(lastTitleFetchDate) >= 5
-        let newTitle: String
-        if AppSettings.shared.captureWindowTitles && (pidChanged || titleStale) {
-            newTitle = getWindowTitle(for: frontApp)
-            lastTitleFetchDate = now
-            lastFrontmostPID = pid
-        } else if AppSettings.shared.captureWindowTitles {
-            newTitle = lastSavedTitle // reuse cached
-        } else {
-            newTitle = ""
-        }
+        let elapsed = now.timeIntervalSince(currentSegmentStart)
+        guard elapsed >= 5 else { return }  // Ignore sub-5s micro-segments
+        guard !lastSavedBundleID.isEmpty, !lastSavedAppName.isEmpty else { return }
+        guard !AppSettings.shared.excludedBundleIDs.contains(lastSavedBundleID) else { return }
 
-        let titleChanged = newTitle != lastSavedTitle
-        if titleChanged { currentTitle = newTitle }
-
-        // Actual elapsed time since last write for this app (accurate duration)
-        let elapsed = now.timeIntervalSince(lastWriteDate)
-        let isBrowser = knownBrowsers.contains(where: { appName.contains($0) })
-
-        if isBrowser {
-            let urlChanged = titleChanged || cachedBrowserURL == nil
-            if urlChanged {
-                // Debounce browser URL fetch — cancel any pending fetch
-                browserURLTask?.cancel()
-                let capturedTitle = newTitle
-                let capturedElapsed = elapsed
-                browserURLTask = Task {
-                    try? await Task.sleep(for: .seconds(1.5))
-                    guard !Task.isCancelled else { return }
-                    let url = await ActivityTracker.fetchBrowserURL(appName: appName)
-                    guard !Task.isCancelled else { return }
-                    self.cachedBrowserURL = url
-                    self.lastBrowserTitle = capturedTitle
-                    let metadata = ContentMetadataExtractor.extract(url: url, windowTitle: capturedTitle, appName: appName)
-                    let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: capturedTitle, url: url, isIdle: recordIsIdle, contentMetadata: metadata)
-                    self.checkDistractionAlert(category: cat)
-                    self.writeRecord(appName: appName, bundleID: bundleID, title: capturedTitle, url: url, category: cat, isIdle: recordIsIdle, duration: capturedElapsed, contentMetadata: metadata)
-                    self.lastSavedBundleID = bundleID; self.lastSavedTitle = capturedTitle
-                    self.lastSavedAppName = appName; self.lastSavedCategory = cat
-                    self.lastSavedURL = url; self.lastSavedIsIdle = recordIsIdle
-                    self.lastWriteDate = Date()
-                }
-            } else {
-                // Same tab — dedup: only write if ≥60s since last write (liveness pulse)
-                guard elapsed >= 60 else { return }
-                let metadata = ContentMetadataExtractor.extract(url: cachedBrowserURL, windowTitle: newTitle, appName: appName)
-                let cat = resolveCategory(appName: appName, bundleID: bundleID, title: newTitle, url: cachedBrowserURL, isIdle: recordIsIdle, contentMetadata: metadata)
-                checkDistractionAlert(category: cat)
-                writeRecord(appName: appName, bundleID: bundleID, title: newTitle, url: cachedBrowserURL, category: cat, isIdle: recordIsIdle, duration: elapsed, contentMetadata: metadata)
-                lastSavedBundleID = bundleID; lastSavedTitle = newTitle; lastSavedIsIdle = recordIsIdle
-                lastSavedAppName = appName; lastSavedCategory = cat
-                lastWriteDate = Date()
-            }
-        } else {
-            cachedBrowserURL = nil
-            // Dedup: if nothing changed, only write every 60s as a liveness pulse
-            let nothingChanged = bundleID == lastSavedBundleID && newTitle == lastSavedTitle && recordIsIdle == lastSavedIsIdle
-            if nothingChanged && elapsed < 60 { return }
-
-            let cat = resolveCategory(appName: appName, bundleID: bundleID, title: newTitle, url: nil, isIdle: recordIsIdle)
-            checkDistractionAlert(category: cat)
-            writeRecord(appName: appName, bundleID: bundleID, title: newTitle, url: nil, category: cat, isIdle: recordIsIdle, duration: elapsed)
-            lastSavedBundleID = bundleID; lastSavedTitle = newTitle; lastSavedIsIdle = recordIsIdle
-            lastSavedAppName = appName; lastSavedCategory = cat
-            lastWriteDate = Date()
-        }
+        writeRecord(appName: lastSavedAppName, bundleID: lastSavedBundleID,
+                    title: lastSavedTitle, url: lastSavedURL,
+                    category: forceIdle ? .idle : lastSavedCategory,
+                    isIdle: forceIdle || lastSavedIsIdle,
+                    duration: elapsed, segmentStart: currentSegmentStart)
     }
 
     // MARK: - App Switch Handler (event-driven, instant)
@@ -253,6 +246,8 @@ final class ActivityTracker: ObservableObject {
         let bundleID = app.bundleIdentifier ?? ""
         let appName = app.localizedName ?? "Unknown"
 
+        // loginwindow = macOS screen lock — treat as idle, never record as activity
+        guard bundleID != "com.apple.loginwindow" && appName.lowercased() != "loginwindow" else { return }
         if AppSettings.shared.excludedBundleIDs.contains(bundleID) { return }
         guard bundleID != lastSavedBundleID else { return } // same app, skip
 
@@ -260,24 +255,18 @@ final class ActivityTracker: ObservableObject {
         browserURLTask?.cancel()
         browserURLTask = nil
 
-        // Write closing record for the previous app to capture time since last heartbeat
-        let now = Date()
-        if !lastSavedBundleID.isEmpty && !lastSavedAppName.isEmpty
-            && !AppSettings.shared.excludedBundleIDs.contains(lastSavedBundleID) {
-            let elapsed = now.timeIntervalSince(lastWriteDate)
-            if elapsed > 1.0 {
-                writeRecord(appName: lastSavedAppName, bundleID: lastSavedBundleID,
-                            title: lastSavedTitle, url: lastSavedURL,
-                            category: lastSavedCategory, isIdle: lastSavedIsIdle,
-                            duration: elapsed)
-            }
-        }
+        // End the previous app's segment — write one accurate record
+        endCurrentSegment()
 
         // Track app switches for context-switching metric
         resetSwitchCountIfNewDay()
         todaySwitchCount += 1
-        trackerLogger.debug("App switch: \(appName, privacy: .public) (#\(self.todaySwitchCount))")
+        trackerLogger.debug("App switch → \(appName, privacy: .public) (#\(self.todaySwitchCount))")
 
+        // Start new segment
+        let now = Date()
+        currentSegmentStart = now
+        isCurrentlyIdle = false
         currentApp = appName
         consecutiveIdleCount = 0
         cachedBrowserURL = nil
@@ -289,14 +278,16 @@ final class ActivityTracker: ObservableObject {
         lastFrontmostPID = app.processIdentifier
         lastTitleFetchDate = now
 
-        // Update dedup state immediately so heartbeat doesn't double-record
+        // Register AXObserver on new app for instant title change detection
+        registerAXTitleObserver(for: app)
+
+        // Update dedup state immediately so checkpoint doesn't double-record
         lastSavedBundleID = bundleID; lastSavedTitle = title
         lastSavedURL = nil; lastSavedIsIdle = false; lastSavedAppName = appName
 
         let isBrowser = knownBrowsers.contains(where: { appName.contains($0) })
         if isBrowser {
-            // Fetch URL async — don't write a record here (duration: 1 < 5s minimum).
-            // The next heartbeat writes the first browser record with accurate duration + URL.
+            // Fetch URL async for the new browser tab
             Task.detached(priority: .utility) {
                 let url = await ActivityTracker.fetchBrowserURL(appName: appName)
                 await MainActor.run { [weak self] in
@@ -311,10 +302,8 @@ final class ActivityTracker: ObservableObject {
                 }
             }
         } else {
-            // Non-browser: write immediately so the switch is recorded at the right timestamp
             let cat = resolveCategory(appName: appName, bundleID: bundleID, title: title, url: nil, isIdle: false)
             checkDistractionAlert(category: cat)
-            writeRecord(appName: appName, bundleID: bundleID, title: title, url: nil, category: cat, isIdle: false, duration: 1)
             lastSavedCategory = cat
         }
     }
@@ -323,15 +312,22 @@ final class ActivityTracker: ObservableObject {
 
     private func handleScreenSleep() {
         isScreenAsleep = true
-        heartbeatTimer?.invalidate(); heartbeatTimer = nil
+        idleTimer?.invalidate(); idleTimer = nil
+        checkpointTimer?.invalidate(); checkpointTimer = nil
+        unregisterAXObserver()
+        // End current segment cleanly before sleep
+        endCurrentSegment()
         lastSavedBundleID = "" // force fresh write on wake
-        trackerLogger.info("Screen/system sleep — tracking paused")
+        trackerLogger.info("Screen/system sleep — segment closed, tracking paused")
     }
 
     private func handleScreenWake() {
         isScreenAsleep = false
-        lastWriteDate = Date() // don't count sleep time as app duration
-        scheduleHeartbeat()
+        isCurrentlyIdle = false
+        currentSegmentStart = Date() // don't count sleep time in next segment
+        lastWriteDate = Date()
+        scheduleIdleTimer()
+        scheduleCheckpointTimer()
         captureCurrentApp()
         trackerLogger.info("Screen/system wake — tracking resumed")
     }
@@ -343,9 +339,108 @@ final class ActivityTracker: ObservableObject {
         let appName = frontApp.localizedName ?? "Unknown"
         let bundleID = frontApp.bundleIdentifier ?? ""
         guard !AppSettings.shared.excludedBundleIDs.contains(bundleID) else { return }
+        guard bundleID != "com.apple.loginwindow" else { return }
         currentApp = appName
-        currentTitle = AppSettings.shared.captureWindowTitles ? getWindowTitle(for: frontApp) : ""
-        lastSavedBundleID = "" // will be set after first write
+        let title = AppSettings.shared.captureWindowTitles ? getWindowTitle(for: frontApp) : ""
+        currentTitle = title
+        lastSavedBundleID = bundleID
+        lastSavedAppName = appName
+        lastSavedTitle = title
+        currentSegmentStart = Date()
+        lastWriteDate = Date()
+        lastFrontmostPID = frontApp.processIdentifier
+        // Register AXObserver for current frontmost app
+        registerAXTitleObserver(for: frontApp)
+        let cat = resolveCategory(appName: appName, bundleID: bundleID, title: title, url: nil, isIdle: false)
+        lastSavedCategory = cat
+    }
+
+    // MARK: - AXObserver (event-driven window title change detection)
+
+    private func registerAXTitleObserver(for app: NSRunningApplication) {
+        let pid = app.processIdentifier
+        guard pid != observedPID else { return }
+        unregisterAXObserver()
+
+        var observer: AXObserver?
+        // Use unretained since ActivityTracker is a singleton that outlives any observer
+        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
+
+        // Literal non-capturing closure is required for @convention(c) C function pointer
+        let err = AXObserverCreate(pid, { _, _, _, userData in
+            guard let userData else { return }
+            let tracker = Unmanaged<ActivityTracker>.fromOpaque(userData).takeUnretainedValue()
+            Task { @MainActor in tracker.handleAXTitleChange() }
+        }, &observer)
+        guard err == .success, let obs = observer else { return }
+
+        let element = AXUIElementCreateApplication(pid)
+        AXObserverAddNotification(obs, element, kAXTitleChangedNotification as CFString, selfPtr)
+        AXObserverAddNotification(obs, element, kAXFocusedWindowChangedNotification as CFString, selfPtr)
+        CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(obs), .defaultMode)
+
+        axObserver = obs
+        axObserverContext = selfPtr
+        observedPID = pid
+        trackerLogger.debug("AXObserver registered for PID \(pid)")
+    }
+
+    private func unregisterAXObserver() {
+        if let obs = axObserver {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(obs), .defaultMode)
+        }
+        axObserver = nil
+        axObserverContext = nil
+        observedPID = 0
+    }
+
+    /// Called by the AXObserver C callback when window title changes within the same app.
+    /// This handles: browser tab switches, file opens in Xcode, document navigation, etc.
+    func handleAXTitleChange() {
+        guard isTracking, !isScreenAsleep, !isCurrentlyIdle else { return }
+        guard let frontApp = NSWorkspace.shared.frontmostApplication else { return }
+
+        let newTitle = AppSettings.shared.captureWindowTitles ? getWindowTitle(for: frontApp) : ""
+        guard newTitle != lastSavedTitle && !newTitle.isEmpty else { return }
+
+        let appName = frontApp.localizedName ?? "Unknown"
+        let bundleID = frontApp.bundleIdentifier ?? ""
+        guard !AppSettings.shared.excludedBundleIDs.contains(bundleID) else { return }
+
+        trackerLogger.debug("AX title change: \"\(newTitle.prefix(60), privacy: .public)\"")
+
+        // End current segment (old title), start new one (new title)
+        endCurrentSegment()
+        currentSegmentStart = Date()
+
+        currentTitle = newTitle
+        lastSavedTitle = newTitle
+        lastSavedURL = nil  // URL changes with title in browsers
+        cachedBrowserURL = nil
+
+        // For browsers: fetch URL for the new tab (debounced)
+        let isBrowser = knownBrowsers.contains(where: { appName.contains($0) })
+        if isBrowser {
+            browserURLTask?.cancel()
+            let capturedTitle = newTitle
+            browserURLTask = Task {
+                // Small debounce to avoid AppleScript on rapid tab switches
+                try? await Task.sleep(for: .seconds(1.0))
+                guard !Task.isCancelled else { return }
+                let url = await ActivityTracker.fetchBrowserURL(appName: appName)
+                guard !Task.isCancelled else { return }
+                self.cachedBrowserURL = url
+                self.lastSavedURL = url
+                let metadata = ContentMetadataExtractor.extract(url: url, windowTitle: capturedTitle, appName: appName)
+                let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: capturedTitle, url: url, isIdle: false, contentMetadata: metadata)
+                self.checkDistractionAlert(category: cat)
+                self.lastSavedCategory = cat
+            }
+        } else {
+            let cat = resolveCategory(appName: appName, bundleID: bundleID, title: newTitle, url: nil, isIdle: false)
+            checkDistractionAlert(category: cat)
+            lastSavedCategory = cat
+        }
     }
 
     // MARK: - Helpers
@@ -355,16 +450,33 @@ final class ActivityTracker: ObservableObject {
         return RuleEngine.shared.categorize(appName: appName, bundleID: bundleID, windowTitle: title, url: url, contentMetadata: contentMetadata) ?? .uncategorized
     }
 
-    private func writeRecord(appName: String, bundleID: String, title: String, url: String?, category: Category, isIdle: Bool, duration: TimeInterval, contentMetadata: ContentMetadata? = nil) {
-        guard duration >= 5 || isIdle else { return }  // capture all activity ≥5s for AI window analysis
+    private func writeRecord(appName: String, bundleID: String, title: String, url: String?, category: Category, isIdle: Bool, duration: TimeInterval, segmentStart: Date? = nil, contentMetadata: ContentMetadata? = nil) {
+        guard duration >= 5 || isIdle else { return }
+
+        // Resolve contentMetadata if not provided
+        let resolvedMetadata: ContentMetadata?
+        if let m = contentMetadata {
+            resolvedMetadata = m
+        } else if let url = url {
+            resolvedMetadata = ContentMetadataExtractor.extract(url: url, windowTitle: title, appName: appName)
+        } else if !title.isEmpty {
+            resolvedMetadata = ContentMetadataExtractor.extractNativeApp(windowTitle: title, appName: appName, bundleID: bundleID)
+        } else {
+            resolvedMetadata = nil
+        }
+
         let metadataJSON: String?
-        if let metadata = contentMetadata, let data = try? JSONEncoder().encode(metadata) {
+        if let metadata = resolvedMetadata, let data = try? JSONEncoder().encode(metadata) {
             metadataJSON = String(data: data, encoding: .utf8)
         } else {
             metadataJSON = nil
         }
         let record = ActivityRecord(
-            timestamp: Date(), appName: appName, bundleID: bundleID,
+            // Use segmentStart as timestamp so the record lands in the correct 30-min window.
+            // Previously used Date() (write time = end of segment), which placed long sessions
+            // in the wrong window bucket.
+            timestamp: segmentStart ?? Date(),
+            appName: appName, bundleID: bundleID,
             windowTitle: title, url: url, category: category,
             isIdle: isIdle, duration: duration, contentMetadata: metadataJSON
         )
@@ -392,11 +504,9 @@ final class ActivityTracker: ObservableObject {
             guard let context else { return }
             let tracker = Unmanaged<ActivityTracker>.fromOpaque(context).takeUnretainedValue()
             Task { @MainActor in
-                let newBattery = tracker.isOnBattery()
-                if newBattery != tracker.cachedOnBattery {
-                    tracker.cachedOnBattery = newBattery
-                    tracker.scheduleHeartbeat()
-                }
+                tracker.cachedOnBattery = tracker.isOnBattery()
+                // Battery state changed — idle timer interval is not power-dependent in the new
+                // segment model (idle check is always 30s), so no rescheduling needed.
             }
         }, context)?.takeRetainedValue() {
             CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
@@ -519,10 +629,7 @@ final class ActivityTracker: ObservableObject {
     private func checkIdle() -> Bool {
         let idleTime = CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: .mouseMoved)
         let keyIdle = CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: .keyDown)
-        // Use a fraction of the user's idle threshold for early detection
-        // (recordIsIdle still uses the full idleThreshold for the actual idle decision)
-        let earlyDetectThreshold = min(30, idleThreshold / 2)
-        return min(idleTime, keyIdle) > earlyDetectThreshold
+        return min(idleTime, keyIdle) > idleThreshold
     }
 
     private func isOnBattery() -> Bool {
