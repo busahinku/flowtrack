@@ -95,6 +95,20 @@ final class Database: Sendable {
             }
         }
 
+        // Deduplicate checkpoint records from the old cumulative checkpoint bug:
+        // multiple records with the same (timestamp, bundleID, appName) — keep only the last (largest id).
+        migrator.registerMigration("v8_dedup_checkpoint_records") { db in
+            let countBefore = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM activities") ?? 0
+            try db.execute(sql: """
+                DELETE FROM activities WHERE id NOT IN (
+                    SELECT MAX(id) FROM activities
+                    GROUP BY timestamp, bundleID, appName
+                )
+                """)
+            let countAfter = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM activities") ?? 0
+            dbLogger.info("v8 dedup migration: \(countBefore) → \(countAfter) records (\(countBefore - countAfter) duplicates removed)")
+        }
+
         try migrator.migrate(dbQueue)
     }
 
@@ -449,14 +463,20 @@ final class Database: Sendable {
             if let bounds = Self.windowBounds(for: wid) {
                 // Query actual activity time range in this window
                 let activityRange = try dbQueue.read { db -> (start: Date, end: Date)? in
-                    let row = try Row.fetchOne(db, sql: """
-                        SELECT MIN(timestamp) as minT, MAX(timestamp) as maxT, MAX(duration) as lastDur
-                        FROM activities
+                    // Get the first activity's timestamp
+                    let minRow = try Row.fetchOne(db, sql: """
+                        SELECT MIN(timestamp) as minT FROM activities
                         WHERE timestamp >= ? AND timestamp < ? AND isIdle = 0
                         """, arguments: [bounds.start, bounds.end])
-                    guard let minT = row?["minT"] as? Date,
-                          let maxT = row?["maxT"] as? Date else { return nil }
-                    let lastDur = (row?["lastDur"] as? Double) ?? 5.0
+                    guard let minT = minRow?["minT"] as? Date else { return nil }
+                    // Get the last record's timestamp and its specific duration (not MAX of all durations)
+                    let lastRow = try Row.fetchOne(db, sql: """
+                        SELECT timestamp, duration FROM activities
+                        WHERE timestamp >= ? AND timestamp < ? AND isIdle = 0
+                        ORDER BY timestamp DESC LIMIT 1
+                        """, arguments: [bounds.start, bounds.end])
+                    guard let maxT = lastRow?["timestamp"] as? Date else { return nil }
+                    let lastDur = (lastRow?["duration"] as? Double) ?? 5.0
                     return (minT, min(maxT.addingTimeInterval(lastDur), bounds.end))
                 }
                 let slotStart = activityRange?.start ?? bounds.start
@@ -480,9 +500,18 @@ final class Database: Sendable {
             let isContinuous = lastProcessedSegment != nil
                 && lastProcessedSegment!.segmentEnd.timeIntervalSince(bounds.start) > -120 // within 2 min of window start
 
+            // Query actual activity start time instead of using the :00/:30 boundary
+            let actualStart = try dbQueue.read { db -> Date? in
+                let row = try Row.fetchOne(db, sql: """
+                    SELECT MIN(timestamp) as minT FROM activities
+                    WHERE timestamp >= ? AND timestamp < ? AND isIdle = 0
+                    """, arguments: [bounds.start, bounds.end])
+                return row?["minT"] as? Date
+            }
+
             slots.append(TimeSlot(
                 id: "current-\(cwid)",
-                startTime: bounds.start,
+                startTime: actualStart ?? bounds.start,
                 endTime: now,
                 category: lastProcessedSegment?.category ?? .uncategorized,
                 activities: [],

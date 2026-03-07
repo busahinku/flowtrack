@@ -52,6 +52,9 @@ final class ActivityTracker: ObservableObject {
     // Browser URL debounce — cancel pending fetch when title changes rapidly
     private var browserURLTask: Task<Void, Never>?
 
+    // Browser URL race guard — prevents checkpoint/segment writes while initial URL fetch is in-flight
+    private var isBrowserFetchPending: Bool = false
+
     // App Nap exemption token
     private var activityToken: NSObjectProtocol?
 
@@ -80,6 +83,11 @@ final class ActivityTracker: ObservableObject {
     private var checkpointTimer: Timer?
     /// Whether we are currently in an idle period (no user input)
     private var isCurrentlyIdle: Bool = false
+    /// Last checkpoint write time — used to make checkpoints incremental (not cumulative)
+    private var lastCheckpointDate: Date?
+
+    // Title change debounce — prevents micro-segments from rapid title changes
+    private var titleChangeDebounceTask: Task<Void, Never>?
 
     // MARK: - AXObserver State (event-driven title change detection)
     private var axObserver: AXObserver?
@@ -191,6 +199,7 @@ final class ActivityTracker: ObservableObject {
             // Transition: idle → active. Start fresh segment.
             isCurrentlyIdle = false
             currentSegmentStart = Date()
+            lastCheckpointDate = nil
             trackerLogger.debug("Activity resumed — new segment started")
         }
         // Update lastActivity for distraction alert timing
@@ -208,17 +217,22 @@ final class ActivityTracker: ObservableObject {
     }
 
     /// Write a partial record every 5 minutes for the in-progress segment.
-    /// This ensures at most 5 min of data is lost on crash, without ending the segment.
+    /// Each checkpoint writes only the time since the last checkpoint (incremental),
+    /// then advances currentSegmentStart to avoid double-counting.
     private func writeCheckpoint() {
-        guard isTracking, !isScreenAsleep, !isCurrentlyIdle else { return }
+        guard isTracking, !isScreenAsleep, !isCurrentlyIdle, !isBrowserFetchPending else { return }
         guard !lastSavedBundleID.isEmpty else { return }
-        let elapsed = Date().timeIntervalSince(currentSegmentStart)
+        let now = Date()
+        let checkpointBase = lastCheckpointDate ?? currentSegmentStart
+        let elapsed = now.timeIntervalSince(checkpointBase)
         guard elapsed >= 60 else { return }  // Don't checkpoint very short segments
         writeRecord(appName: lastSavedAppName, bundleID: lastSavedBundleID,
                     title: lastSavedTitle, url: lastSavedURL,
                     category: lastSavedCategory, isIdle: false,
-                    duration: elapsed, segmentStart: currentSegmentStart)
-        // Don't reset currentSegmentStart — the segment continues; this is just a safety write
+                    duration: elapsed, segmentStart: checkpointBase)
+        // Advance segment start so next checkpoint/endSegment only writes incremental time
+        currentSegmentStart = now
+        lastCheckpointDate = now
         trackerLogger.debug("Checkpoint write for \(self.lastSavedAppName, privacy: .public) (\(Int(elapsed))s)")
     }
 
@@ -238,6 +252,9 @@ final class ActivityTracker: ObservableObject {
                     category: forceIdle ? .idle : lastSavedCategory,
                     isIdle: forceIdle || lastSavedIsIdle,
                     duration: elapsed, segmentStart: currentSegmentStart)
+        // Advance start and clear checkpoint so no double-counting if checkpoint fires before caller sets new start
+        currentSegmentStart = now
+        lastCheckpointDate = nil
     }
 
     // MARK: - App Switch Handler (event-driven, instant)
@@ -255,6 +272,9 @@ final class ActivityTracker: ObservableObject {
         // Cancel any pending browser URL debounce from previous app
         browserURLTask?.cancel()
         browserURLTask = nil
+        isBrowserFetchPending = false
+        titleChangeDebounceTask?.cancel()
+        titleChangeDebounceTask = nil
 
         // End the previous app's segment — write one accurate record
         endCurrentSegment()
@@ -267,6 +287,7 @@ final class ActivityTracker: ObservableObject {
         // Start new segment
         let now = Date()
         currentSegmentStart = now
+        lastCheckpointDate = nil
         isCurrentlyIdle = false
         currentApp = appName
         consecutiveIdleCount = 0
@@ -290,10 +311,12 @@ final class ActivityTracker: ObservableObject {
         if isBrowser {
             // Cancel any in-flight fetch from a prior browser switch, then start a fresh one
             browserFetchTask?.cancel()
+            isBrowserFetchPending = true
             browserFetchTask = Task.detached(priority: .utility) {
                 let info = await ActivityTracker.fetchBrowserInfo(appName: appName)
                 await MainActor.run { [weak self] in
                     guard let self else { return }
+                    self.isBrowserFetchPending = false
                     self.cachedBrowserURL = info.url
                     self.lastBrowserTitle = title
                     // Use AppleScript page title if AX title was empty (page was loading)
@@ -320,6 +343,7 @@ final class ActivityTracker: ObservableObject {
 
     private func handleScreenSleep() {
         isScreenAsleep = true
+        isBrowserFetchPending = false
         idleTimer?.invalidate(); idleTimer = nil
         checkpointTimer?.invalidate(); checkpointTimer = nil
         unregisterAXObserver()
@@ -333,6 +357,7 @@ final class ActivityTracker: ObservableObject {
         isScreenAsleep = false
         isCurrentlyIdle = false
         currentSegmentStart = Date() // don't count sleep time in next segment
+        lastCheckpointDate = nil
         lastWriteDate = Date()
         scheduleIdleTimer()
         scheduleCheckpointTimer()
@@ -355,6 +380,7 @@ final class ActivityTracker: ObservableObject {
         lastSavedAppName = appName
         lastSavedTitle = title
         currentSegmentStart = Date()
+        lastCheckpointDate = nil
         lastWriteDate = Date()
         lastFrontmostPID = frontApp.processIdentifier
         // Register AXObserver for current frontmost app
@@ -404,6 +430,7 @@ final class ActivityTracker: ObservableObject {
 
     /// Called by the AXObserver C callback when window title changes within the same app.
     /// This handles: browser tab switches, file opens in Xcode, document navigation, etc.
+    /// Debounces for 2s to avoid micro-segments from rapid title changes (loading states, autosave, etc.).
     func handleAXTitleChange() {
         guard isTracking, !isScreenAsleep, !isCurrentlyIdle else { return }
         guard let frontApp = NSWorkspace.shared.frontmostApplication else { return }
@@ -419,22 +446,50 @@ final class ActivityTracker: ObservableObject {
 
         // If the previous title was empty (page was loading when segment started),
         // update title in-place without ending the segment — avoids recording a blank-title record.
-        let previousTitleWasEmpty = lastSavedTitle.isEmpty
-        if !previousTitleWasEmpty {
-            endCurrentSegment()
-            currentSegmentStart = Date()
+        if lastSavedTitle.isEmpty {
+            currentTitle = newTitle
+            lastSavedTitle = newTitle
+            updateBrowserInfo(appName: appName, bundleID: bundleID, title: newTitle)
+            return
         }
 
+        // Update UI immediately for responsiveness, but defer the segment split
         currentTitle = newTitle
-        lastSavedTitle = newTitle
-        lastSavedURL = nil  // URL changes with title in browsers
-        cachedBrowserURL = nil
 
-        // For browsers: fetch URL for the new tab (debounced)
+        // Debounce: cancel any pending title change, wait 2s before splitting
+        titleChangeDebounceTask?.cancel()
+        titleChangeDebounceTask = Task {
+            try? await Task.sleep(for: .seconds(2.0))
+            guard !Task.isCancelled else { return }
+
+            // After debounce: if segment is very short (< 15s), update title in-place
+            let segmentAge = Date().timeIntervalSince(self.currentSegmentStart)
+            if segmentAge < 15 {
+                self.lastSavedTitle = newTitle
+                self.lastSavedURL = nil
+                self.cachedBrowserURL = nil
+                self.updateBrowserInfo(appName: appName, bundleID: bundleID, title: newTitle)
+                return
+            }
+
+            // Segment is long enough — end it and start a new one
+            self.endCurrentSegment()
+            self.currentSegmentStart = Date()
+            self.lastCheckpointDate = nil
+
+            self.lastSavedTitle = newTitle
+            self.lastSavedURL = nil
+            self.cachedBrowserURL = nil
+            self.updateBrowserInfo(appName: appName, bundleID: bundleID, title: newTitle)
+        }
+    }
+
+    /// Fetch browser URL and update category for a title change. Shared by handleAXTitleChange paths.
+    private func updateBrowserInfo(appName: String, bundleID: String, title: String) {
         let isBrowser = knownBrowsers.contains(where: { appName.contains($0) })
         if isBrowser {
             browserURLTask?.cancel()
-            let capturedTitle = newTitle
+            let capturedTitle = title
             browserURLTask = Task {
                 // Small debounce to avoid AppleScript on rapid tab switches
                 try? await Task.sleep(for: .seconds(1.0))
@@ -455,7 +510,7 @@ final class ActivityTracker: ObservableObject {
                 self.lastSavedCategory = cat
             }
         } else {
-            let cat = resolveCategory(appName: appName, bundleID: bundleID, title: newTitle, url: nil, isIdle: false)
+            let cat = resolveCategory(appName: appName, bundleID: bundleID, title: title, url: nil, isIdle: false)
             checkDistractionAlert(category: cat)
             lastSavedCategory = cat
         }
@@ -499,10 +554,21 @@ final class ActivityTracker: ObservableObject {
             isIdle: isIdle, duration: duration, contentMetadata: metadataJSON
         )
         Task(priority: .utility) {
-            do {
-                try Database.shared.saveActivity(record)
-            } catch {
-                trackerLogger.error("DB write failed: \(error.localizedDescription, privacy: .public)")
+            let maxRetries = 3
+            let baseDelay: UInt64 = 100_000_000  // 100ms in nanoseconds
+            for attempt in 0..<maxRetries {
+                do {
+                    try Database.shared.saveActivity(record)
+                    return
+                } catch {
+                    if attempt < maxRetries - 1 {
+                        let delay = baseDelay * UInt64(1 << attempt)  // 100ms, 200ms, 400ms
+                        trackerLogger.warning("DB write retry \(attempt + 1)/\(maxRetries): \(error.localizedDescription, privacy: .public)")
+                        try? await Task.sleep(nanoseconds: delay)
+                    } else {
+                        trackerLogger.error("DB write failed after \(maxRetries) attempts: \(error.localizedDescription, privacy: .public)")
+                    }
+                }
             }
         }
     }
