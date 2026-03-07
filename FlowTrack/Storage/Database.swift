@@ -656,6 +656,29 @@ final class Database: Sendable {
         }
     }
 
+    /// Clear fallback-only segments (all segments for a windowId have nil titles) so they
+    /// become eligible for re-analysis on the next "Run AI" click.
+    /// Returns the number of windowIds cleared.
+    func clearFallbackSegments(for date: Date) throws -> Int {
+        let (start, end) = dayBounds(for: date)
+        return try dbQueue.write { db -> Int in
+            // Find windowIds where EVERY segment has a nil title (fallback segments)
+            let fallbackWindowIds = try String.fetchAll(db, sql: """
+                SELECT windowId FROM window_segments
+                WHERE segmentStart >= ? AND segmentStart < ?
+                GROUP BY windowId
+                HAVING COUNT(*) = COUNT(CASE WHEN title IS NULL THEN 1 END)
+                """, arguments: [start, end])
+            guard !fallbackWindowIds.isEmpty else { return 0 }
+            let placeholders = fallbackWindowIds.map { _ in "?" }.joined(separator: ",")
+            try db.execute(
+                sql: "DELETE FROM window_segments WHERE windowId IN (\(placeholders))",
+                arguments: StatementArguments(fallbackWindowIds)
+            )
+            return fallbackWindowIds.count
+        }
+    }
+
     private func buildSummaries(from records: [ActivityRecord]) -> [ActivitySummary] {
         var grouped: [String: (appName: String, bundleID: String, titles: [String], urls: Set<String>, duration: TimeInterval, timestamps: [Date])] = [:]
 

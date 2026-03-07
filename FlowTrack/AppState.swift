@@ -186,6 +186,11 @@ final class AppState {
         isRunningAI = true
         defer { isRunningAI = false }
 
+        // Clear fallback segments (nil titles from previous failed runs) so they get re-analyzed
+        if let cleared = try? Database.shared.clearFallbackSegments(for: selectedDate), cleared > 0 {
+            log.info("Cleared \(cleared) fallback windows for re-analysis")
+        }
+
         await reCategorizeWithRules()
         await analyzeUnprocessedWindows(limit: 200)
         await analyzeCurrentWindowNow()
