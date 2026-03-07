@@ -179,6 +179,8 @@ struct AITab: View {
     @State private var fb2KeyInput = ""
     @State private var fb1ModelInput = ""
     @State private var fb2ModelInput = ""
+    @State private var fb1SavedIndicator = false
+    @State private var fb2SavedIndicator = false
     private var theme: AppTheme { AppSettings.shared.appTheme }
 
     enum ProviderHealthStatus {
@@ -223,7 +225,7 @@ struct AITab: View {
                 ))
 
                 if let sec = settings.secondaryProvider, sec != settings.aiProvider {
-                    fallbackProviderConfig(sec, keyBinding: $fb1KeyInput, modelBinding: $fb1ModelInput)
+                    fallbackProviderConfig(sec, keyBinding: $fb1KeyInput, modelBinding: $fb1ModelInput, savedBinding: $fb1SavedIndicator)
                 }
 
                 fallbackPicker("Fallback 2", selection: Binding(
@@ -237,7 +239,7 @@ struct AITab: View {
                 ))
 
                 if let ter = settings.tertiaryProvider, ter != settings.aiProvider, ter != settings.secondaryProvider {
-                    fallbackProviderConfig(ter, keyBinding: $fb2KeyInput, modelBinding: $fb2ModelInput)
+                    fallbackProviderConfig(ter, keyBinding: $fb2KeyInput, modelBinding: $fb2ModelInput, savedBinding: $fb2SavedIndicator)
                 }
             }
 
@@ -393,24 +395,14 @@ struct AITab: View {
     }
 
     @ViewBuilder
-    private func fallbackProviderConfig(_ provider: AIProviderType, keyBinding: Binding<String>, modelBinding: Binding<String>) -> some View {
+    private func fallbackProviderConfig(_ provider: AIProviderType, keyBinding: Binding<String>, modelBinding: Binding<String>, savedBinding: Binding<Bool>) -> some View {
+        // Header: status dot + provider name + CLI status
         HStack(spacing: 6) {
             statusDot(for: provider)
             Text(provider.rawValue)
                 .font(.caption)
                 .foregroundStyle(theme.secondaryText)
             Spacer()
-            if provider.needsAPIKey {
-                if SecureStore.shared.hasKey(for: provider.rawValue) {
-                    Label("Key saved", systemImage: "key.fill")
-                        .font(.caption2)
-                        .foregroundStyle(theme.successColor)
-                } else {
-                    Text("⚠️ No key")
-                        .font(.caption2)
-                        .foregroundStyle(theme.warningColor)
-                }
-            }
             if provider.isCLI {
                 if cliDetected[provider.cliCommand ?? ""] != nil {
                     Label("Found", systemImage: "checkmark.circle.fill")
@@ -424,19 +416,45 @@ struct AITab: View {
             }
         }
 
-        if provider.needsAPIKey && !SecureStore.shared.hasKey(for: provider.rawValue) {
-            HStack {
-                SecureField("API Key for \(provider.rawValue)", text: keyBinding)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.caption)
-                Button("Save") {
-                    SecureStore.shared.save(key: keyBinding.wrappedValue, for: provider.rawValue)
-                    keyBinding.wrappedValue = ""
+        // API key management — mirrors primary provider behaviour
+        if provider.needsAPIKey {
+            if SecureStore.shared.hasKey(for: provider.rawValue) {
+                HStack {
+                    Label("Key saved", systemImage: "key.fill")
+                        .font(.caption2)
+                        .foregroundStyle(theme.successColor)
+                    Spacer()
+                    Button("Remove Key") {
+                        SecureStore.shared.deleteKey(for: provider.rawValue)
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(theme.errorColor)
                 }
-                .font(.caption)
+            } else {
+                HStack {
+                    SecureField("API Key for \(provider.rawValue)", text: keyBinding)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.caption)
+                    Button("Save") {
+                        SecureStore.shared.save(key: keyBinding.wrappedValue, for: provider.rawValue)
+                        keyBinding.wrappedValue = ""
+                        savedBinding.wrappedValue = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { savedBinding.wrappedValue = false }
+                    }
+                    .font(.caption)
+                    if savedBinding.wrappedValue {
+                        Text("Saved ✓")
+                            .font(.caption2)
+                            .foregroundStyle(theme.successColor)
+                    }
+                }
+                Text("⚠️ No API key saved for \(provider.rawValue)")
+                    .font(.caption2)
+                    .foregroundStyle(theme.warningColor)
             }
         }
 
+        // Model selection — setting modelBinding triggers re-render so displayed model updates
         HStack {
             Text("Model:")
                 .font(.caption2)
@@ -447,10 +465,12 @@ struct AITab: View {
             ForEach(provider.suggestedModels.prefix(3), id: \.self) { model in
                 Button(model) {
                     settings.setModelName(model, for: provider)
+                    modelBinding.wrappedValue = ""
                 }
                 .font(.caption2)
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
+                .tint(settings.modelName(for: provider) == model ? .blue : nil)
             }
         }
     }

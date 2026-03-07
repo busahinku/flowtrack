@@ -70,7 +70,12 @@ class FlowTrackAppDelegate: NSObject, NSApplicationDelegate {
             return .terminateNow
         }
         for window in NSApp.windows { window.close() }
-        NSApp.setActivationPolicy(.accessory)
+        // Defer activation policy change so SwiftUI's MenuBarExtra finishes processing
+        // the termination event before the policy switches — otherwise the menu bar
+        // icon stays visible but stops responding to clicks.
+        DispatchQueue.main.async {
+            NSApp.setActivationPolicy(.accessory)
+        }
         return .terminateCancel
     }
 
