@@ -284,6 +284,19 @@ enum AIProviderType: String, CaseIterable, Codable, Identifiable, Sendable {
         }
     }
 
+    /// The cheapest/fastest model for lightweight classification tasks (e.g., 1-word responses).
+    var cheapClassificationModel: String {
+        switch self {
+        case .claudeCLI:   return "haiku"
+        case .chatgptCLI:  return "gpt-4.1-mini"
+        case .claude:      return "claude-haiku-4-5-20250929"
+        case .openai:      return "gpt-4o-mini"
+        case .gemini:      return "gemini-2.5-flash-lite"
+        case .ollama:      return defaultModel
+        case .lmstudio:    return defaultModel
+        }
+    }
+
     var modelHint: String {
         switch self {
         case .claudeCLI: return "haiku (cheapest) → sonnet → opus"
@@ -309,6 +322,36 @@ enum AIProviderType: String, CaseIterable, Codable, Identifiable, Sendable {
         case .claudeCLI: return "Install: npm install -g @anthropic-ai/claude-code"
         case .chatgptCLI: return "Install: npm install -g @openai/codex"
         default: return nil
+        }
+    }
+}
+
+// MARK: - Sync
+
+enum SyncProvider: String, CaseIterable, Sendable {
+    case none      = "none"
+    case iCloud    = "iCloud"
+    case googleDrive = "googleDrive"
+    case dropbox   = "dropbox"
+    case oneDrive  = "oneDrive"
+
+    var displayName: String {
+        switch self {
+        case .none:        return "Off"
+        case .iCloud:      return "iCloud Drive"
+        case .googleDrive: return "Google Drive"
+        case .dropbox:     return "Dropbox"
+        case .oneDrive:    return "OneDrive"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .none:        return "xmark.circle"
+        case .iCloud:      return "icloud"
+        case .googleDrive: return "g.circle"
+        case .dropbox:     return "square.and.arrow.down"
+        case .oneDrive:    return "cloud"
         }
     }
 }
@@ -396,6 +439,18 @@ final class AppSettings {
     var sessionGapSeconds: Int {
         didSet { UserDefaults.standard.set(sessionGapSeconds, forKey: "sessionGapSeconds") }
     }
+    var syncProvider: SyncProvider {
+        didSet { UserDefaults.standard.set(syncProvider.rawValue, forKey: "syncProvider") }
+    }
+    var lastSyncDate: Date? {
+        didSet { UserDefaults.standard.set(lastSyncDate, forKey: "lastSyncDate") }
+    }
+    var autoSyncEnabled: Bool {
+        didSet { UserDefaults.standard.set(autoSyncEnabled, forKey: "autoSyncEnabled") }
+    }
+    var autoSyncIntervalDays: Int {
+        didSet { UserDefaults.standard.set(autoSyncIntervalDays, forKey: "autoSyncIntervalDays") }
+    }
 
     private init() {
         let defaults = UserDefaults.standard
@@ -423,6 +478,10 @@ final class AppSettings {
         self.use24HourClock = defaults.object(forKey: "use24HourClock") as? Bool ?? true
         self.defaultTimerMode = TimerMode(rawValue: defaults.string(forKey: "defaultTimerMode") ?? "") ?? .stopwatch
         self.sessionGapSeconds = defaults.object(forKey: "sessionGapSeconds") as? Int ?? 300
+        self.syncProvider = SyncProvider(rawValue: defaults.string(forKey: "syncProvider") ?? "") ?? .none
+        self.lastSyncDate = defaults.object(forKey: "lastSyncDate") as? Date
+        self.autoSyncEnabled = defaults.bool(forKey: "autoSyncEnabled")
+        self.autoSyncIntervalDays = defaults.object(forKey: "autoSyncIntervalDays") as? Int ?? 1
     }
 
     func modelName(for provider: AIProviderType) -> String {

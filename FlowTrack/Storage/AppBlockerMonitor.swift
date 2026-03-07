@@ -65,13 +65,13 @@ final class AppBlockerMonitor {
                 }
                 if let matched = matchedApp {
                     if card.isAlwaysBlock {
-                        terminateApp(bundleID: currentBundleID, cardName: card.name, limitMinutes: 0)
+                        terminateApp(bundleID: currentBundleID, cardId: card.id, cardName: card.name, limitMinutes: 0)
                     } else {
                         store.recordUsage(cardId: card.id, addSeconds: elapsed)
                         let used  = store.usageToday(for: card.id)
                         let limit = card.dailyLimitMinutes * 60
                         if used >= limit {
-                            terminateApp(bundleID: currentBundleID, cardName: card.name, limitMinutes: card.dailyLimitMinutes)
+                            terminateApp(bundleID: currentBundleID, cardId: card.id, cardName: card.name, limitMinutes: card.dailyLimitMinutes)
                         }
                         _ = matched // suppress unused-var warning
                     }
@@ -95,12 +95,12 @@ final class AppBlockerMonitor {
 
     // MARK: - Enforcement
 
-    private func terminateApp(bundleID: String, cardName: String, limitMinutes: Int) {
+    private func terminateApp(bundleID: String, cardId: String, cardName: String, limitMinutes: Int) {
         for app in NSRunningApplication.runningApplications(withBundleIdentifier: bundleID) {
             app.forceTerminate()
         }
-        if !notifiedCardIds.contains(cardName) {
-            notifiedCardIds.insert(cardName)
+        if !notifiedCardIds.contains(cardId) {
+            notifiedCardIds.insert(cardId)
             sendBlockNotification(name: cardName, limitMinutes: limitMinutes)
         }
         monitorLog.info("Terminated \(bundleID) (card: \(cardName))")

@@ -382,19 +382,24 @@ struct AIPromptBuilder {
             let segActivities = activities.filter { a in
                 a.timestamp >= clampedStart && a.timestamp < clampedEnd && !a.isIdle
             }
-            // Trim segment end to the last actual activity to avoid over-wide cards
+            // Trim both start and end to actual activity timestamps for accurate card boundaries
+            let trimmedStart: Date
             let trimmedEnd: Date
-            if let lastAct = segActivities.max(by: { $0.timestamp < $1.timestamp }) {
+            if let firstAct = segActivities.min(by: { $0.timestamp < $1.timestamp }),
+               let lastAct = segActivities.max(by: { $0.timestamp < $1.timestamp }) {
+                // Respect AI's intended start (don't go earlier), but trim to actual first activity
+                trimmedStart = max(clampedStart, firstAct.timestamp)
                 trimmedEnd = min(lastAct.timestamp.addingTimeInterval(lastAct.duration), clampedEnd)
             } else {
+                trimmedStart = clampedStart
                 trimmedEnd = clampedEnd
             }
-            guard trimmedEnd > clampedStart else { continue }
+            guard trimmedEnd > trimmedStart else { continue }
 
             let apps = buildAppEntries(from: segActivities)
 
             results.append(WindowSegmentResult(
-                segmentStart: clampedStart,
+                segmentStart: trimmedStart,
                 segmentEnd: trimmedEnd,
                 category: category,
                 title: title,

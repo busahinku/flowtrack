@@ -11,7 +11,7 @@ struct SessionDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if slot.status == .processed {
+            if !slot.activities.isEmpty {
                 headerStrip
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 12) {

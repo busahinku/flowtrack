@@ -302,14 +302,10 @@ struct TimelineView: View {
     }
 
     private func slotH(_ slot: TimeSlot) -> CGFloat {
-        // Use activeDuration (actual work time) for card height so cards reflect real effort,
-        // not wall-clock span which inflates height when idle gaps exist within a merged card.
-        let duration: TimeInterval
-        if slot.status == .processed && slot.activeDuration > 0 {
-            duration = slot.activeDuration
-        } else {
-            duration = slot.endTime.timeIntervalSince(slot.startTime)
-        }
+        // Use wall-clock span so cards fill their exact time range on the grid.
+        // This eliminates visual gaps between adjacent cards. The activeDuration
+        // (actual work time) is shown in the card's duration text instead.
+        let duration = slot.endTime.timeIntervalSince(slot.startTime)
         return max(0, CGFloat(duration / 3600.0) * TL.hourHeight)
     }
 
@@ -336,16 +332,23 @@ struct SessionCardView: View {
     private var theme: AppTheme { AppSettings.shared.appTheme }
     private var catColor: Color { Theme.color(for: slot.category) }
 
+    private var isLive: Bool { slot.status == .processing || slot.status == .continuous }
+
     var body: some View {
-        switch slot.status {
-        case .processed:
+        // Show real content for any card with activities; placeholders only for truly empty cards
+        if !slot.activities.isEmpty {
             processedCard
-        case .processing:
-            placeholderCard(text: "Processing...", color: .gray, pulsing: true)
-        case .continuous:
-            placeholderCard(text: "Processing continuous", color: catColor, pulsing: false)
-        case .pending:
-            placeholderCard(text: "Analyzing...", color: .gray.opacity(0.5), pulsing: false, dashed: true)
+        } else {
+            switch slot.status {
+            case .processed:
+                processedCard
+            case .processing:
+                placeholderCard(text: "Processing...", color: .gray, pulsing: true)
+            case .continuous:
+                placeholderCard(text: "Continuing...", color: catColor, pulsing: false)
+            case .pending:
+                placeholderCard(text: "Analyzing...", color: .gray.opacity(0.5), pulsing: false, dashed: true)
+            }
         }
     }
 
@@ -369,7 +372,12 @@ struct SessionCardView: View {
 
             if isCompact {
                 HStack(spacing: 5) {
-                    if let first = slot.activities.first {
+                    if isLive {
+                        Circle()
+                            .fill(catColor)
+                            .frame(width: 5, height: 5)
+                            .modifier(PulseModifier())
+                    } else if let first = slot.activities.first {
                         AppIconImage(bundleID: first.bundleID, size: 11)
                     }
                     Text(title)
@@ -385,6 +393,12 @@ struct SessionCardView: View {
             } else {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 4) {
+                        if isLive {
+                            Circle()
+                                .fill(catColor)
+                                .frame(width: 6, height: 6)
+                                .modifier(PulseModifier())
+                        }
                         Text(title)
                             .font(.system(size: 11, weight: .semibold))
                             .lineLimit(1)

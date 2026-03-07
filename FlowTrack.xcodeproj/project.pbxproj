@@ -32,6 +32,7 @@
 		7A918BDE2F59C8A2007FA75D /* FlowTrack.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FlowTrack.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7A918BEB2F59C8A3007FA75D /* FlowTrackTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FlowTrackTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7A918BF52F59C8A3007FA75D /* FlowTrackUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FlowTrackUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		7AECA5042F5C738900113DE0 /* FlowTrack.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = FlowTrack.xcodeproj; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -96,6 +97,11 @@
 				7A918BEB2F59C8A3007FA75D /* FlowTrackTests.xctest */,
 				7A918BF52F59C8A3007FA75D /* FlowTrackUITests.xctest */,
 			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		7AECA5062F5C738900113DE0 /* Products */ = {
+			isa = PBXGroup;
 			name = Products;
 			sourceTree = "<group>";
 		};
@@ -211,6 +217,12 @@
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 7A918BDF2F59C8A2007FA75D /* Products */;
 			projectDirPath = "";
+			projectReferences = (
+				{
+					ProductGroup = 7AECA5062F5C738900113DE0 /* Products */;
+					ProjectRef = 7AECA5042F5C738900113DE0 /* FlowTrack.xcodeproj */;
+				},
+			);
 			projectRoot = "";
 			targets = (
 				7A918BDD2F59C8A2007FA75D /* FlowTrack */,
@@ -405,23 +417,26 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = FlowTrack/FlowTrack.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Privacy - AppleEvents Sending Usage Descriptio";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSAccessibilityUsageDescription = "FlowTrack reads window titles to accurately track how you spend your time.";
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "FlowTrack uses Apple Events to read the current URL from your browser for activity tracking.";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2025 FlowTrack. All rights reserved.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.FlowTrack;
+				PRODUCT_BUNDLE_IDENTIFIER = com.flowtrack.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -438,23 +453,26 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = FlowTrack/FlowTrack.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Privacy - AppleEvents Sending Usage Descriptio";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSAccessibilityUsageDescription = "FlowTrack reads window titles to accurately track how you spend your time.";
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "FlowTrack uses Apple Events to read the current URL from your browser for activity tracking.";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2025 FlowTrack. All rights reserved.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.FlowTrack;
+				PRODUCT_BUNDLE_IDENTIFIER = com.flowtrack.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

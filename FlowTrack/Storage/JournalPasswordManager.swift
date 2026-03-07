@@ -20,19 +20,22 @@ final class JournalPasswordManager {
     private let lock = NSLock()
     /// Single Keychain item holding both salt + verifier as a 64-byte blob (32+32).
     private let credsKey = "journal_creds_v3"
+    /// In-memory cache of the credentials blob — avoids multiple Keychain reads (each triggers a macOS password prompt).
+    nonisolated(unsafe) private var cachedCredBlob: Data? = nil
 
     private init() {
         keychain = KeychainSwift(keyPrefix: "FlowTrackJournal_")
         keychain.synchronizable = false
-        migrateV2IfNeeded()
+        migrateV2IfNeeded()   // populates cachedCredBlob on first read
     }
 
     // MARK: - State
 
     nonisolated var isSetUp: Bool {
         lock.lock(); defer { lock.unlock() }
-        guard let blob = keychain.getData(credsKey) else { return false }
-        return blob.count == 64
+        if let blob = cachedCredBlob { return blob.count == 64 }
+        cachedCredBlob = keychain.getData(credsKey)
+        return cachedCredBlob?.count == 64
     }
 
     // MARK: - Setup
@@ -53,6 +56,7 @@ final class JournalPasswordManager {
             Logger(subsystem: "com.flowtrack", category: "JournalPasswordManager").error("Keychain write failed for journal credentials")
             throw JournalPasswordError.keychainFailed
         }
+        cachedCredBlob = blob   // update cache so subsequent reads skip the Keychain prompt
         Logger(subsystem: "com.flowtrack", category: "JournalPasswordManager").info("Journal password set up successfully")
         return key
     }
@@ -63,16 +67,23 @@ final class JournalPasswordManager {
     /// Runs PBKDF2 synchronously — MUST be called from a background thread (Task.detached).
     nonisolated func verifyAndDeriveKey(password: String) throws -> SymmetricKey {
         lock.lock()
-        guard let blob = keychain.getData(credsKey), blob.count == 64 else {
+        // Use cached blob to avoid a second Keychain read (which would trigger another macOS prompt)
+        let blob: Data
+        if let cached = cachedCredBlob, cached.count == 64 {
+            blob = cached
             lock.unlock()
-            throw JournalPasswordError.notSetUp
+        } else {
+            guard let fresh = keychain.getData(credsKey), fresh.count == 64 else {
+                lock.unlock()
+                throw JournalPasswordError.notSetUp
+            }
+            cachedCredBlob = fresh
+            blob = fresh
+            lock.unlock()
         }
-        let salt   = Data(blob.prefix(32))
-        let stored = Data(blob.suffix(32))
-        lock.unlock()
 
-        let key = try JournalCrypto.deriveKey(password: password, salt: salt)
-        guard JournalCrypto.isKeyValid(key, verifier: stored) else {
+        let key = try JournalCrypto.deriveKey(password: password, salt: Data(blob.prefix(32)))
+        guard JournalCrypto.isKeyValid(key, verifier: Data(blob.suffix(32))) else {
             throw JournalPasswordError.wrongPassword
         }
         return key
@@ -83,6 +94,7 @@ final class JournalPasswordManager {
     func reset() {
         lock.lock(); defer { lock.unlock() }
         keychain.delete(credsKey)
+        cachedCredBlob = nil
         pmLog.info("Journal password reset — Keychain cleared")
     }
 
@@ -91,12 +103,18 @@ final class JournalPasswordManager {
     private func migrateV2IfNeeded() {
         let oldSaltKey = "journal_salt_v2"
         let oldVerKey  = "journal_verifier_v2"
-        guard keychain.getData(credsKey) == nil,
-              let salt = keychain.getData(oldSaltKey),
+        // Read v3 once and cache it — avoids a second Keychain read in isSetUp/verifyAndDeriveKey
+        let existing = keychain.getData(credsKey)
+        if let existing {
+            cachedCredBlob = existing
+            return
+        }
+        guard let salt = keychain.getData(oldSaltKey),
               let ver  = keychain.getData(oldVerKey),
               salt.count == 32, ver.count == 32 else { return }
         var blob = Data(); blob.append(salt); blob.append(ver)
         if keychain.set(blob, forKey: credsKey, withAccess: .accessibleWhenUnlockedThisDeviceOnly) {
+            cachedCredBlob = blob
             keychain.delete(oldSaltKey)
             keychain.delete(oldVerKey)
             pmLog.info("Migrated journal credentials from v2 (2 items) to v3 (1 item)")

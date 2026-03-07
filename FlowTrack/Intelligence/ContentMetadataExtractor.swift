@@ -298,7 +298,19 @@ struct ContentMetadataExtractor {
             "walkthrough", "guide to", "build a", "building", "develop",
             "implement", "architecture", "design pattern", "algorithm",
             "data structure", "system design", "interview prep",
-            "documentation", "deep dive", "masterclass"
+            "documentation", "deep dive", "masterclass",
+            // Study / academia
+            "study", "studying", "review", "exam prep", "homework",
+            "math", "calculus", "statistics", "physics", "chemistry",
+            "biology", "history", "geography", "science", "economics",
+            // Coding / tech specifics
+            "debug", "refactor", "deployment", "devops", "backend", "frontend",
+            "api", "framework", "library", "open source",
+            "complete guide", "in depth", "advanced guide", "beginners guide",
+            "beginner guide", "for beginners", "for developers",
+            "mit ", "stanford ", "harvard ", "coursera", "udemy", "freecodecamp",
+            // Common video title patterns
+            "part 1", "episode ", "series", "chapter "
         ]
         return indicators.contains(where: { t.contains($0) })
     }

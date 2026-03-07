@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 import OSLog
 
-private let dbLogger = Logger(subsystem: "com.flowtrack", category: "Database")
+private nonisolated let dbLogger = Logger(subsystem: "com.flowtrack", category: "Database")
 
 final class Database: Sendable {
     static let shared: Database = {
@@ -457,64 +457,66 @@ final class Database: Sendable {
             )
         }
 
-        // Add .pending placeholders for unprocessed past windows — trimmed to actual activity range
+        // Add .pending slots for unprocessed past windows — populated with real activity data
         let unprocessed = try unprocessedWindowIds(for: date)
         for wid in unprocessed {
             if let bounds = Self.windowBounds(for: wid) {
-                // Query actual activity time range in this window
-                let activityRange = try dbQueue.read { db -> (start: Date, end: Date)? in
-                    // Get the first activity's timestamp
-                    let minRow = try Row.fetchOne(db, sql: """
-                        SELECT MIN(timestamp) as minT FROM activities
-                        WHERE timestamp >= ? AND timestamp < ? AND isIdle = 0
-                        """, arguments: [bounds.start, bounds.end])
-                    guard let minT = minRow?["minT"] as? Date else { return nil }
-                    // Get the last record's timestamp and its specific duration (not MAX of all durations)
-                    let lastRow = try Row.fetchOne(db, sql: """
-                        SELECT timestamp, duration FROM activities
-                        WHERE timestamp >= ? AND timestamp < ? AND isIdle = 0
-                        ORDER BY timestamp DESC LIMIT 1
-                        """, arguments: [bounds.start, bounds.end])
-                    guard let maxT = lastRow?["timestamp"] as? Date else { return nil }
-                    let lastDur = (lastRow?["duration"] as? Double) ?? 5.0
-                    return (minT, min(maxT.addingTimeInterval(lastDur), bounds.end))
+                let windowActivities = try dbQueue.read { db in
+                    try ActivityRecord
+                        .filter(ActivityRecord.Columns.timestamp >= bounds.start && ActivityRecord.Columns.timestamp < bounds.end)
+                        .filter(ActivityRecord.Columns.isIdle == false)
+                        .order(ActivityRecord.Columns.timestamp)
+                        .fetchAll(db)
                 }
-                let slotStart = activityRange?.start ?? bounds.start
-                let slotEnd = activityRange?.end ?? bounds.end
+                guard !windowActivities.isEmpty else { continue }
+
+                let summaries = buildSummaries(from: windowActivities)
+                let category = dominantCategory(in: windowActivities)
+                let slotStart = windowActivities.first!.timestamp
+                let lastAct = windowActivities.last!
+                let slotEnd = min(lastAct.timestamp.addingTimeInterval(lastAct.duration), bounds.end)
+
                 slots.append(TimeSlot(
                     id: "pending-\(wid)",
                     startTime: slotStart,
                     endTime: slotEnd,
-                    category: .uncategorized,
-                    activities: [],
+                    category: category,
+                    activities: summaries,
                     isIdle: false,
                     status: .pending
                 ))
             }
         }
 
-        // Add current window placeholder (if today)
+        // Add current window with real activity data (if today)
         if isToday, let cwid = currentWindowId, let bounds = Self.windowBounds(for: cwid) {
-            // Check if the last processed segment's category matches the current foreground app
             let lastProcessedSegment = segments.filter { !$0.isIdle }.last
             let isContinuous = lastProcessedSegment != nil
-                && lastProcessedSegment!.segmentEnd.timeIntervalSince(bounds.start) > -120 // within 2 min of window start
+                && lastProcessedSegment!.segmentEnd.timeIntervalSince(bounds.start) > -120
 
-            // Query actual activity start time instead of using the :00/:30 boundary
-            let actualStart = try dbQueue.read { db -> Date? in
-                let row = try Row.fetchOne(db, sql: """
-                    SELECT MIN(timestamp) as minT FROM activities
-                    WHERE timestamp >= ? AND timestamp < ? AND isIdle = 0
-                    """, arguments: [bounds.start, bounds.end])
-                return row?["minT"] as? Date
+            let currentActivities = try dbQueue.read { db in
+                try ActivityRecord
+                    .filter(ActivityRecord.Columns.timestamp >= bounds.start && ActivityRecord.Columns.timestamp < bounds.end)
+                    .filter(ActivityRecord.Columns.isIdle == false)
+                    .order(ActivityRecord.Columns.timestamp)
+                    .fetchAll(db)
             }
+
+            let summaries = buildSummaries(from: currentActivities)
+            let category: Category
+            if !currentActivities.isEmpty {
+                category = dominantCategory(in: currentActivities)
+            } else {
+                category = lastProcessedSegment?.category ?? .uncategorized
+            }
+            let actualStart = currentActivities.first?.timestamp ?? bounds.start
 
             slots.append(TimeSlot(
                 id: "current-\(cwid)",
-                startTime: actualStart ?? bounds.start,
+                startTime: actualStart,
                 endTime: now,
-                category: lastProcessedSegment?.category ?? .uncategorized,
-                activities: [],
+                category: category,
+                activities: summaries,
                 isIdle: false,
                 status: isContinuous ? .continuous : .processing
             ))
@@ -527,8 +529,8 @@ final class Database: Sendable {
         return mergeAdjacentProcessedSlots(slots)
     }
 
-    /// Merges adjacent .processed TimeSlots with the same category into one visual card,
-    /// but only if the gap between them is ≤ 10 minutes (avoids merging across long idle gaps).
+    /// Merges adjacent same-category TimeSlots into one visual card when the gap is ≤ 10 minutes.
+    /// Handles: processed+processed, pending+pending, any+current-window, and cross-status merges.
     private func mergeAdjacentProcessedSlots(_ slots: [TimeSlot]) -> [TimeSlot] {
         guard !slots.isEmpty else { return [] }
         let maxMergeGap: TimeInterval = 10 * 60  // 10 minutes
@@ -539,11 +541,35 @@ final class Database: Sendable {
             let next = slots[i]
             let gap = next.startTime.timeIntervalSince(current.endTime)
 
-            // Only merge two processed, same-category, non-idle slots within the gap threshold
-            if current.status == .processed && next.status == .processed
-                && current.category == next.category && !current.isIdle && !next.isIdle
-                && gap <= maxMergeGap {
-                // Merge activities
+            // Determine if these two slots can merge
+            let sameCategory = current.category == next.category && !current.isIdle && !next.isIdle && gap <= maxMergeGap
+            let canMergeActivities: Bool
+            let mergedStatus: TimeSlotStatus
+
+            switch (current.status, next.status) {
+            case (.processed, .processed):
+                canMergeActivities = sameCategory
+                mergedStatus = .processed
+            case (.pending, .pending):
+                canMergeActivities = sameCategory
+                mergedStatus = .pending
+            case (.processed, .pending), (.pending, .processed):
+                // Allow merging AI-processed and unprocessed-yet adjacent windows of the same category
+                // so that recent windows don't appear as separate 30-min cards mid-session
+                canMergeActivities = sameCategory
+                mergedStatus = .pending
+            case (.processed, .continuous), (.processed, .processing),
+                 (.pending, .continuous), (.pending, .processing):
+                // Extend into current window
+                canMergeActivities = sameCategory
+                mergedStatus = next.status
+            default:
+                canMergeActivities = false
+                mergedStatus = current.status
+            }
+
+            if canMergeActivities {
+                // Merge activities from both slots
                 var indexByName: [String: Int] = Dictionary(
                     uniqueKeysWithValues: current.activities.enumerated().map { ($0.element.appName, $0.offset) }
                 )
@@ -561,7 +587,6 @@ final class Database: Sendable {
                         allActivities.append(a)
                     }
                 }
-                // Use first slot's title, combine summaries
                 let combinedSummary: String? = {
                     if let s1 = current.summary, let s2 = next.summary { return s1 + " " + s2 }
                     return current.summary ?? next.summary
@@ -575,21 +600,7 @@ final class Database: Sendable {
                     isIdle: false,
                     title: current.title ?? next.title,
                     summary: combinedSummary,
-                    status: .processed
-                )
-            } else if current.status == .processed && next.status == .continuous
-                && current.category == next.category && gap <= maxMergeGap {
-                // Extend the previous card to cover the continuous window
-                current = TimeSlot(
-                    id: current.id,
-                    startTime: current.startTime,
-                    endTime: next.endTime,
-                    category: current.category,
-                    activities: current.activities,
-                    isIdle: false,
-                    title: current.title,
-                    summary: current.summary,
-                    status: .continuous
+                    status: mergedStatus
                 )
             } else {
                 merged.append(current)
@@ -981,7 +992,7 @@ final class Database: Sendable {
         var streak = 0
         var checkDate = today
         for _ in 0..<365 {
-            guard let entry = dayTotals[checkDate], entry.total > 60 else { break }
+            guard let entry = dayTotals[checkDate], entry.total > 300 else { break }
             guard entry.productive / entry.total >= 0.5 else { break }
             streak += 1
             checkDate = cal.date(byAdding: .day, value: -1, to: checkDate)!

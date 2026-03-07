@@ -54,6 +54,8 @@ final class ActivityTracker: ObservableObject {
 
     // Browser URL race guard — prevents checkpoint/segment writes while initial URL fetch is in-flight
     private var isBrowserFetchPending: Bool = false
+    // Generation counter — prevents stale browser fetch results from overwriting newer state
+    private var browserFetchGeneration: UInt64 = 0
 
     // App Nap exemption token
     private var activityToken: NSObjectProtocol?
@@ -70,6 +72,7 @@ final class ActivityTracker: ObservableObject {
 
     // Distraction alert tracking
     private var distractionStartTime: Date?
+    private var distractionPausedAt: Date?
     private var lastDistractionAlertFired: Date?
 
     private let knownBrowsers = ["Safari", "Google Chrome", "Firefox", "Arc", "Brave Browser", "Microsoft Edge", "Opera"]
@@ -312,10 +315,12 @@ final class ActivityTracker: ObservableObject {
             // Cancel any in-flight fetch from a prior browser switch, then start a fresh one
             browserFetchTask?.cancel()
             isBrowserFetchPending = true
+            browserFetchGeneration &+= 1
+            let fetchGen = browserFetchGeneration
             browserFetchTask = Task.detached(priority: .utility) {
                 let info = await ActivityTracker.fetchBrowserInfo(appName: appName)
                 await MainActor.run { [weak self] in
-                    guard let self else { return }
+                    guard let self, self.browserFetchGeneration == fetchGen else { return }
                     self.isBrowserFetchPending = false
                     self.cachedBrowserURL = info.url
                     self.lastBrowserTitle = title
@@ -328,13 +333,14 @@ final class ActivityTracker: ObservableObject {
                     let metadata = ContentMetadataExtractor.extract(url: info.url, windowTitle: resolvedTitle, appName: appName)
                     let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: resolvedTitle, url: info.url, isIdle: false, contentMetadata: metadata)
                     self.checkDistractionAlert(category: cat)
-                    self.lastSavedURL = info.url
+                    FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url)
                     self.lastSavedCategory = cat
                 }
             }
         } else {
             let cat = resolveCategory(appName: appName, bundleID: bundleID, title: title, url: nil, isIdle: false)
             checkDistractionAlert(category: cat)
+            FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: title)
             lastSavedCategory = cat
         }
     }
@@ -442,7 +448,7 @@ final class ActivityTracker: ObservableObject {
         let bundleID = frontApp.bundleIdentifier ?? ""
         guard !AppSettings.shared.excludedBundleIDs.contains(bundleID) else { return }
 
-        trackerLogger.debug("AX title change: \"\(newTitle.prefix(60), privacy: .public)\"")
+        trackerLogger.debug("AX title change: \"\(newTitle.prefix(60), privacy: .private)\"")
 
         // If the previous title was empty (page was loading when segment started),
         // update title in-place without ending the segment — avoids recording a blank-title record.
@@ -507,11 +513,13 @@ final class ActivityTracker: ObservableObject {
                 let metadata = ContentMetadataExtractor.extract(url: info.url, windowTitle: resolvedTitle, appName: appName)
                 let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: resolvedTitle, url: info.url, isIdle: false, contentMetadata: metadata)
                 self.checkDistractionAlert(category: cat)
+                FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url)
                 self.lastSavedCategory = cat
             }
         } else {
             let cat = resolveCategory(appName: appName, bundleID: bundleID, title: title, url: nil, isIdle: false)
             checkDistractionAlert(category: cat)
+            FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: title)
             lastSavedCategory = cat
         }
     }
@@ -766,10 +774,20 @@ final class ActivityTracker: ObservableObject {
 
     private func checkDistractionAlert(category: Category) {
         let alertMinutes = AppSettings.shared.distractionAlertMinutes
-        guard alertMinutes > 0 else { distractionStartTime = nil; return }
+        guard alertMinutes > 0 else { distractionStartTime = nil; distractionPausedAt = nil; return }
 
         if category == .distraction {
-            if distractionStartTime == nil { distractionStartTime = Date() }
+            if let paused = distractionPausedAt {
+                // Returning to distraction after a break
+                if Date().timeIntervalSince(paused) > 60 {
+                    // Break was long enough — reset timer
+                    distractionStartTime = Date()
+                }
+                // else: brief break — keep original start time
+                distractionPausedAt = nil
+            } else if distractionStartTime == nil {
+                distractionStartTime = Date()
+            }
             guard let start = distractionStartTime else { return }
             let elapsed = Date().timeIntervalSince(start)
             let threshold = TimeInterval(alertMinutes * 60)
@@ -779,7 +797,10 @@ final class ActivityTracker: ObservableObject {
                 fireDistractionNotification(minutes: alertMinutes)
             }
         } else {
-            distractionStartTime = nil
+            // Switched away from distraction — start grace period instead of resetting immediately
+            if distractionStartTime != nil && distractionPausedAt == nil {
+                distractionPausedAt = Date()
+            }
         }
     }
 

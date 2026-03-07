@@ -1,5 +1,9 @@
 import Foundation
 import AppKit
+import UserNotifications
+import OSLog
+
+private let timerLog = Logger(subsystem: "com.flowtrack", category: "TimerStore")
 
 // MARK: - TimerStore
 @MainActor @Observable
@@ -21,6 +25,10 @@ final class TimerStore {
     private var settings: AppSettings { AppSettings.shared }
     /// ID of the todo that was auto-set to .inProgress when the timer started
     private var autoActivatedTodoId: String? = nil
+    /// Milestone thresholds (seconds) already notified in the current stopwatch session
+    private var firedMilestones: Set<Int> = []
+    /// Focus milestones: 30 min, 1 hr, 2 hr, 3 hr, 5 hr
+    private let focusMilestones = [1800, 3600, 7200, 10800, 18000]
 
     private init() {
         let s = AppSettings.shared
@@ -127,6 +135,7 @@ final class TimerStore {
         isRunning = false
         timerTask?.cancel()
         timerTask = nil
+        firedMilestones.removeAll()
         // Save partial session if meaningful (≥5 seconds)
         if let start = sessionStart {
             let duration = Date().timeIntervalSince(start)
@@ -143,6 +152,7 @@ final class TimerStore {
         elapsedSeconds = 0
         remainingSeconds = initialRemaining()
         if mode == .pomodoro { phase = .work }
+        firedMilestones.removeAll()
         laps = []
         lapStartTime = nil
     }
@@ -189,6 +199,7 @@ final class TimerStore {
         switch mode {
         case .stopwatch:
             elapsedSeconds += 1
+            checkFocusMilestone(elapsedSeconds: elapsedSeconds)
 
         case .countdown:
             if remainingSeconds > 0 {
@@ -214,6 +225,7 @@ final class TimerStore {
                     completedPomodoros += 1
                     let workDuration = Double(settings.pomodoroWorkMinutes * 60)
                     saveSession(duration: workDuration)
+                    AchievementEngine.shared.checkPomodoroAchievement(completedToday: completedPomodoros)
                     sessionStart = Date()
                     // Advance phase
                     if completedPomodoros % settings.pomodoroSessionsBeforeLong == 0 {
@@ -246,14 +258,16 @@ final class TimerStore {
     }
 
     private func saveSession(duration: TimeInterval) {
+        let startedAt = sessionStart ?? Date().addingTimeInterval(-duration)
         let session = TimerSession(
             todoId: selectedTodoId,
             mode: mode,
             duration: duration,
-            startedAt: sessionStart ?? Date().addingTimeInterval(-duration),
+            startedAt: startedAt,
             endedAt: Date()
         )
         TodoStore.shared.saveTimerSession(session)
+        AchievementEngine.shared.checkSessionAchievements(duration: duration, startedAt: startedAt)
 
         // Save to main activities DB for timeline/stats integration
         let todoTitle: String
@@ -274,5 +288,40 @@ final class TimerStore {
             contentMetadata: nil
         )
         Task(priority: .utility) { try? Database.shared.saveActivity(record) }
+    }
+
+    // MARK: - Focus Milestone Notifications
+
+    private func checkFocusMilestone(elapsedSeconds: Int) {
+        for milestone in focusMilestones {
+            guard elapsedSeconds >= milestone, !firedMilestones.contains(milestone) else { continue }
+            firedMilestones.insert(milestone)
+            fireMilestoneNotification(seconds: milestone)
+            break   // fire one milestone at a time
+        }
+    }
+
+    private func fireMilestoneNotification(seconds: Int) {
+        let milestoneMessages: [Int: (title: String, body: String)] = [
+            1800:  ("30 Minutes! 🔥",              "You're warming up nicely. Keep the focus going!"),
+            3600:  ("1 Hour of Focus! 💪",          "You're in the zone. Incredible concentration!"),
+            7200:  ("2 Hours Deep Work! 🎯",        "This is extraordinary focus. You're absolutely crushing it!"),
+            10800: ("3 Hours! You're a Legend 🏆",  "Incredible dedication. Time for a well-earned break soon?"),
+            18000: ("5 Hours! 🌟",                  "Absolutely extraordinary. You are an inspiration!")
+        ]
+        let msg = milestoneMessages[seconds] ?? ("Keep Going! 🚀", "You've been focusing for \(seconds / 60) minutes!")
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = msg.title
+            content.body  = msg.body
+            content.sound = .default
+            let req = UNNotificationRequest(
+                identifier: "milestone-\(seconds)-\(Int(Date().timeIntervalSince1970))",
+                content: content,
+                trigger: nil
+            )
+            UNUserNotificationCenter.current().add(req)
+        }
     }
 }

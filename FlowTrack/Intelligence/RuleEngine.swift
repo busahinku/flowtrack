@@ -136,24 +136,26 @@ final class RuleEngine: @unchecked Sendable {
         let cached = categoryCache[bundleID.lowercased()]
         lock.unlock()
 
-        // 1. Custom rules (user-defined, highest priority)
+        // 1. Custom rules (user-defined, highest priority — always wins)
         if let cat = matchRules(customSnap, appName: appName, bundleID: bundleID, windowTitle: windowTitle, url: url) {
             return cat
         }
-        // 2. Default rules (built-in)
-        if let cat = matchRules(defaultSnap, appName: appName, bundleID: bundleID, windowTitle: windowTitle, url: url) {
-            return cat
-        }
-        // 3. AI-learned rules + cache
-        if let cat = matchRules(learnedSnap, appName: appName, bundleID: bundleID, windowTitle: windowTitle, url: url) {
-            return cat
-        }
-        // 4. Cache lookup by bundle ID
-        if let cached { return cached }
-        // 5. Content metadata categorization (browser content awareness)
+        // 2. Content metadata — checked BEFORE default domain rules so that content-aware
+        //    signals (e.g. "YouTube tutorial = Work") override broad domain rules
+        //    (e.g. "youtube.com → Distraction"). Custom rules above still take precedence.
         if let metadata = contentMetadata, let cat = metadataCategory(metadata) {
             return cat
         }
+        // 3. Default rules (built-in broad-stroke domain/app rules)
+        if let cat = matchRules(defaultSnap, appName: appName, bundleID: bundleID, windowTitle: windowTitle, url: url) {
+            return cat
+        }
+        // 4. AI-learned rules + cache
+        if let cat = matchRules(learnedSnap, appName: appName, bundleID: bundleID, windowTitle: windowTitle, url: url) {
+            return cat
+        }
+        // 5. Cache lookup by bundle ID
+        if let cached { return cached }
         // 6. Smart fallback based on bundle ID patterns + window title heuristics
         if let cat = smartCategorize(appName: appName, bundleID: bundleID, windowTitle: windowTitle) {
             return cat

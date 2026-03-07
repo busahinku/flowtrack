@@ -79,6 +79,7 @@ private struct SidebarView: View {
         List(selection: $selectedTab) {
             statusSection
             todaySection
+            focusModeSection
             viewsSection
         }
         .listStyle(.sidebar)
@@ -124,6 +125,31 @@ private struct SidebarView: View {
                 Spacer()
             }
             .padding(.vertical, 2)
+            .listRowSeparator(.hidden)
+            .selectionDisabled()
+        }
+    }
+
+    private var focusModeSection: some View {
+        let engine = FocusModeEngine.shared
+        return Section {
+            Button(action: { engine.toggle() }) {
+                Label {
+                    HStack {
+                        Text("Focus Mode")
+                        Spacer()
+                        if engine.isActive {
+                            Text("ON")
+                                .font(.caption2.weight(.heavy))
+                                .foregroundStyle(theme.successColor)
+                        }
+                    }
+                } icon: {
+                    Image(systemName: engine.isActive ? "shield.fill" : "shield")
+                        .foregroundStyle(engine.isActive ? theme.successColor : .secondary)
+                }
+            }
+            .buttonStyle(.plain)
             .listRowSeparator(.hidden)
             .selectionDisabled()
         }
@@ -219,14 +245,14 @@ private struct SidebarView: View {
     }
 
     private var totalActiveTime: String {
-        let secs = appState.timeSlots.filter { !$0.isIdle }.reduce(0.0) { $0 + $1.duration }
+        let secs = appState.timeSlots.filter { !$0.isIdle }.reduce(0.0) { $0 + $1.activeDuration }
         return Theme.formatDuration(secs)
     }
 
     private var distractionTime: String {
         let secs = appState.timeSlots
             .filter { $0.category.rawValue == "Distraction" }
-            .reduce(0.0) { $0 + $1.duration }
+            .reduce(0.0) { $0 + $1.activeDuration }
         guard secs > 0 else { return "—" }
         return Theme.formatDuration(secs)
     }
@@ -240,3 +266,4 @@ private struct SidebarView: View {
         return Theme.formatDuration(total)
     }
 }
+

@@ -58,6 +58,7 @@ struct StatsView: View {
                     distractionSection
                     topApps
                     sessionsSection
+                    AchievementsView()
                 } else {
                     timerTasksContent
                 }
@@ -1282,11 +1283,14 @@ struct StatsView: View {
         // Load 7-day sparkline data (always for last 7 days from today)
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
+        let sparkStart = cal.date(byAdding: .day, value: -6, to: today)!
+        let sparkEnd = cal.date(byAdding: .day, value: 1, to: today)!
+        let allSparkActs = (try? Database.shared.activitiesForRange(from: sparkStart, to: sparkEnd)) ?? []
         sevenDayActivities = (0..<7).map { offset in
             let day = cal.date(byAdding: .day, value: -(6 - offset), to: today)!
             let nextDay = cal.date(byAdding: .day, value: 1, to: day)!
-            let acts = (try? Database.shared.activitiesForRange(from: day, to: nextDay)) ?? []
-            let total = acts.filter { !$0.isIdle }.reduce(0.0) { $0 + $1.duration }
+            let acts = allSparkActs.filter { $0.timestamp >= day && $0.timestamp < nextDay }
+            let total = acts.reduce(0.0) { $0 + $1.duration }
             let prod = acts.filter { $0.category.isProductive }.reduce(0.0) { $0 + $1.duration }
             let score = total > 0 ? prod / total * 100 : 0
             return (date: day, score: score)

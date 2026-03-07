@@ -94,6 +94,7 @@ final class AppState {
                             self.streakDays = days
                             self.cachedStreakDate = today
                             self.cachedStreakValue = days
+                            AchievementEngine.shared.checkStreakAchievements(streak: days)
                         }
                     }
                 }

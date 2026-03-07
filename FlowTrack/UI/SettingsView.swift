@@ -23,6 +23,8 @@ struct SettingsView: View {
                 .tabItem { Label("Privacy", systemImage: "lock.shield") }
             ExportTab()
                 .tabItem { Label("Export", systemImage: "square.and.arrow.up") }
+            SyncSettingsView()
+                .tabItem { Label("Sync", systemImage: "arrow.triangle.2.circlepath") }
         }
         .frame(width: 660, height: 540)
         .preferredColorScheme(AppSettings.shared.appTheme.colorScheme)

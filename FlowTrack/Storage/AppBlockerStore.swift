@@ -120,8 +120,10 @@ final class AppBlockerStore {
 
         // Strip existing FlowTrack section
         var cleaned = current
-        if let b = cleaned.range(of: hostsBegin), let e = cleaned.range(of: hostsEnd) {
-            cleaned.removeSubrange(b.lowerBound ..< cleaned.index(after: e.upperBound))
+        if let b = cleaned.range(of: hostsBegin), let e = cleaned.range(of: hostsEnd),
+           b.lowerBound < e.lowerBound {
+            let removeEnd = e.upperBound < cleaned.endIndex ? cleaned.index(after: e.upperBound) : e.upperBound
+            cleaned.removeSubrange(b.lowerBound ..< removeEnd)
         }
         let base      = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         let newHosts  = newSection.isEmpty ? base + "\n" : base + "\n" + newSection + "\n"

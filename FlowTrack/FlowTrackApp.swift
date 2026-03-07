@@ -25,7 +25,6 @@ struct FlowTrackApp: App {
                     OnboardingView(isPresented: $showOnboarding)
                 }
                 .onAppear {
-                    ActivityTracker.shared.startTracking()
                     AppBlockerMonitor.shared.start()
                     // Capture openWindow in delegate so dock-click can reopen after close
                     appDelegate.reopenDashboard = { openWindow(id: "dashboard") }
@@ -54,6 +53,16 @@ class FlowTrackAppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.removeObject(forKey: "reallyQuit")
         // Start activity tracking immediately on launch
         ActivityTracker.shared.startTracking()
+        // Ensure the dashboard window is visible and focused on every launch
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+            if let win = NSApp.windows.first(where: { $0.identifier?.rawValue == "dashboard" }) {
+                win.makeKeyAndOrderFront(nil)
+            } else {
+                self.reopenDashboard?()
+            }
+        }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

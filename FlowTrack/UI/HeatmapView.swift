@@ -418,16 +418,17 @@ struct HeatmapView: View {
         let weekday = cal.component(.weekday, from: baseDate)
         let mondayOffset = (weekday == 1) ? -6 : (2 - weekday)
         let startOfWeek = cal.date(byAdding: .day, value: mondayOffset, to: baseDate)!
+        let endOfWeek = cal.date(byAdding: .day, value: 7, to: startOfWeek)!
 
         var result: [[Double]] = Array(repeating: Array(repeating: 0, count: 24), count: 7)
 
-        for dayIdx in 0..<7 {
-            let day = cal.date(byAdding: .day, value: dayIdx, to: startOfWeek)!
-            guard let activities = try? Database.shared.activitiesForDate(day) else { continue }
-            for a in activities where !a.isIdle && a.category.isProductive {
-                let hour = cal.component(.hour, from: a.timestamp)
-                result[dayIdx][hour] += a.duration / 60.0
-            }
+        // Single range query instead of 7 separate per-day queries
+        let allActivities = (try? Database.shared.activitiesForRange(from: startOfWeek, to: endOfWeek)) ?? []
+        for a in allActivities where a.category.isProductive {
+            let dayIdx = cal.dateComponents([.day], from: cal.startOfDay(for: startOfWeek), to: cal.startOfDay(for: a.timestamp)).day ?? 0
+            guard dayIdx >= 0 && dayIdx < 7 else { continue }
+            let hour = cal.component(.hour, from: a.timestamp)
+            result[dayIdx][hour] += a.duration / 60.0
         }
         weeklyData = result
     }
