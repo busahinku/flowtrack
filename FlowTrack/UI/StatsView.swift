@@ -1313,15 +1313,19 @@ struct StatsView: View {
         let totalAct = cachedTotalActive
         cachedProductivePercent = totalAct > 0 ? acts.filter { $0.category.isProductive }.reduce(0) { $0 + $1.duration } / totalAct * 100 : 0
 
-        var apps: [String: (bundleID: String, category: Category, duration: Double, timestamps: [Date])] = [:]
+        var apps: [String: (bundleID: String, categoryDurations: [String: Double], duration: Double, timestamps: [Date])] = [:]
         for a in acts where !a.isIdle {
-            var entry = apps[a.appName] ?? (a.bundleID, a.category, 0, [])
+            var entry = apps[a.appName] ?? (a.bundleID, [:], 0, [])
             entry.duration += a.duration
+            entry.categoryDurations[a.category.rawValue, default: 0] += a.duration
             entry.timestamps.append(a.timestamp)
             apps[a.appName] = entry
         }
         cachedAppUsages = apps.map { (name, val) in
-            AppUsageInfo(appName: name, bundleID: val.bundleID, category: val.category,
+            // Use the category with the most total duration (dominant category).
+            // This correctly handles browsers where activities span multiple categories.
+            let dominant = val.categoryDurations.max(by: { $0.value < $1.value })?.key ?? "Uncategorized"
+            return AppUsageInfo(appName: name, bundleID: val.bundleID, category: Category(dominant),
                         duration: val.duration, timestamps: val.timestamps.sorted())
         }.sorted { $0.duration > $1.duration }
 
