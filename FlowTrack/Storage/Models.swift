@@ -533,9 +533,21 @@ struct TodoItem: Codable, Identifiable, Sendable {
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
     var subtasks: [TodoItem] = []
+    /// When enabled, StudyTrackerEngine auto-starts a stopwatch when the current activity matches this todo.
+    var autoCatch: Bool = false
+    /// Comma-separated keywords for instant matching (e.g. "python, calculus, react tutorial").
+    var autoCatchKeywords: String = ""
 
     var completedSubtaskCount: Int { subtasks.filter { $0.status == .done }.count }
     var hasSubtasks: Bool { !subtasks.isEmpty }
+
+    /// Parsed keywords lowercased and trimmed, used by StudyTrackerEngine for fast matching.
+    var parsedKeywords: [String] {
+        autoCatchKeywords
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+            .filter { !$0.isEmpty }
+    }
 }
 
 // MARK: - Timer Models

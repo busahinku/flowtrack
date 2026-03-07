@@ -730,6 +730,16 @@ struct TodoRowView: View {
                                     .background(theme.accentColor.opacity(0.1), in: Capsule())
                                 }
 
+                                if todo.autoCatch {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "antenna.radiowaves.left.and.right").font(.system(size: 8))
+                                        Text("Auto Catch").font(.system(size: 10, weight: .medium))
+                                    }
+                                    .foregroundStyle(theme.infoColor)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(theme.infoColor.opacity(0.1), in: Capsule())
+                                }
+
                                 if trackedTime >= 60 {
                                     HStack(spacing: 3) {
                                         Image(systemName: "clock.fill").font(.system(size: 8))
@@ -1132,6 +1142,8 @@ struct TodoEditSheet: View {
     @State private var status:   TodoStatus   = .pending
     @State private var dueDate:  Date         = Date()
     @State private var hasDueDate = false
+    @State private var autoCatch = false
+    @State private var autoCatchKeywords = ""
 
     private var theme: AppTheme { AppSettings.shared.appTheme }
     private var isEditing: Bool { todo != nil }
@@ -1231,6 +1243,34 @@ struct TodoEditSheet: View {
             .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
             .animation(.easeInOut(duration: 0.15), value: hasDueDate)
 
+            // Auto Catch
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("Auto Catch", systemImage: "antenna.radiowaves.left.and.right")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Toggle("", isOn: $autoCatch)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                        .scaleEffect(0.8)
+                }
+                if autoCatch {
+                    Text("Auto-starts a stopwatch when your activity matches this task.")
+                        .font(.caption)
+                        .foregroundStyle(theme.secondaryText)
+                    TextField("Keywords (comma-separated)", text: $autoCatchKeywords)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 13))
+                    Text("e.g. python, calculus, react tutorial")
+                        .font(.caption2)
+                        .foregroundStyle(theme.secondaryText.opacity(0.7))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+            .animation(.easeInOut(duration: 0.15), value: autoCatch)
+
             // Actions
             HStack {
                 Spacer()
@@ -1251,6 +1291,8 @@ struct TodoEditSheet: View {
                 notes    = t.notes
                 priority = t.priority
                 status   = t.status
+                autoCatch = t.autoCatch
+                autoCatchKeywords = t.autoCatchKeywords
                 if let d = t.dueDate { dueDate = d; hasDueDate = true }
             } else if let d = defaultDueDate {
                 dueDate = d; hasDueDate = true
@@ -1268,10 +1310,14 @@ struct TodoEditSheet: View {
             existing.priority = priority
             existing.status  = status
             existing.dueDate = resolvedDue
+            existing.autoCatch = autoCatch
+            existing.autoCatchKeywords = autoCatch ? autoCatchKeywords : ""
             TodoStore.shared.update(existing)
         } else {
             var newTodo = TodoItem(title: trimmed, notes: notes, priority: priority)
             newTodo.dueDate = resolvedDue
+            newTodo.autoCatch = autoCatch
+            newTodo.autoCatchKeywords = autoCatch ? autoCatchKeywords : ""
             TodoStore.shared.add(newTodo)
         }
     }

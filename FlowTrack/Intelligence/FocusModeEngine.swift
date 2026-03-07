@@ -10,11 +10,14 @@ private nonisolated let focusLog = Logger(subsystem: "com.flowtrack", category: 
 /// Real-time focus enforcement.
 ///
 /// When Focus Mode is active, `checkActivity` is called after every category resolution.
-/// If a distraction persists beyond `gracePeriod` seconds, an intervention fires:
-/// the current browser tab is **redirected** to the motivation video (not a new tab),
-/// preventing the user from simply switching back to the old page.
-/// After each intervention `distractionSince` is reset so the 8s grace cycle restarts —
-/// meaning every ~28s of continuous distraction triggers another redirect.
+/// If a distraction persists beyond the grace period, an intervention fires:
+/// the current browser tab is **redirected** to the motivation video (not a new tab).
+///
+/// Grace escalation: first offense uses 3 s, repeat offenses within 60 s use 1 s.
+/// Cooldown between interventions: 10 s.
+/// After each intervention `distractionSince` is set to a fresh `Date()` (not nil),
+/// so the next `checkActivity` call (~5 s later) already has 5 s elapsed and can
+/// immediately re-intervene if the user is still on a distraction page.
 @MainActor @Observable
 final class FocusModeEngine {
     static let shared = FocusModeEngine()
@@ -34,8 +37,12 @@ final class FocusModeEngine {
 
     /// Seconds of continuous distraction before first intervention fires.
     private let gracePeriod: TimeInterval = 3
-    /// Minimum seconds between consecutive interventions (restarts after each one).
-    private let cooldown: TimeInterval = 20
+    /// Shorter grace for repeat offenses (intervention fired within `repeatWindow`).
+    private let repeatGracePeriod: TimeInterval = 1
+    /// Window in which a previous intervention counts as "repeat".
+    private let repeatWindow: TimeInterval = 60
+    /// Minimum seconds between consecutive interventions.
+    private let cooldown: TimeInterval = 10
     /// The motivation video — redirected into the current tab (replaces distraction page).
     private let motivationURL = URL(string: "https://www.youtube.com/watch?v=zSkFFW--Ma0")!
 
@@ -91,8 +98,14 @@ final class FocusModeEngine {
 
         if category == .distraction {
             lastDistractionApp = appName
+
             if distractionSince == nil {
+                // Fresh distraction — start tracking
                 distractionSince = Date()
+                schedulePendingIntervention(appName: appName, windowTitle: windowTitle, url: url)
+            } else if pendingInterventionTask == nil {
+                // Still distracted and no pending intervention (previous one completed).
+                // Re-schedule immediately since distractionSince is already set.
                 schedulePendingIntervention(appName: appName, windowTitle: windowTitle, url: url)
             }
         } else {
@@ -113,9 +126,13 @@ final class FocusModeEngine {
             ? Task { await ContentAIClassifier.shared.isEducational(videoTitle: windowTitle) }
             : nil
 
+        // Escalating grace: shorter if we recently intervened
+        let isRepeat = lastInterventionAt.map { Date().timeIntervalSince($0) < repeatWindow } ?? false
+        let grace = isRepeat ? repeatGracePeriod : gracePeriod
+
         pendingInterventionTask = Task {
             do {
-                try await Task.sleep(for: .seconds(gracePeriod))
+                try await Task.sleep(for: .seconds(grace))
             } catch {
                 aiTask?.cancel()
                 return  // cancelled — user went back to productive work
@@ -138,9 +155,9 @@ final class FocusModeEngine {
 
             // Cooldown guard
             if let last = lastInterventionAt, Date().timeIntervalSince(last) < cooldown {
-                focusLog.debug("Intervention skipped — cooldown active")
-                // Don't return — still reset so the cycle will restart next poll
-                distractionSince = nil
+                focusLog.debug("Intervention skipped — cooldown active (\(String(format: "%.1f", Date().timeIntervalSince(last)))s / \(Int(self.cooldown))s)")
+                // Keep distractionSince so next checkActivity re-triggers
+                pendingInterventionTask = nil
                 return
             }
 
@@ -156,14 +173,13 @@ final class FocusModeEngine {
         focusLog.info("Intervention #\(self.interventionCount) — \(appName)")
 
         // Redirect the CURRENT browser tab to the motivation video.
-        // This replaces the distraction page so the user can't just flip back.
         redirectCurrentBrowserTab(appName: appName)
 
         sendNotification()
 
-        // Reset so the next checkActivity call (in ~5s) starts a fresh grace period.
-        // This produces continuous enforcement: every cooldown seconds while distracted.
-        distractionSince = nil
+        // Set to fresh Date (NOT nil) so the next checkActivity call (~5s later) sees
+        // elapsed time > repeat grace and can immediately re-intervene if still distracted.
+        distractionSince = Date()
         pendingInterventionTask = nil
     }
 
@@ -171,6 +187,7 @@ final class FocusModeEngine {
 
     /// Replaces the URL of the active browser tab with the motivation video.
     /// Falls back to opening a new tab for unsupported browsers (e.g. Firefox).
+    /// Retries once on failure and falls back to NSWorkspace.open if both attempts fail.
     private func redirectCurrentBrowserTab(appName: String) {
         let urlStr = motivationURL.absoluteString
         let app = appName.lowercased()
@@ -212,11 +229,30 @@ final class FocusModeEngine {
             return
         }
 
-        // Run osascript in background so it doesn't block the main thread.
+        // Run osascript — retry once on failure, fall back to open URL.
+        if !runAppleScript(script) {
+            focusLog.debug("First redirect attempt failed, retrying…")
+            if !runAppleScript(script) {
+                focusLog.debug("Redirect retry failed — falling back to NSWorkspace.open")
+                NSWorkspace.shared.open(motivationURL)
+            }
+        }
+    }
+
+    /// Runs an AppleScript string via osascript. Returns true on success.
+    private func runAppleScript(_ script: String) -> Bool {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         proc.arguments = ["-e", script]
-        try? proc.run()
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = FileHandle.nullDevice
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+            return proc.terminationStatus == 0
+        } catch {
+            return false
+        }
     }
 
     // MARK: - Notification
