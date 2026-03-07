@@ -77,8 +77,16 @@ final class AppState {
 
             guard force || count != cachedActivityCount || dateChanged else { return }
 
-            timeSlots = try Database.shared.timelineSlotsForDate(selectedDate)
-            categoryStats = try Database.shared.categoryStatsForDate(selectedDate)
+            // Run heavy DB reads on a background thread to avoid blocking the main actor.
+            let date = selectedDate
+            let (slots, stats) = try await Task(priority: .userInitiated) {
+                let s = try Database.shared.timelineSlotsForDate(date)
+                let c = try Database.shared.categoryStatsForDate(date)
+                return (s, c)
+            }.value
+
+            timeSlots = slots
+            categoryStats = stats
             cachedActivityCount = count
             cachedSessionDate = selectedDate
 
@@ -171,7 +179,8 @@ final class AppState {
 
     // MARK: - AI Processing
 
-    /// Manual AI run — processes ALL unprocessed windows for the selected day
+    /// Manual AI run — processes ALL unprocessed windows for the selected day,
+    /// including the current in-progress window up to the current time.
     func runAINow() async {
         guard !isRunningAI else { return }
         isRunningAI = true
@@ -179,7 +188,51 @@ final class AppState {
 
         await reCategorizeWithRules()
         await analyzeUnprocessedWindows(limit: 200)
+        await analyzeCurrentWindowNow()
         await refreshData(force: true)
+    }
+
+    /// Analyze the currently in-progress 30-min window up to now.
+    /// Called only on manual "Run AI" so the user always gets a card for their ongoing work.
+    private func analyzeCurrentWindowNow() async {
+        let now = Date()
+        let windowId = Database.windowId(for: now)
+        guard let bounds = Database.windowBounds(for: windowId) else { return }
+
+        do {
+            let activities = try Database.shared.activitiesForWindow(windowId: windowId)
+            let nonIdle = activities.filter { !$0.isIdle }
+            guard nonIdle.count >= 2 else { return }
+
+            let results = try await withFallback { provider in
+                try await provider.analyzeActivityWindow(
+                    activities: nonIdle,
+                    windowStart: bounds.start,
+                    windowEnd: now   // partial window — up to current time
+                )
+            }
+
+            let encoder = JSONEncoder()
+            let segments = results.enumerated().map { idx, result -> WindowSegment in
+                let appsJSON = (try? String(data: encoder.encode(result.apps), encoding: .utf8)) ?? "[]"
+                return WindowSegment(
+                    id: "\(windowId)-\(idx)",
+                    windowId: windowId,
+                    segmentStart: result.segmentStart,
+                    segmentEnd: result.segmentEnd,
+                    category: result.category,
+                    title: result.title,
+                    summary: result.summary,
+                    isIdle: result.isIdle,
+                    apps: appsJSON,
+                    processedAt: Date()
+                )
+            }
+            try Database.shared.saveWindowSegments(segments, windowId: windowId)
+            log.info("Saved \(segments.count) segments for current window \(windowId)")
+        } catch {
+            log.error("Current window analysis failed: \(error.localizedDescription)")
+        }
     }
 
     /// Timer-based AI batch — processes recent unprocessed windows

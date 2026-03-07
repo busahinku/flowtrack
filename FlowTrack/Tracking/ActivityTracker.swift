@@ -334,6 +334,7 @@ final class ActivityTracker: ObservableObject {
                     let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: resolvedTitle, url: info.url, isIdle: false, contentMetadata: metadata)
                     self.checkDistractionAlert(category: cat)
                     FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url)
+                    StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url)
                     self.lastSavedCategory = cat
                 }
             }
@@ -341,6 +342,7 @@ final class ActivityTracker: ObservableObject {
             let cat = resolveCategory(appName: appName, bundleID: bundleID, title: title, url: nil, isIdle: false)
             checkDistractionAlert(category: cat)
             FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: title)
+            StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: title)
             lastSavedCategory = cat
         }
     }
@@ -514,12 +516,14 @@ final class ActivityTracker: ObservableObject {
                 let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: resolvedTitle, url: info.url, isIdle: false, contentMetadata: metadata)
                 self.checkDistractionAlert(category: cat)
                 FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url)
+                StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url)
                 self.lastSavedCategory = cat
             }
         } else {
             let cat = resolveCategory(appName: appName, bundleID: bundleID, title: title, url: nil, isIdle: false)
             checkDistractionAlert(category: cat)
             FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: title)
+            StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: title)
             lastSavedCategory = cat
         }
     }

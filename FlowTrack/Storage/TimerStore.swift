@@ -11,11 +11,11 @@ final class TimerStore {
     static let shared = TimerStore()
 
     var mode: TimerMode = .pomodoro
-    var phase: PomodoroPhase = .work
+    var phase: SessionPhase = .work
     var isRunning = false
     var elapsedSeconds: Int = 0          // used for stopwatch (counts up)
-    var remainingSeconds: Int = 0        // used for pomodoro / countdown (counts down)
-    var completedPomodoros: Int = 0      // work sessions completed today
+    var remainingSeconds: Int = 0        // used for session / countdown (counts down)
+    var completedSessions: Int = 0       // work sessions completed today
     var selectedTodoId: String?
     var laps: [LapRecord] = []
     var lapStartTime: Date?
@@ -34,7 +34,7 @@ final class TimerStore {
         let s = AppSettings.shared
         self.mode = s.defaultTimerMode
         switch s.defaultTimerMode {
-        case .pomodoro:  remainingSeconds = s.pomodoroWorkMinutes * 60
+        case .pomodoro:  remainingSeconds = s.sessionWorkMinutes * 60
         case .countdown: remainingSeconds = s.countdownMinutes * 60
         case .stopwatch: remainingSeconds = 0
         }
@@ -55,9 +55,9 @@ final class TimerStore {
         case .countdown: return settings.countdownMinutes * 60
         case .pomodoro:
             switch phase {
-            case .work:       return settings.pomodoroWorkMinutes * 60
-            case .shortBreak: return settings.pomodoroBreakMinutes * 60
-            case .longBreak:  return settings.pomodoroLongBreakMinutes * 60
+            case .work:       return settings.sessionWorkMinutes * 60
+            case .shortBreak: return settings.sessionBreakMinutes * 60
+            case .longBreak:  return settings.sessionLongBreakMinutes * 60
             }
         }
     }
@@ -124,9 +124,19 @@ final class TimerStore {
             TodoStore.shared.setStatus(.inProgress, for: id)
         }
         timerTask = Task {
+            // Use wall-clock anchoring to eliminate cumulative drift.
+            // Each wake calculates how many ticks have actually elapsed since start.
+            let anchor = Date()
+            var lastTickCount = 0
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                tick()
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { break }
+                // How many full seconds have elapsed since anchor?
+                let elapsed = Int(Date().timeIntervalSince(anchor))
+                let ticksNeeded = elapsed - lastTickCount
+                // Normally 1, but catch up if OS delayed wakeup (e.g. App Nap, Doze)
+                for _ in 0..<max(1, min(ticksNeeded, 3)) { tick() }
+                lastTickCount = elapsed
             }
         }
     }
@@ -157,7 +167,7 @@ final class TimerStore {
         lapStartTime = nil
     }
 
-    /// Skip the current Pomodoro phase without saving a session or reverting the linked todo.
+    /// Skip the current session phase without saving a session or reverting the linked todo.
     func skipPhase() {
         guard mode == .pomodoro else { return }
         timerTask?.cancel()
@@ -165,8 +175,8 @@ final class TimerStore {
         isRunning = false
         sessionStart = nil
         if phase == .work {
-            completedPomodoros += 1
-            phase = completedPomodoros % settings.pomodoroSessionsBeforeLong == 0 ? .longBreak : .shortBreak
+            completedSessions += 1
+            phase = completedSessions % settings.sessionsBeforeLong == 0 ? .longBreak : .shortBreak
         } else {
             phase = .work
         }
@@ -178,7 +188,7 @@ final class TimerStore {
         phase = .work
         elapsedSeconds = 0
         remainingSeconds = initialRemaining()
-        completedPomodoros = 0
+        completedSessions = 0
         laps = []
         lapStartTime = nil
     }
@@ -222,13 +232,13 @@ final class TimerStore {
             } else {
                 // Phase finished
                 if phase == .work {
-                    completedPomodoros += 1
-                    let workDuration = Double(settings.pomodoroWorkMinutes * 60)
+                    completedSessions += 1
+                    let workDuration = Double(settings.sessionWorkMinutes * 60)
                     saveSession(duration: workDuration)
-                    AchievementEngine.shared.checkPomodoroAchievement(completedToday: completedPomodoros)
+                    AchievementEngine.shared.checkSessionAchievement(completedToday: completedSessions)
                     sessionStart = Date()
                     // Advance phase
-                    if completedPomodoros % settings.pomodoroSessionsBeforeLong == 0 {
+                    if completedSessions % settings.sessionsBeforeLong == 0 {
                         phase = .longBreak
                     } else {
                         phase = .shortBreak
@@ -250,9 +260,9 @@ final class TimerStore {
         case .countdown: return settings.countdownMinutes * 60
         case .pomodoro:
             switch phase {
-            case .work:       return settings.pomodoroWorkMinutes * 60
-            case .shortBreak: return settings.pomodoroBreakMinutes * 60
-            case .longBreak:  return settings.pomodoroLongBreakMinutes * 60
+            case .work:       return settings.sessionWorkMinutes * 60
+            case .shortBreak: return settings.sessionBreakMinutes * 60
+            case .longBreak:  return settings.sessionLongBreakMinutes * 60
             }
         }
     }

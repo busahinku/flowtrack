@@ -415,17 +415,17 @@ final class AppSettings {
     var retentionDays: Int {
         didSet { UserDefaults.standard.set(retentionDays, forKey: "retentionDays") }
     }
-    var pomodoroWorkMinutes: Int {
-        didSet { UserDefaults.standard.set(pomodoroWorkMinutes, forKey: "pomodoroWorkMinutes") }
+    var sessionWorkMinutes: Int {
+        didSet { UserDefaults.standard.set(sessionWorkMinutes, forKey: "sessionWorkMinutes") }
     }
-    var pomodoroBreakMinutes: Int {
-        didSet { UserDefaults.standard.set(pomodoroBreakMinutes, forKey: "pomodoroBreakMinutes") }
+    var sessionBreakMinutes: Int {
+        didSet { UserDefaults.standard.set(sessionBreakMinutes, forKey: "sessionBreakMinutes") }
     }
-    var pomodoroLongBreakMinutes: Int {
-        didSet { UserDefaults.standard.set(pomodoroLongBreakMinutes, forKey: "pomodoroLongBreakMinutes") }
+    var sessionLongBreakMinutes: Int {
+        didSet { UserDefaults.standard.set(sessionLongBreakMinutes, forKey: "sessionLongBreakMinutes") }
     }
-    var pomodoroSessionsBeforeLong: Int {
-        didSet { UserDefaults.standard.set(pomodoroSessionsBeforeLong, forKey: "pomodoroSessionsBeforeLong") }
+    var sessionsBeforeLong: Int {
+        didSet { UserDefaults.standard.set(sessionsBeforeLong, forKey: "sessionsBeforeLong") }
     }
     var countdownMinutes: Int {
         didSet { UserDefaults.standard.set(countdownMinutes, forKey: "countdownMinutes") }
@@ -470,10 +470,10 @@ final class AppSettings {
         self.idleThresholdSeconds = defaults.object(forKey: "idleThresholdSeconds") as? Int ?? 120
         self.distractionAlertMinutes = defaults.object(forKey: "distractionAlertMinutes") as? Int ?? 0
         self.retentionDays = defaults.object(forKey: "retentionDays") as? Int ?? 90
-        self.pomodoroWorkMinutes = defaults.object(forKey: "pomodoroWorkMinutes") as? Int ?? 25
-        self.pomodoroBreakMinutes = defaults.object(forKey: "pomodoroBreakMinutes") as? Int ?? 5
-        self.pomodoroLongBreakMinutes = defaults.object(forKey: "pomodoroLongBreakMinutes") as? Int ?? 15
-        self.pomodoroSessionsBeforeLong = defaults.object(forKey: "pomodoroSessionsBeforeLong") as? Int ?? 4
+        self.sessionWorkMinutes = (defaults.object(forKey: "sessionWorkMinutes") ?? defaults.object(forKey: "pomodoroWorkMinutes")) as? Int ?? 25
+        self.sessionBreakMinutes = (defaults.object(forKey: "sessionBreakMinutes") ?? defaults.object(forKey: "pomodoroBreakMinutes")) as? Int ?? 5
+        self.sessionLongBreakMinutes = (defaults.object(forKey: "sessionLongBreakMinutes") ?? defaults.object(forKey: "pomodoroLongBreakMinutes")) as? Int ?? 15
+        self.sessionsBeforeLong = (defaults.object(forKey: "sessionsBeforeLong") ?? defaults.object(forKey: "pomodoroSessionsBeforeLong")) as? Int ?? 4
         self.countdownMinutes = defaults.object(forKey: "countdownMinutes") as? Int ?? 25
         self.use24HourClock = defaults.object(forKey: "use24HourClock") as? Bool ?? true
         self.defaultTimerMode = TimerMode(rawValue: defaults.string(forKey: "defaultTimerMode") ?? "") ?? .stopwatch
@@ -541,7 +541,7 @@ struct TodoItem: Codable, Identifiable, Sendable {
 // MARK: - Timer Models
 
 enum TimerMode: String, Codable, CaseIterable, Sendable {
-    case pomodoro  = "Pomodoro"
+    case pomodoro  = "Session"
     case countdown = "Countdown"
     case stopwatch = "Stopwatch"
     var icon: String {
@@ -549,7 +549,7 @@ enum TimerMode: String, Codable, CaseIterable, Sendable {
     }
 }
 
-enum PomodoroPhase: String, Sendable {
+enum SessionPhase: String, Sendable {
     case work, shortBreak, longBreak
     var label: String {
         switch self { case .work: "Focus"; case .shortBreak: "Short Break"; case .longBreak: "Long Break" }
@@ -563,6 +563,9 @@ enum PomodoroPhase: String, Sendable {
         }
     }
 }
+
+/// Backward-compatibility typealias so any remaining PomodoroPhase references still compile.
+typealias PomodoroPhase = SessionPhase
 
 struct LapRecord: Codable, Identifiable, Sendable {
     var id: String = UUID().uuidString

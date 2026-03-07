@@ -488,11 +488,14 @@ final class Database: Sendable {
             }
         }
 
-        // Add current window with real activity data (if today)
+        // Add current window with real activity data (if today).
+        // Skip the placeholder if the window was already AI-processed (e.g. via manual "Run AI") —
+        // the processed segments are already in `slots` above. Only show a live placeholder
+        // for the portion of the window that hasn't been captured yet (activities after the
+        // last segment's end time).
         if isToday, let cwid = currentWindowId, let bounds = Self.windowBounds(for: cwid) {
-            let lastProcessedSegment = segments.filter { !$0.isIdle }.last
-            let isContinuous = lastProcessedSegment != nil
-                && lastProcessedSegment!.segmentEnd.timeIntervalSince(bounds.start) > -120
+            let processedIds = try processedWindowIds(for: date)
+            let currentWindowProcessed = processedIds.contains(cwid)
 
             let currentActivities = try dbQueue.read { db in
                 try ActivityRecord
@@ -502,24 +505,51 @@ final class Database: Sendable {
                     .fetchAll(db)
             }
 
-            let summaries = buildSummaries(from: currentActivities)
-            let category: Category
-            if !currentActivities.isEmpty {
-                category = dominantCategory(in: currentActivities)
+            if currentWindowProcessed {
+                // Current window was analyzed by "Run AI". Show a small live indicator only
+                // for activities that arrived after the last saved segment's end time.
+                let lastSegmentEnd = segments.filter { $0.windowId == cwid && !$0.isIdle }.map(\.segmentEnd).max()
+                if let cutoff = lastSegmentEnd {
+                    let newActivities = currentActivities.filter { $0.timestamp > cutoff }
+                    if newActivities.count >= 2 {
+                        let summaries = buildSummaries(from: newActivities)
+                        let category = dominantCategory(in: newActivities)
+                        slots.append(TimeSlot(
+                            id: "current-live-\(cwid)",
+                            startTime: newActivities.first!.timestamp,
+                            endTime: now,
+                            category: category,
+                            activities: summaries,
+                            isIdle: false,
+                            status: .processing
+                        ))
+                    }
+                }
             } else {
-                category = lastProcessedSegment?.category ?? .uncategorized
-            }
-            let actualStart = currentActivities.first?.timestamp ?? bounds.start
+                // Window not yet processed — show the standard continuous/processing placeholder.
+                let lastProcessedSegment = segments.filter { !$0.isIdle }.last
+                let isContinuous = lastProcessedSegment != nil
+                    && lastProcessedSegment!.segmentEnd.timeIntervalSince(bounds.start) > -120
 
-            slots.append(TimeSlot(
-                id: "current-\(cwid)",
-                startTime: actualStart,
-                endTime: now,
-                category: category,
-                activities: summaries,
-                isIdle: false,
-                status: isContinuous ? .continuous : .processing
-            ))
+                let summaries = buildSummaries(from: currentActivities)
+                let category: Category
+                if !currentActivities.isEmpty {
+                    category = dominantCategory(in: currentActivities)
+                } else {
+                    category = lastProcessedSegment?.category ?? .uncategorized
+                }
+                let actualStart = currentActivities.first?.timestamp ?? bounds.start
+
+                slots.append(TimeSlot(
+                    id: "current-\(cwid)",
+                    startTime: actualStart,
+                    endTime: now,
+                    category: category,
+                    activities: summaries,
+                    isIdle: false,
+                    status: isContinuous ? .continuous : .processing
+                ))
+            }
         }
 
         // Sort by start time

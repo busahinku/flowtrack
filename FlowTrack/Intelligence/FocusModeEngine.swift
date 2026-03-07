@@ -33,7 +33,7 @@ final class FocusModeEngine {
     // MARK: - Configuration
 
     /// Seconds of continuous distraction before first intervention fires.
-    private let gracePeriod: TimeInterval = 8
+    private let gracePeriod: TimeInterval = 3
     /// Minimum seconds between consecutive interventions (restarts after each one).
     private let cooldown: TimeInterval = 20
     /// The motivation video — redirected into the current tab (replaces distraction page).
@@ -57,6 +57,8 @@ final class FocusModeEngine {
 
     func enable() {
         guard !isActive else { return }
+        pendingInterventionTask?.cancel()
+        pendingInterventionTask = nil
         isActive = true
         startedAt = Date()
         interventionCount = 0

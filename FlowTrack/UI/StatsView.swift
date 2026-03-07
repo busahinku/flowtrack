@@ -1015,8 +1015,8 @@ struct StatsView: View {
         HStack(spacing: 12) {
             SummaryCard(title: "Timer Total", value: timerTotalSeconds >= 60 ? Theme.formatDuration(timerTotalSeconds) : "—",
                        icon: "timer", color: theme.accentColor)
-            let pomodoroSessions = filteredTimerSessions.filter { $0.mode == .pomodoro }.count
-            SummaryCard(title: "Pomodoros", value: pomodoroSessions > 0 ? "\(pomodoroSessions)" : "—",
+            let sessionCount = filteredTimerSessions.filter { $0.mode == .pomodoro }.count
+            SummaryCard(title: "Sessions", value: sessionCount > 0 ? "\(sessionCount)" : "—",
                        icon: "circle.fill", color: theme.errorColor)
             let periodTodoIds = Set(filteredTimerSessions.compactMap(\.todoId))
             let periodTodos = todoStore.todos.filter { periodTodoIds.contains($0.id) }

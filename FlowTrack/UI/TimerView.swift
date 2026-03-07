@@ -125,9 +125,9 @@ struct TimerView: View {
 
                     if timer.mode == .pomodoro {
                         HStack(spacing: 4) {
-                            ForEach(0..<settings.pomodoroSessionsBeforeLong, id: \.self) { i in
+                            ForEach(0..<settings.sessionsBeforeLong, id: \.self) { i in
                                 Circle()
-                                    .fill(i < timer.completedPomodoros % settings.pomodoroSessionsBeforeLong
+                                    .fill(i < timer.completedSessions % settings.sessionsBeforeLong
                                           ? phaseColor : phaseColor.opacity(0.15))
                                     .frame(width: 5, height: 5)
                             }
@@ -414,17 +414,17 @@ struct TimerConfigSheet: View {
 
             GroupBox {
                 VStack(spacing: 12) {
-                    stepperRow("Focus duration", value: $settings.pomodoroWorkMinutes, range: 1...120, unit: "min", icon: "brain", color: theme.infoColor)
+                    stepperRow("Focus duration", value: $settings.sessionWorkMinutes, range: 1...120, unit: "min", icon: "brain", color: theme.infoColor)
                     Divider()
-                    stepperRow("Short break", value: $settings.pomodoroBreakMinutes, range: 1...30, unit: "min", icon: "cup.and.saucer.fill", color: theme.successColor)
+                    stepperRow("Short break", value: $settings.sessionBreakMinutes, range: 1...30, unit: "min", icon: "cup.and.saucer.fill", color: theme.successColor)
                     Divider()
-                    stepperRow("Long break", value: $settings.pomodoroLongBreakMinutes, range: 5...60, unit: "min", icon: "leaf.fill", color: theme.infoColor)
+                    stepperRow("Long break", value: $settings.sessionLongBreakMinutes, range: 5...60, unit: "min", icon: "leaf.fill", color: theme.infoColor)
                     Divider()
-                    stepperRow("Sessions before long break", value: $settings.pomodoroSessionsBeforeLong, range: 1...10, unit: "", icon: "repeat", color: theme.warningColor)
+                    stepperRow("Sessions before long break", value: $settings.sessionsBeforeLong, range: 1...10, unit: "", icon: "repeat", color: theme.warningColor)
                 }
                 .padding(.vertical, 4)
             } label: {
-                Label("Pomodoro", systemImage: "timer")
+                Label("Session", systemImage: "timer")
                     .font(.subheadline.weight(.semibold))
             }
 

@@ -50,7 +50,6 @@ class FlowTrackAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let showDock = AppSettings.shared.showDockIcon
         NSApp.setActivationPolicy(showDock ? .regular : .accessory)
-        UserDefaults.standard.removeObject(forKey: "reallyQuit")
         // Start activity tracking immediately on launch
         ActivityTracker.shared.startTracking()
         // Ensure the dashboard window is visible and focused on every launch
@@ -66,17 +65,7 @@ class FlowTrackAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if UserDefaults.standard.bool(forKey: "reallyQuit") {
-            return .terminateNow
-        }
-        for window in NSApp.windows { window.close() }
-        // Defer activation policy change so SwiftUI's MenuBarExtra finishes processing
-        // the termination event before the policy switches — otherwise the menu bar
-        // icon stays visible but stops responding to clicks.
-        DispatchQueue.main.async {
-            NSApp.setActivationPolicy(.accessory)
-        }
-        return .terminateCancel
+        return .terminateNow
     }
 
     // Dock icon clicked — show existing window or recreate it

@@ -300,13 +300,16 @@ struct AIPromptBuilder {
         - Skip periods with no activity — do NOT invent segments to fill gaps
         - Minimum segment duration: 60 seconds
         - Available categories: \(categoriesList)
-        - Segments must NOT overlap and must stay within \(windowStartStr.prefix(5))–\(windowEndStr.prefix(5))
-        - title: 5-8 words, specific (e.g. "SwiftUI database layer development" not "Coding work")
-        - summary: 1-2 sentences only for segments >10 min, otherwise null
-        - isIdle: true only for clear idle/break periods with no app usage
+        - Segments must NOT overlap and must stay within \(windowStartStr)–\(windowEndStr)
+        - "title": REQUIRED for every segment — 5-8 words, specific and descriptive (e.g. "SwiftUI database layer refactoring" not "Coding work"). Never null.
+        - "summary": null for segments ≤10 min; for segments >10 min write 1-2 concrete sentences describing what was done (e.g. "Reviewed pull requests and fixed failing CI tests. Updated documentation for the auth module.")
+        - "isIdle": true only for clear idle/break periods with zero app usage
 
-        Respond ONLY with a JSON array (no markdown, no explanation):
-        [{"start":"HH:mm","end":"HH:mm","category":"Work","title":"...","summary":null,"isIdle":false}]
+        Respond ONLY with a valid JSON array (no markdown fences, no explanation):
+        [
+          {"start":"HH:mm:ss","end":"HH:mm:ss","category":"Work","title":"Swift concurrency bug investigation","summary":null,"isIdle":false},
+          {"start":"HH:mm:ss","end":"HH:mm:ss","category":"Work","title":"Email triage and team coordination","summary":"Processed inbox and replied to 12 threads. Scheduled sprint planning meeting and updated project board.","isIdle":false}
+        ]
         """
     }
 
@@ -325,6 +328,9 @@ struct AIPromptBuilder {
         }
 
         let cal = Calendar.current
+        let timeFmtSec = DateFormatter()
+        timeFmtSec.dateFormat = "HH:mm:ss"
+        timeFmtSec.timeZone = cal.timeZone
         let timeFmt = DateFormatter()
         timeFmt.dateFormat = "HH:mm"
         timeFmt.timeZone = cal.timeZone
@@ -337,15 +343,17 @@ struct AIPromptBuilder {
                   let endStr = obj["end"] as? String,
                   let catStr = obj["category"] as? String else { continue }
 
-            guard let startTime = timeFmt.date(from: startStr),
-                  let endTime = timeFmt.date(from: endStr) else { continue }
+            guard let startTime = timeFmtSec.date(from: startStr) ?? timeFmt.date(from: startStr),
+                  let endTime = timeFmtSec.date(from: endStr) ?? timeFmt.date(from: endStr) else { continue }
 
-            let startComps = cal.dateComponents([.hour, .minute], from: startTime)
-            let endComps = cal.dateComponents([.hour, .minute], from: endTime)
-            let segStart = cal.date(bySettingHour: startComps.hour ?? 0, minute: startComps.minute ?? 0, second: 0, of: dayStart)
-                ?? dayStart.addingTimeInterval(TimeInterval((startComps.hour ?? 0) * 3600 + (startComps.minute ?? 0) * 60))
-            var segEnd = cal.date(bySettingHour: endComps.hour ?? 0, minute: endComps.minute ?? 0, second: 0, of: dayStart)
-                ?? dayStart.addingTimeInterval(TimeInterval((endComps.hour ?? 0) * 3600 + (endComps.minute ?? 0) * 60))
+            let startComps = cal.dateComponents([.hour, .minute, .second], from: startTime)
+            let endComps = cal.dateComponents([.hour, .minute, .second], from: endTime)
+            let sh = startComps.hour ?? 0, sm = startComps.minute ?? 0, ss = startComps.second ?? 0
+            let eh = endComps.hour ?? 0, em = endComps.minute ?? 0, es = endComps.second ?? 0
+            let segStart = cal.date(bySettingHour: sh, minute: sm, second: ss, of: dayStart)
+                ?? dayStart.addingTimeInterval(TimeInterval(sh * 3600 + sm * 60 + ss))
+            var segEnd = cal.date(bySettingHour: eh, minute: em, second: es, of: dayStart)
+                ?? dayStart.addingTimeInterval(TimeInterval(eh * 3600 + em * 60 + es))
 
             if segEnd <= segStart {
                 segEnd = cal.date(byAdding: .day, value: 1, to: segEnd) ?? segEnd.addingTimeInterval(86400)

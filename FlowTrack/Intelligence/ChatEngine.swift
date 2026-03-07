@@ -124,7 +124,7 @@ final class ChatEngine {
             - Timeline: Visual hour-by-hour activity log with session cards
             - Statistics: Charts for category breakdown, top apps, productivity trends
             - Focus Shield (App Blocker): Create "block cards" grouping sites/apps to block during focus time
-            - Timer: Pomodoro, countdown, or stopwatch modes — can attach to tasks
+            - Timer: Session, countdown, or stopwatch modes — can attach to tasks
             - Tasks (Todos): Task list with status (active/done), priority, and due dates
             - Journal: Private encrypted daily journal with markdown support
             - Settings: AI provider config, categories, themes, tracking preferences

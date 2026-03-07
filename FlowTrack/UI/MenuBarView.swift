@@ -186,7 +186,7 @@ struct MenuBarView: View {
 
             // Timer display + controls
             HStack(spacing: 10) {
-                // Mini progress ring for pomodoro/countdown
+                // Mini progress ring for session/countdown
                 if timer.mode != .stopwatch {
                     ZStack {
                         Circle()
@@ -202,10 +202,10 @@ struct MenuBarView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
-                    // Phase label (Pomodoro) or mode icon
+                    // Phase label (Session mode) or mode icon
                     if timer.mode == .pomodoro {
                         HStack(spacing: 4) {
-                            Text("🍅").font(.caption2)
+                            Text("🎯").font(.caption2)
                             Text(timer.phase.label)
                                 .font(.caption2.weight(.medium))
                                 .foregroundStyle(timer.phase.color)
@@ -217,16 +217,16 @@ struct MenuBarView: View {
                         .font(.system(size: 22, weight: .light, design: .monospaced))
                         .foregroundStyle(theme.primaryText)
 
-                    // Pomodoro dots OR today total
-                    if timer.mode == .pomodoro && timer.completedPomodoros > 0 {
+                    // Session dots OR today total
+                    if timer.mode == .pomodoro && timer.completedSessions > 0 {
                         HStack(spacing: 3) {
-                            ForEach(0..<min(timer.completedPomodoros, 8), id: \.self) { _ in
+                            ForEach(0..<min(timer.completedSessions, 8), id: \.self) { _ in
                                 Circle()
                                     .fill(timer.phase.color)
                                     .frame(width: 4, height: 4)
                             }
-                            if timer.completedPomodoros > 8 {
-                                Text("+\(timer.completedPomodoros - 8)")
+                            if timer.completedSessions > 8 {
+                                Text("+\(timer.completedSessions - 8)")
                                     .font(.caption2).foregroundStyle(theme.secondaryText)
                             }
                         }

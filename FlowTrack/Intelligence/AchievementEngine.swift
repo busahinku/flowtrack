@@ -16,7 +16,7 @@ enum AchievementID: String, Codable, CaseIterable {
     case streak30        = "streak_30"
     case earlyBird       = "early_bird"        // started before 7 AM
     case nightOwl        = "night_owl"         // started after 10 PM
-    case pomodoroMaster  = "pomodoro_master"   // 10 Pomodoros in one day
+    case pomodoroMaster  = "pomodoro_master"   // 10 sessions in one day
 
     var title: String {
         switch self {
@@ -29,7 +29,7 @@ enum AchievementID: String, Codable, CaseIterable {
         case .streak30:       return "Monthly Master"
         case .earlyBird:      return "Early Bird"
         case .nightOwl:       return "Night Owl"
-        case .pomodoroMaster: return "Pomodoro Master"
+        case .pomodoroMaster: return "Session Master"
         }
     }
 
@@ -44,7 +44,7 @@ enum AchievementID: String, Codable, CaseIterable {
         case .streak30:       return "Maintain a 30-day focus streak"
         case .earlyBird:      return "Start a focus session before 7:00 AM"
         case .nightOwl:       return "Start a focus session after 10:00 PM"
-        case .pomodoroMaster: return "Complete 10 Pomodoros in one day"
+        case .pomodoroMaster: return "Complete 10 sessions in one day"
         }
     }
 
@@ -121,8 +121,8 @@ final class AchievementEngine {
         if streak >= 30 { unlock(.streak30) }
     }
 
-    /// Call when Pomodoro work sessions complete for today.
-    func checkPomodoroAchievement(completedToday: Int) {
+    /// Call when session work phases complete for today.
+    func checkSessionAchievement(completedToday: Int) {
         if completedToday >= 10 { unlock(.pomodoroMaster) }
     }
 
