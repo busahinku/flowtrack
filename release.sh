@@ -89,6 +89,14 @@ if [[ -z "$APP_PATH" ]]; then
 fi
 echo "✅ App exported: $APP_PATH"
 
+# Re-sign embedded frameworks and the app with the same ad-hoc identity
+echo "🔏 Re-signing app bundle..."
+find "$APP_PATH/Contents/Frameworks" -type d -name "*.framework" | while read fw; do
+    codesign --force --deep --sign - "$fw" 2>/dev/null
+done
+codesign --force --deep --sign - "$APP_PATH"
+echo "✅ App re-signed"
+
 # ── DMG ───────────────────────────────────────────────────────────────────────
 
 DMG_NAME="FlowTrack-$TAG.dmg"
