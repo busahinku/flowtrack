@@ -21,6 +21,11 @@ private nonisolated let studyLog = Logger(subsystem: "com.flowtrack", category: 
 final class StudyTrackerEngine {
     static let shared = StudyTrackerEngine()
 
+    private enum MatchSource {
+        case keyword
+        case ai
+    }
+
     // MARK: - Observable State
 
     /// Whether this engine auto-started the current stopwatch session.
@@ -33,11 +38,11 @@ final class StudyTrackerEngine {
     /// Seconds of consecutive matched activity before auto-starting (keyword match).
     private let keywordStartGrace: TimeInterval = 3
     /// Seconds of consecutive matched activity before auto-starting (AI match).
-    private let aiStartGrace: TimeInterval = 8
+    private let aiStartGrace: TimeInterval = 2
     /// Seconds of non-matching activity before auto-stopping the stopwatch.
     private let stopGrace: TimeInterval = 10
     /// Minimum seconds between successive AI todo-matching calls.
-    private let aiCooldown: TimeInterval = 20
+    private let aiCooldown: TimeInterval = 3
 
     // MARK: - Internal State
 
@@ -116,7 +121,7 @@ final class StudyTrackerEngine {
 
         // ── Tier 1: instant keyword match ────────────────────────────
         if let matched = keywordMatch(appName: appName, windowTitle: windowTitle, url: url, todos: autoCatchTodos) {
-            handleMatched(todo: matched, grace: keywordStartGrace, appName: appName, windowTitle: windowTitle, url: url)
+            handleMatched(todo: matched, grace: keywordStartGrace, source: .keyword, appName: appName, windowTitle: windowTitle, url: url)
             return
         }
 
@@ -177,7 +182,7 @@ final class StudyTrackerEngine {
 
     // MARK: - State Transitions
 
-    private func handleMatched(todo: TodoItem, grace: TimeInterval, appName: String, windowTitle: String, url: String?) {
+    private func handleMatched(todo: TodoItem, grace: TimeInterval, source: MatchSource, appName: String, windowTitle: String, url: String?) {
         // Cancel any pending stop
         cancelPendingStop()
         unmatchedSince = nil
@@ -214,19 +219,30 @@ final class StudyTrackerEngine {
         let capturedApp = appName
         let capturedTitle = windowTitle
         let capturedURL = url
+        let capturedContextKey = contextKey(appName: appName, windowTitle: windowTitle, url: url)
         pendingStartTask = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(grace)) } catch { return }
             guard let self, self.matchedSince != nil else { return }
 
-            // Re-verify: confirm the current frontmost app/title still matches
-            // the same todo — catches cases where the user navigated away during grace.
+            // Re-verify before auto-starting so quick tab hops do not start the timer.
             let currentApp = ActivityTracker.shared.currentApp
             let currentTitle = ActivityTracker.shared.currentTitle
             let currentURL = ActivityTracker.shared.currentURL
             let recheckURL = currentURL ?? capturedURL
-            let activeTodos = TodoStore.shared.todos.filter { $0.autoCatch && $0.status != .done }
-            guard self.keywordMatch(appName: currentApp, windowTitle: currentTitle, url: recheckURL, todos: activeTodos)?.id == capturedTodo.id else {
-                self.cancelPendingStart(); self.matchedSince = nil; self.pendingMatchTodoId = nil
+
+            let stillMatches: Bool
+            switch source {
+            case .keyword:
+                let activeTodos = TodoStore.shared.todos.filter { $0.autoCatch && $0.status != .done }
+                stillMatches = self.keywordMatch(appName: currentApp, windowTitle: currentTitle, url: recheckURL, todos: activeTodos)?.id == capturedTodo.id
+            case .ai:
+                stillMatches = self.contextKey(appName: currentApp, windowTitle: currentTitle, url: recheckURL) == capturedContextKey
+            }
+
+            guard stillMatches else {
+                self.cancelPendingStart()
+                self.matchedSince = nil
+                self.pendingMatchTodoId = nil
                 return
             }
 
@@ -269,7 +285,7 @@ final class StudyTrackerEngine {
 
     private func scheduleAIMatch(appName: String, windowTitle: String, url: String?, todos: [TodoItem]) {
         aiMatchTask?.cancel()
-        lastAIContext = "\(appName)|\(windowTitle.prefix(80))|\((url ?? "").prefix(120))"
+        lastAIContext = contextKey(appName: appName, windowTitle: windowTitle, url: url)
         lastAIMatchAt = Date()
 
         let capturedApp = appName
@@ -286,7 +302,7 @@ final class StudyTrackerEngine {
             guard !self.isAutoTracking else { return }
 
             if let todo = matchedTodo {
-                self.handleMatched(todo: todo, grace: self.aiStartGrace, appName: capturedApp, windowTitle: capturedTitle, url: url)
+                self.handleMatched(todo: todo, grace: self.aiStartGrace, source: .ai, appName: capturedApp, windowTitle: capturedTitle, url: url)
             }
         }
     }
@@ -342,7 +358,13 @@ final class StudyTrackerEngine {
     /// Runs in background — asks AI which auto-catch todo best matches the current activity.
     private nonisolated func matchTodoWithAI(appName: String, windowTitle: String, url: String?, todos: [TodoItem]) async -> TodoItem? {
         let todoList = todos.enumerated()
-            .map { "\($0.offset + 1). \($0.element.title)\($0.element.autoCatchKeywords.isEmpty ? "" : " (keywords: \($0.element.autoCatchKeywords))")" }
+            .map {
+                let todo = $0.element
+                let notes = todo.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+                let keywordPart = todo.autoCatchKeywords.isEmpty ? "" : " | keywords: \(todo.autoCatchKeywords)"
+                let notesPart = notes.isEmpty ? "" : " | notes: \(notes.prefix(120))"
+                return "\($0.offset + 1). \(todo.title)\(keywordPart)\(notesPart)"
+            }
             .joined(separator: "\n")
 
         let prompt = """
@@ -353,6 +375,8 @@ final class StudyTrackerEngine {
         \(todoList)
 
         Which task number (1–\(todos.count)) best matches what they are doing right now?
+        Use semantic meaning, not just exact keyword overlap.
+        Prefer task title first, then keywords, then notes.
         Reply with ONLY the task number. If nothing clearly matches, reply 0.
         """
 
@@ -377,5 +401,9 @@ final class StudyTrackerEngine {
             studyLog.debug("Study tracker AI match failed: \(error.localizedDescription)")
         }
         return nil
+    }
+
+    private func contextKey(appName: String, windowTitle: String, url: String?) -> String {
+        "\(appName)|\(windowTitle.prefix(80))|\((url ?? "").prefix(120))"
     }
 }
