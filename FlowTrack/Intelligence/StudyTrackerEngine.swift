@@ -101,17 +101,15 @@ final class StudyTrackerEngine {
     func checkActivity(category: Category, appName: String, windowTitle: String, url: String? = nil) {
         guard category != .idle else { return }
 
-        // Distraction sites (Reddit, Instagram, etc.) should never trigger auto-start,
-        // even if they happen to contain a matching keyword in the title.
-        // Educational YouTube already gets category = .work from RuleEngine's ContentMetadata check.
-        guard category != .distraction else {
+        let autoCatchTodos = TodoStore.shared.todos.filter { $0.autoCatch && $0.status != .done }
+        guard !autoCatchTodos.isEmpty else {
             handleUnmatched()
             return
         }
 
-        let autoCatchTodos = TodoStore.shared.todos.filter { $0.autoCatch && $0.status != .done }
-        guard !autoCatchTodos.isEmpty else {
-            // No auto-catch todos → behave as if unmatched
+        // YouTube exception: allow through the distraction gate if keywords match
+        let isYouTube = url?.lowercased().contains("youtube") == true
+        if category == .distraction && !isYouTube {
             handleUnmatched()
             return
         }
