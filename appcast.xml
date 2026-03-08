@@ -6,13 +6,13 @@
     <description>Updates for FlowTrack</description>
     <language>en</language>
     <item>
-      <title>FlowTrack 0.4.794-beta</title>
+      <title>FlowTrack 0.5</title>
       <description><![CDATA[<p>update implementation and auto start session implementation</p>]]></description>
-      <pubDate>Sun, 08 Mar 2026 23:07:52 +0300</pubDate>
-      <sparkle:version>0.4.794-beta</sparkle:version>
-      <sparkle:shortVersionString>0.4.794-beta</sparkle:shortVersionString>
+      <pubDate>Sun, 08 Mar 2026 23:13:14 +0300</pubDate>
+      <sparkle:version>0.5</sparkle:version>
+      <sparkle:shortVersionString>0.5</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/busahinku/flowtrack/releases/download/v0.4.794-beta/FlowTrack-v0.4.794-beta.dmg" type="application/octet-stream" length="7371734" sparkle:edSignature="FmU6iVQOPfVyK6wjx9A1Xw7k83HxFCrdXZj5YDkfXx0lQyp4mTir8/3hQndt9Kl5haoURZpcw1AcX1HamT5WAg==" />
+      <enclosure url="https://github.com/busahinku/flowtrack/releases/download/v0.5/FlowTrack-v0.5.dmg" type="application/octet-stream" length="7371764" sparkle:edSignature="UlOsxJaUQLpUzpCq7cXOKKl7qA6CqbJTyDt8JqyhsVMZVigAuf8kw07gaR7W/m/2QS6Ls1fPUGPpiRoNlEStCA==" />
     </item>
   </channel>
 </rss>
