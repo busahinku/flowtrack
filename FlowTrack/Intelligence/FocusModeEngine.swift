@@ -54,6 +54,7 @@ final class FocusModeEngine {
     private var pendingInterventionTask: Task<Void, Never>? = nil
     private var pendingRedirectTask: Task<Void, Never>? = nil
     private var sessionGeneration: UInt64 = 0
+    private var dashboardPauseCount: Int = 0
 
     // MARK: - Init
 
@@ -94,12 +95,23 @@ final class FocusModeEngine {
         disable()
     }
 
+    /// Cancel all pending interventions while the dashboard is being opened.
+    /// Prevents focus mode from interfering with window activation.
+    func pauseForDashboard() {
+        dashboardPauseCount += 1
+        cancelPendingWork(bumpGeneration: true)
+    }
+
+    func resumeAfterDashboard() {
+        dashboardPauseCount = max(0, dashboardPauseCount - 1)
+    }
+
     // MARK: - Activity Check
 
     /// Called by ActivityTracker after every category resolution.
     /// Fires on every app switch and browser tab change — reacts within seconds.
     func checkActivity(category: Category, appName: String, windowTitle: String = "", url: String? = nil) {
-        guard isActive else { return }
+        guard isActive, dashboardPauseCount == 0 else { return }
         guard !isFlowTrackForegroundApp(appName: appName) else {
             distractionSince = nil
             cancelPendingRedirects()

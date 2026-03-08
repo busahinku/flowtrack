@@ -46,28 +46,13 @@ struct FlowTrackApp: App {
 // MARK: - App Delegate
 @MainActor
 class FlowTrackAppDelegate: NSObject, NSApplicationDelegate {
-    /// Set by the dashboard view on first appear; safe to call even after the window is closed.
     var reopenDashboard: (() -> Void)?
+    private var windowCloseObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Start activity tracking immediately on launch
         TrackingLifecycle.shared.startTracking()
-        // Ensure the dashboard window is visible and focused on every launch
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            // Temporarily show dock icon so macOS creates/activates the window
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate(ignoringOtherApps: true)
-            if let win = NSApp.windows.first(where: { $0.identifier?.rawValue == "dashboard" }) {
-                win.makeKeyAndOrderFront(nil)
-            } else {
-                self.reopenDashboard?()
-            }
-            // Restore user's dock preference after the window is visible
-            if !AppSettings.shared.showDockIcon {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    NSApp.setActivationPolicy(.accessory)
-                }
-            }
+            self.showDashboard()
         }
     }
 
@@ -76,25 +61,48 @@ class FlowTrackAppDelegate: NSObject, NSApplicationDelegate {
         return .terminateNow
     }
 
-    // Dock icon clicked — show existing window or recreate it
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showDashboard()
         return true
     }
 
-    /// Show the dashboard window, temporarily enabling dock icon if needed.
     func showDashboard() {
+        FocusModeEngine.shared.pauseForDashboard()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+
         if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "dashboard" }) {
             window.makeKeyAndOrderFront(nil)
+            observeClose(of: window)
         } else {
             reopenDashboard?()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                if let win = NSApp.windows.first(where: { $0.identifier?.rawValue == "dashboard" }) {
+                    win.makeKeyAndOrderFront(nil)
+                    self?.observeClose(of: win)
+                }
+            }
         }
-        // Restore accessory mode if user disabled dock icon
-        if !AppSettings.shared.showDockIcon {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        FocusModeEngine.shared.resumeAfterDashboard()
+    }
+
+    /// Switch back to .accessory only when the dashboard window actually closes.
+    private func observeClose(of window: NSWindow) {
+        if let existing = windowCloseObserver {
+            NotificationCenter.default.removeObserver(existing)
+        }
+        windowCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            if !AppSettings.shared.showDockIcon {
                 NSApp.setActivationPolicy(.accessory)
+            }
+            if let obs = self.windowCloseObserver {
+                NotificationCenter.default.removeObserver(obs)
+                self.windowCloseObserver = nil
             }
         }
     }

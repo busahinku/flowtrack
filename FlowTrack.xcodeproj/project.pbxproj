@@ -36,9 +36,22 @@
 		7AECA5042F5C738900113DE0 /* FlowTrack.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = FlowTrack.xcodeproj; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		7A0BE5F92F5E030F00B327A3 /* Exceptions for "FlowTrack" folder in "FlowTrack" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 7A918BDD2F59C8A2007FA75D /* FlowTrack */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		7A918BE02F59C8A2007FA75D /* FlowTrack */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				7A0BE5F92F5E030F00B327A3 /* Exceptions for "FlowTrack" folder in "FlowTrack" target */,
+			);
 			path = FlowTrack;
 			sourceTree = "<group>";
 		};
@@ -608,14 +621,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		BB000001BBBB0000BBBBBBBB /* XCRemoteSwiftPackageReference "Sparkle" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/sparkle-project/Sparkle";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.6.0;
-			};
-		};
 		7A918D732F5A12F4007FA75D /* XCRemoteSwiftPackageReference "keychain-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/evgenyneu/keychain-swift";
@@ -632,14 +637,17 @@
 				minimumVersion = 7.0.0;
 			};
 		};
+		BB000001BBBB0000BBBBBBBB /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.6.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		BB000001BBBB0001BBBBBBBB /* Sparkle */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = BB000001BBBB0000BBBBBBBB /* XCRemoteSwiftPackageReference "Sparkle" */;
-			productName = Sparkle;
-		};
 		7A918CF12F5A1400007FA75E /* KeychainSwift */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 7A918D732F5A12F4007FA75D /* XCRemoteSwiftPackageReference "keychain-swift" */;
@@ -649,6 +657,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AA000001AAAA0000AAAAAAAA /* XCRemoteSwiftPackageReference "GRDB.swift" */;
 			productName = GRDB;
+		};
+		BB000001BBBB0001BBBBBBBB /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BB000001BBBB0000BBBBBBBB /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
