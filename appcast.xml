@@ -6,13 +6,13 @@
     <description>Updates for FlowTrack</description>
     <language>en</language>
     <item>
-      <title>FlowTrack 0.4.788-beta</title>
+      <title>FlowTrack 0.4.790-beta</title>
       <description><![CDATA[<p>update implementation, removed quick fallback for flowtrack</p>]]></description>
-      <pubDate>Sun, 08 Mar 2026 22:51:02 +0300</pubDate>
-      <sparkle:version>0.4.788-beta</sparkle:version>
-      <sparkle:shortVersionString>0.4.788-beta</sparkle:shortVersionString>
+      <pubDate>Sun, 08 Mar 2026 22:57:42 +0300</pubDate>
+      <sparkle:version>0.4.790-beta</sparkle:version>
+      <sparkle:shortVersionString>0.4.790-beta</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/busahinku/flowtrack/releases/download/v0.4.788-beta/FlowTrack-v0.4.788-beta.dmg" type="application/octet-stream" length="7370328" sparkle:edSignature="KfejDnvFWrv2A1B+wBcsfx809YF/xDQHDa8f6bpf9oL2JsjJ1ARGSmXhwoJ7jOdpaTKsE0X37liCY87MhzNsCA==" />
+      <enclosure url="https://github.com/busahinku/flowtrack/releases/download/v0.4.790-beta/FlowTrack-v0.4.790-beta.dmg" type="application/octet-stream" length="7370369" sparkle:edSignature="DaCAAlDFcypNQlFaj60Bo+riZ/QpJDfaCNWxObJPobzRF0cP1xOmPer99aGqjduJeUKmMK7e30JIg4HmPw4rAw==" />
     </item>
   </channel>
 </rss>
