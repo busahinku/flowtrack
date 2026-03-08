@@ -31,6 +31,18 @@ if [[ -z "$VERSION" ]]; then
     VERSION=$(grep -m1 "MARKETING_VERSION" "$PROJECT/project.pbxproj" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?')
 fi
 
+# Sparkle expects:
+# - shortVersionString: user-facing dotted version (eg. 0.4.795)
+# - version: monotonically increasing build number (eg. 4795 or 5000)
+# Keep GitHub tags free to include suffixes like "-beta", but strip suffixes from the app version.
+APP_VERSION="${VERSION%%-*}"
+
+IFS='.' read -r VERSION_MAJOR VERSION_MINOR VERSION_PATCH <<< "$APP_VERSION"
+VERSION_MAJOR="${VERSION_MAJOR:-0}"
+VERSION_MINOR="${VERSION_MINOR:-0}"
+VERSION_PATCH="${VERSION_PATCH:-0}"
+BUILD_VERSION=$((10#$VERSION_MAJOR * 1000000 + 10#$VERSION_MINOR * 1000 + 10#$VERSION_PATCH))
+
 if [[ -z "$NOTES" ]]; then
     NOTES="FlowTrack v$VERSION"
 fi
@@ -38,6 +50,8 @@ fi
 TAG="v$VERSION"
 
 echo "▶ Building FlowTrack $TAG for release..."
+echo "   App version: $APP_VERSION"
+echo "   Build version: $BUILD_VERSION"
 
 # ── Prep ─────────────────────────────────────────────────────────────────────
 
@@ -67,6 +81,8 @@ xcodebuild archive \
     -configuration Release \
     -archivePath "$ARCHIVE_PATH" \
     -destination "generic/platform=macOS" \
+    MARKETING_VERSION="$APP_VERSION" \
+    CURRENT_PROJECT_VERSION="$BUILD_VERSION" \
     CODE_SIGN_IDENTITY="-" \
     AD_HOC_CODE_SIGNING_ALLOWED=YES \
     2>&1 | grep -E "error:|warning:|archive|ARCHIVE|BUILD" | grep -v appintents
@@ -206,8 +222,8 @@ cat > "$APPCAST_FILE" << APPCASTEOF
       <title>FlowTrack $VERSION</title>
       <description><![CDATA[<p>$NOTES</p>]]></description>
       <pubDate>$PUB_DATE</pubDate>
-      <sparkle:version>$VERSION</sparkle:version>
-      <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
+      <sparkle:version>$BUILD_VERSION</sparkle:version>
+      <sparkle:shortVersionString>$APP_VERSION</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
       <enclosure $ENCLOSURE_ATTRS />
     </item>
