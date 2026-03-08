@@ -122,6 +122,16 @@ final class StudyTrackerEngine {
             return
         }
 
+        // If an auto-tracked timer is already running, only direct keyword matches may keep
+        // it alive or switch it. AI fallback is allowed to START tracking, but not to keep
+        // or retarget an existing auto-started timer to a guessed todo.
+        if isAutoTracking {
+            aiMatchTask?.cancel()
+            aiMatchTask = nil
+            handleUnmatched()
+            return
+        }
+
         // ── Tier 2: AI match (debounced) ─────────────────────────────
         let contextKey = "\(appName)|\(windowTitle.prefix(80))|\((url ?? "").prefix(120))"
         let cooldownElapsed = lastAIMatchAt.map { Date().timeIntervalSince($0) > aiCooldown } ?? true
@@ -261,7 +271,7 @@ final class StudyTrackerEngine {
 
     private func scheduleAIMatch(appName: String, windowTitle: String, url: String?, todos: [TodoItem]) {
         aiMatchTask?.cancel()
-        lastAIContext = "\(appName)|\(windowTitle.prefix(80))"
+        lastAIContext = "\(appName)|\(windowTitle.prefix(80))|\((url ?? "").prefix(120))"
         lastAIMatchAt = Date()
 
         let capturedApp = appName
@@ -275,10 +285,10 @@ final class StudyTrackerEngine {
             guard !Task.isCancelled, let self else { return }
             self.aiMatchTask = nil
 
+            guard !self.isAutoTracking else { return }
+
             if let todo = matchedTodo {
                 self.handleMatched(todo: todo, grace: self.aiStartGrace, appName: capturedApp, windowTitle: capturedTitle, url: url)
-            } else if self.isAutoTracking {
-                self.handleUnmatched()
             }
         }
     }
