@@ -36,13 +36,13 @@ final class FocusModeEngine {
     // MARK: - Configuration
 
     /// Seconds of continuous distraction before first intervention fires.
-    private let gracePeriod: TimeInterval = 3
+    private let gracePeriod: TimeInterval = 2
     /// Shorter grace for repeat offenses (intervention fired within `repeatWindow`).
-    private let repeatGracePeriod: TimeInterval = 1
+    private let repeatGracePeriod: TimeInterval = 0.5
     /// Window in which a previous intervention counts as "repeat".
-    private let repeatWindow: TimeInterval = 60
+    private let repeatWindow: TimeInterval = 120
     /// Minimum seconds between consecutive interventions.
-    private let cooldown: TimeInterval = 10
+    private let cooldown: TimeInterval = 4
     /// The motivation video — redirected into the current tab (replaces distraction page).
     private let motivationURL = URL(string: "https://www.youtube.com/watch?v=zSkFFW--Ma0")!
 
@@ -92,7 +92,8 @@ final class FocusModeEngine {
 
     // MARK: - Activity Check
 
-    /// Called by ActivityTracker after every category resolution (~every 5 seconds).
+    /// Called by ActivityTracker after every category resolution.
+    /// Fires on every app switch and browser tab change — reacts within seconds.
     func checkActivity(category: Category, appName: String, windowTitle: String = "", url: String? = nil) {
         guard isActive else { return }
 
@@ -103,9 +104,9 @@ final class FocusModeEngine {
                 // Fresh distraction — start tracking
                 distractionSince = Date()
                 schedulePendingIntervention(appName: appName, windowTitle: windowTitle, url: url)
-            } else if pendingInterventionTask == nil {
-                // Still distracted and no pending intervention (previous one completed).
-                // Re-schedule immediately since distractionSince is already set.
+            } else {
+                // Still distracted — always re-schedule so that navigating away from
+                // the motivation video back to distraction triggers immediately.
                 schedulePendingIntervention(appName: appName, windowTitle: windowTitle, url: url)
             }
         } else {
@@ -191,6 +192,7 @@ final class FocusModeEngine {
     private func redirectCurrentBrowserTab(appName: String) {
         let urlStr = motivationURL.absoluteString
         let app = appName.lowercased()
+        let motivURL = motivationURL
 
         let script: String
         if app.contains("safari") {
@@ -225,33 +227,41 @@ final class FocusModeEngine {
             """
         } else {
             // Firefox and others don't support tab URL setting via AppleScript.
-            NSWorkspace.shared.open(motivationURL)
+            NSWorkspace.shared.open(motivURL)
             return
         }
 
-        // Run osascript — retry once on failure, fall back to open URL.
-        if !runAppleScript(script) {
-            focusLog.debug("First redirect attempt failed, retrying…")
-            if !runAppleScript(script) {
-                focusLog.debug("Redirect retry failed — falling back to NSWorkspace.open")
-                NSWorkspace.shared.open(motivationURL)
+        // Run osascript on a background thread to avoid blocking the MainActor.
+        Task.detached(priority: .userInitiated) {
+            let success = await Self.runAppleScript(script)
+            if !success {
+                focusLog.debug("First redirect attempt failed, retrying…")
+                let retrySuccess = await Self.runAppleScript(script)
+                if !retrySuccess {
+                    focusLog.debug("Redirect retry failed — falling back to NSWorkspace.open")
+                    await MainActor.run { NSWorkspace.shared.open(motivURL) }
+                }
             }
         }
     }
 
-    /// Runs an AppleScript string via osascript. Returns true on success.
-    private func runAppleScript(_ script: String) -> Bool {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        proc.arguments = ["-e", script]
-        proc.standardOutput = FileHandle.nullDevice
-        proc.standardError = FileHandle.nullDevice
-        do {
-            try proc.run()
-            proc.waitUntilExit()
-            return proc.terminationStatus == 0
-        } catch {
-            return false
+    /// Runs an AppleScript string via osascript on a background thread. Returns true on success.
+    private nonisolated static func runAppleScript(_ script: String) async -> Bool {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let proc = Process()
+                proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+                proc.arguments = ["-e", script]
+                proc.standardOutput = FileHandle.nullDevice
+                proc.standardError = FileHandle.nullDevice
+                do {
+                    try proc.run()
+                    proc.waitUntilExit()
+                    continuation.resume(returning: proc.terminationStatus == 0)
+                } catch {
+                    continuation.resume(returning: false)
+                }
+            }
         }
     }
 

@@ -20,15 +20,39 @@ struct OnboardingView: View {
     private var theme: AppTheme { AppSettings.shared.appTheme }
     private let totalSteps = 4
 
-    // Gradient colors per step
-    private var gradientColors: [Color] {
-        switch step {
-        case 0: return [Color(red: 0.10, green: 0.08, blue: 0.20), Color(red: 0.18, green: 0.14, blue: 0.40)]
-        case 1: return [Color(red: 0.08, green: 0.16, blue: 0.28), Color(red: 0.12, green: 0.28, blue: 0.42)]
-        case 2: return [Color(red: 0.08, green: 0.20, blue: 0.18), Color(red: 0.12, green: 0.32, blue: 0.26)]
-        default: return [Color(red: 0.12, green: 0.20, blue: 0.14), Color(red: 0.18, green: 0.36, blue: 0.22)]
+    /// Whether the current theme uses a dark background
+    private var isDarkGradient: Bool {
+        switch theme {
+        case .dark, .midnight: return true
+        case .light, .pastel: return false
+        case .system: return NSApp?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         }
     }
+
+    // Theme-aware gradient colors per step
+    private var gradientColors: [Color] {
+        if isDarkGradient {
+            switch step {
+            case 0: return [Color(red: 0.10, green: 0.08, blue: 0.20), Color(red: 0.18, green: 0.14, blue: 0.40)]
+            case 1: return [Color(red: 0.08, green: 0.16, blue: 0.28), Color(red: 0.12, green: 0.28, blue: 0.42)]
+            case 2: return [Color(red: 0.08, green: 0.20, blue: 0.18), Color(red: 0.12, green: 0.32, blue: 0.26)]
+            default: return [Color(red: 0.12, green: 0.20, blue: 0.14), Color(red: 0.18, green: 0.36, blue: 0.22)]
+            }
+        } else {
+            switch step {
+            case 0: return [Color(red: 0.92, green: 0.90, blue: 0.98), Color(red: 0.85, green: 0.82, blue: 0.95)]
+            case 1: return [Color(red: 0.88, green: 0.93, blue: 0.98), Color(red: 0.82, green: 0.90, blue: 0.97)]
+            case 2: return [Color(red: 0.88, green: 0.96, blue: 0.93), Color(red: 0.82, green: 0.94, blue: 0.90)]
+            default: return [Color(red: 0.90, green: 0.96, blue: 0.90), Color(red: 0.84, green: 0.94, blue: 0.86)]
+            }
+        }
+    }
+
+    /// Foreground color that contrasts with the onboarding gradient
+    private var onboardingPrimary: Color { theme.primaryText }
+    private var onboardingSecondary: Color { theme.secondaryText }
+    /// Subtle overlay for cards/chips on the gradient background
+    private var overlayBg: Color { isDarkGradient ? Color.white : Color.black }
 
     var body: some View {
         ZStack {
@@ -38,7 +62,7 @@ struct OnboardingView: View {
                 .ignoresSafeArea()
 
             // Subtle noise texture overlay
-            Color.white.opacity(0.02)
+            overlayBg.opacity(0.02)
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
@@ -80,7 +104,7 @@ struct OnboardingView: View {
         HStack(spacing: 8) {
             ForEach(0..<totalSteps, id: \.self) { i in
                 Capsule()
-                    .fill(i == step ? Color.white : Color.white.opacity(0.25))
+                    .fill(i == step ? onboardingPrimary : onboardingSecondary.opacity(0.4))
                     .frame(width: i == step ? 24 : 8, height: 8)
                     .animation(.spring(response: 0.35), value: step)
             }
@@ -95,10 +119,10 @@ struct OnboardingView: View {
 
             ZStack {
                 Circle()
-                    .fill(Color.white.opacity(0.08))
+                    .fill(overlayBg.opacity(0.08))
                     .frame(width: 120, height: 120)
                 Circle()
-                    .fill(Color.white.opacity(0.05))
+                    .fill(overlayBg.opacity(0.05))
                     .frame(width: 96, height: 96)
                 ThemeAwareMenuIcon(size: 56)
             }
@@ -106,12 +130,12 @@ struct OnboardingView: View {
             VStack(spacing: 10) {
                 Text("Welcome to FlowTrack")
                     .font(.system(size: 30, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(onboardingPrimary)
 
                 Text("Your intelligent Mac productivity tracker.\nUnderstands how you work and helps you do more of what matters.")
                     .font(.callout)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(Color.white.opacity(0.70))
+                    .foregroundStyle(onboardingSecondary)
                     .lineSpacing(4)
             }
 
@@ -137,9 +161,9 @@ struct OnboardingView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(Color.white.opacity(0.10))
+        .background(overlayBg.opacity(0.10))
         .clipShape(Capsule())
-        .foregroundStyle(Color.white.opacity(0.85))
+        .foregroundStyle(onboardingPrimary.opacity(0.85))
     }
 
     // MARK: - Step 1: Permissions
@@ -150,22 +174,22 @@ struct OnboardingView: View {
 
             ZStack {
                 Circle()
-                    .fill(Color.blue.opacity(0.15))
+                    .fill(theme.infoColor.opacity(0.15))
                     .frame(width: 110, height: 110)
                 Image(systemName: accessibilityGranted ? "lock.open.fill" : "lock.shield.fill")
                     .font(.system(size: 50))
-                    .foregroundStyle(accessibilityGranted ? Color.green : Color.white)
+                    .foregroundStyle(accessibilityGranted ? theme.successColor : onboardingPrimary)
                     .animation(.spring(response: 0.4), value: accessibilityGranted)
             }
 
             VStack(spacing: 10) {
                 Text("Allow Accessibility Access")
                     .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(onboardingPrimary)
                 Text("FlowTrack reads app names and window titles to understand your work. This data never leaves your Mac.")
                     .font(.callout)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(Color.white.opacity(0.70))
+                    .foregroundStyle(onboardingSecondary)
                     .lineSpacing(4)
             }
 
@@ -174,10 +198,10 @@ struct OnboardingView: View {
             if accessibilityGranted {
                 Label("Accessibility access granted!", systemImage: "checkmark.circle.fill")
                     .font(.callout.bold())
-                    .foregroundStyle(.green)
+                    .foregroundStyle(theme.successColor)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
-                    .background(Color.green.opacity(0.12))
+                    .background(theme.successColor.opacity(0.12))
                     .clipShape(Capsule())
                     .transition(.scale.combined(with: .opacity))
             } else {
@@ -191,19 +215,19 @@ struct OnboardingView: View {
                             .padding(.vertical, 12)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.white.opacity(0.20))
-                    .foregroundStyle(.white)
+                    .tint(theme.accentColor)
+                    .foregroundStyle(theme.selectedForeground)
 
-                    Button("Open Accessibility Settings →") {
+                    Button("Open Accessibility Settings \u{2192}") {
                         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
                     }
                     .font(.callout)
-                    .foregroundStyle(Color.white.opacity(0.60))
+                    .foregroundStyle(onboardingSecondary)
                     .buttonStyle(.plain)
 
-                    Text("Waiting for permission… (the app will detect it automatically)")
+                    Text("Waiting for permission\u{2026} (the app will detect it automatically)")
                         .font(.caption)
-                        .foregroundStyle(Color.white.opacity(0.40))
+                        .foregroundStyle(onboardingSecondary.opacity(0.7))
                 }
             }
 
@@ -231,11 +255,11 @@ struct OnboardingView: View {
                 VStack(spacing: 8) {
                     Text("Set Up AI")
                         .font(.system(size: 26, weight: .bold))
-                        .foregroundStyle(.white)
-                    Text("AI categorizes your sessions and writes smart summaries. Choose your provider below — or skip and set it up in Settings later.")
+                        .foregroundStyle(onboardingPrimary)
+                    Text("AI categorizes your sessions and writes smart summaries. Choose your provider below \u{2014} or skip and set it up in Settings later.")
                         .font(.callout)
                         .multilineTextAlignment(.center)
-                        .foregroundStyle(Color.white.opacity(0.65))
+                        .foregroundStyle(onboardingSecondary)
                         .lineSpacing(3)
                 }
 
@@ -253,28 +277,28 @@ struct OnboardingView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Ollama model (must be installed locally)")
                                 .font(.caption)
-                                .foregroundStyle(Color.white.opacity(0.55))
+                                .foregroundStyle(onboardingSecondary)
                             TextField("e.g. mistral, llama3.2", text: $ollamaModel)
                                 .textFieldStyle(.plain)
                                 .padding(10)
-                                .background(Color.white.opacity(0.08))
+                                .background(overlayBg.opacity(0.08))
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(onboardingPrimary)
                             Text("Free & private. Install at ollama.ai, then run: ollama pull mistral")
                                 .font(.caption2)
-                                .foregroundStyle(Color.white.opacity(0.40))
+                                .foregroundStyle(onboardingSecondary.opacity(0.7))
                         }
                     case .claude, .openai, .gemini:
                         VStack(alignment: .leading, spacing: 6) {
                             Text("API Key")
                                 .font(.caption)
-                                .foregroundStyle(Color.white.opacity(0.55))
+                                .foregroundStyle(onboardingSecondary)
                             SecureField("Paste your \(selectedProvider.rawValue) API key", text: $apiKey)
                                 .textFieldStyle(.plain)
                                 .padding(10)
-                                .background(Color.white.opacity(0.08))
+                                .background(overlayBg.opacity(0.08))
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(onboardingPrimary)
                         }
                     default:
                         EmptyView()
@@ -287,20 +311,20 @@ struct OnboardingView: View {
                         Task { await testConnection() }
                     } label: {
                         if isTesting {
-                            HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Testing…") }
+                            HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Testing\u{2026}") }
                         } else {
                             Label("Test Connection", systemImage: "bolt.fill")
                         }
                     }
                     .buttonStyle(.bordered)
-                    .tint(Color.white.opacity(0.25))
-                    .foregroundStyle(.white)
+                    .tint(theme.accentColor.opacity(0.5))
+                    .foregroundStyle(onboardingPrimary)
                     .disabled(isTesting)
 
                     if let result = testResult {
                         Label(result, systemImage: testIsSuccess ? "checkmark.circle.fill" : "xmark.circle.fill")
                             .font(.caption)
-                            .foregroundStyle(testIsSuccess ? Color.green : Color.red)
+                            .foregroundStyle(testIsSuccess ? theme.successColor : theme.errorColor)
                     }
                 }
 
@@ -325,13 +349,13 @@ struct OnboardingView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
-            .background(selected ? Color.white.opacity(0.18) : Color.white.opacity(0.06))
+            .background(selected ? theme.accentColor.opacity(0.18) : overlayBg.opacity(0.06))
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .stroke(selected ? Color.white.opacity(0.50) : Color.clear, lineWidth: 1.5)
+                    .stroke(selected ? theme.accentColor.opacity(0.50) : Color.clear, lineWidth: 1.5)
             )
             .clipShape(RoundedRectangle(cornerRadius: 10))
-            .foregroundStyle(selected ? .white : Color.white.opacity(0.55))
+            .foregroundStyle(selected ? onboardingPrimary : onboardingSecondary)
         }
         .buttonStyle(.plain)
     }
@@ -365,22 +389,22 @@ struct OnboardingView: View {
             ZStack {
                 ForEach(0..<3, id: \.self) { i in
                     Circle()
-                        .fill(Color.green.opacity(0.06 + Double(i) * 0.04))
+                        .fill(theme.successColor.opacity(0.06 + Double(i) * 0.04))
                         .frame(width: CGFloat(140 - i * 28), height: CGFloat(140 - i * 28))
                 }
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 64))
-                    .foregroundStyle(Color.green)
+                    .foregroundStyle(theme.successColor)
             }
 
             VStack(spacing: 10) {
                 Text("You're all set!")
                     .font(.system(size: 30, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(onboardingPrimary)
                 Text("FlowTrack is now tracking your activity in the background. Check the menu bar icon anytime to see what you're working on.")
                     .font(.callout)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(Color.white.opacity(0.70))
+                    .foregroundStyle(onboardingSecondary)
                     .lineSpacing(4)
             }
 
@@ -401,11 +425,11 @@ struct OnboardingView: View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .font(.body)
-                .foregroundStyle(Color.green.opacity(0.80))
+                .foregroundStyle(theme.successColor.opacity(0.80))
                 .frame(width: 22)
             Text(text)
                 .font(.callout)
-                .foregroundStyle(Color.white.opacity(0.70))
+                .foregroundStyle(onboardingSecondary)
             Spacer()
         }
     }
@@ -422,7 +446,7 @@ struct OnboardingView: View {
                         Image(systemName: "chevron.left")
                         Text("Back")
                     }
-                    .foregroundStyle(Color.white.opacity(0.55))
+                    .foregroundStyle(onboardingSecondary)
                 }
                 .buttonStyle(.plain)
             }
@@ -433,7 +457,7 @@ struct OnboardingView: View {
                 Button("Skip") {
                     withAnimation { step += 1 }
                 }
-                .foregroundStyle(Color.white.opacity(0.40))
+                .foregroundStyle(onboardingSecondary.opacity(0.7))
                 .buttonStyle(.plain)
                 .padding(.trailing, 12)
             }
@@ -451,9 +475,9 @@ struct OnboardingView: View {
                     .font(.callout.bold())
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
-                    .background(canProgress ? Color.white.opacity(0.18) : Color.white.opacity(0.06))
+                    .background(canProgress ? theme.accentColor.opacity(0.22) : overlayBg.opacity(0.06))
                     .clipShape(Capsule())
-                    .foregroundStyle(canProgress ? .white : Color.white.opacity(0.30))
+                    .foregroundStyle(canProgress ? onboardingPrimary : onboardingSecondary.opacity(0.5))
                 }
                 .buttonStyle(.plain)
                 .disabled(!canProgress)
@@ -466,9 +490,9 @@ struct OnboardingView: View {
                         .font(.callout.bold())
                         .padding(.horizontal, 24)
                         .padding(.vertical, 10)
-                        .background(Color.green.opacity(0.75))
+                        .background(theme.successColor.opacity(0.75))
                         .clipShape(Capsule())
-                        .foregroundStyle(.white)
+                        .foregroundStyle(theme.selectedForeground)
                 }
                 .buttonStyle(.plain)
             }

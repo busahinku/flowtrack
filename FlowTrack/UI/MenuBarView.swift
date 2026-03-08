@@ -532,9 +532,16 @@ struct MenuBarView: View {
     private func openDashboard() {
         dismiss()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            // Temporarily show dock icon so macOS can activate the window
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
             openWindow(id: "dashboard")
+            // Restore accessory mode if user disabled dock icon
+            if !AppSettings.shared.showDockIcon {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    NSApp.setActivationPolicy(.accessory)
+                }
+            }
         }
     }
 

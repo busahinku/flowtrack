@@ -93,6 +93,46 @@ private enum CalendarLayoutEngine {
     }
 }
 
+// MARK: - Idle Gap Model
+private struct IdleGap: Identifiable {
+    let start: Date
+    let end: Date
+    var id: String { "\(Int(start.timeIntervalSince1970))-\(Int(end.timeIntervalSince1970))" }
+    var minutes: Int { max(1, Int(end.timeIntervalSince(start) / 60)) }
+}
+
+// MARK: - Idle Gap Indicator
+private struct IdleGapIndicator: View {
+    let minutes: Int
+    private var theme: AppTheme { AppSettings.shared.appTheme }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            dashedLine
+            label
+            dashedLine
+        }
+        .padding(.horizontal, 8)
+    }
+
+    private var dashedLine: some View {
+        Rectangle()
+            .fill(theme.secondaryText.opacity(0.2))
+            .frame(height: 1)
+    }
+
+    private var label: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "moon.zzz")
+                .font(.system(size: 8))
+            Text(minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m idle" : "\(minutes)m idle")
+                .font(.system(size: 9, weight: .medium))
+        }
+        .foregroundStyle(theme.secondaryText.opacity(0.5))
+        .fixedSize()
+    }
+}
+
 // MARK: - Timeline View
 struct TimelineView: View {
     @Bindable var appState = AppState.shared
@@ -190,6 +230,17 @@ struct TimelineView: View {
         return ZStack(alignment: .topLeading) {
             hourGrid(width: width, totalH: totalH)
 
+            // Idle gap indicators — show subtle markers between sessions
+            ForEach(idleGaps(from: appState.timeSlots), id: \.id) { gap in
+                let xOff = TL.labelWidth + TL.cardLeading
+                let yOff = timeY(gap.start)
+                let gapH = max(timeY(gap.end) - timeY(gap.start), 12)
+
+                IdleGapIndicator(minutes: Int(gap.end.timeIntervalSince(gap.start) / 60))
+                    .frame(width: usable, height: gapH)
+                    .offset(x: xOff, y: yOff)
+            }
+
             ForEach(layouts) { item in
                 let colW = max(1, (usable - CGFloat(item.totalCols - 1) * TL.colGap) / CGFloat(item.totalCols))
                 let xOff = TL.labelWidth + TL.cardLeading + CGFloat(item.col) * (colW + TL.colGap)
@@ -214,6 +265,22 @@ struct TimelineView: View {
                 .offset(y: timeY(Date()))
         }
         .frame(width: width, height: totalH)
+    }
+
+    /// Compute idle gaps (>2 min) between consecutive non-idle slots.
+    private func idleGaps(from slots: [TimeSlot]) -> [IdleGap] {
+        let sorted = slots.filter { !$0.isIdle }.sorted { $0.startTime < $1.startTime }
+        guard sorted.count >= 2 else { return [] }
+        var gaps: [IdleGap] = []
+        for i in 0..<(sorted.count - 1) {
+            let gapStart = sorted[i].endTime
+            let gapEnd = sorted[i + 1].startTime
+            let duration = gapEnd.timeIntervalSince(gapStart)
+            if duration > 120 { // only show gaps > 2 min
+                gaps.append(IdleGap(start: gapStart, end: gapEnd))
+            }
+        }
+        return gaps
     }
 
     // MARK: - Hour grid (Canvas for efficiency + SwiftUI labels for crisp text)

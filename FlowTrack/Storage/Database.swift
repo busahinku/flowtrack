@@ -109,6 +109,12 @@ final class Database: Sendable {
             dbLogger.info("v8 dedup migration: \(countBefore) → \(countAfter) records (\(countBefore - countAfter) duplicates removed)")
         }
 
+        migrator.registerMigration("v9_document_path") { db in
+            try db.alter(table: "activities") { t in
+                t.add(column: "documentPath", .text)
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 

@@ -1001,7 +1001,7 @@ struct AppearanceTab: View {
                     themePreviewBox("Card", color: settings.appTheme.cardBg)
                     themePreviewBox("BG", color: settings.appTheme.timelineBg)
                     themePreviewBox("Sidebar", color: settings.appTheme.sidebarBg)
-                    themePreviewBox("Accent", color: settings.appTheme.accentColor, textColor: .white)
+                    themePreviewBox("Accent", color: settings.appTheme.accentColor, textColor: settings.appTheme.selectedForeground)
                 }
             }
         }

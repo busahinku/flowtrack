@@ -54,11 +54,12 @@ struct ActivityRecord: Codable, FetchableRecord, PersistableRecord, Sendable {
     let isIdle: Bool
     let duration: TimeInterval
     let contentMetadata: String?
+    let documentPath: String?
 
     static let databaseTableName = "activities"
 
     enum Columns: String, ColumnExpression {
-        case id, timestamp, appName, bundleID, windowTitle, url, category, isIdle, duration, contentMetadata
+        case id, timestamp, appName, bundleID, windowTitle, url, category, isIdle, duration, contentMetadata, documentPath
     }
 }
 
@@ -227,6 +228,21 @@ struct Rule: Codable, Identifiable, Hashable, Sendable {
 
     enum MatchType: String, Codable, Sendable {
         case appName, bundleID, domain, titleContains
+
+        init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            switch raw {
+            case "windowTitle": self = .titleContains
+            default:
+                guard let value = MatchType(rawValue: raw) else {
+                    throw DecodingError.dataCorrupted(.init(
+                        codingPath: decoder.codingPath,
+                        debugDescription: "Unknown MatchType: \(raw)"
+                    ))
+                }
+                self = value
+            }
+        }
     }
 
     init(matchType: MatchType, pattern: String, category: String) {

@@ -56,7 +56,7 @@ struct AppBlockerView: View {
                     .shadow(color: Color.purple.opacity(0.4), radius: 10, y: 4)
                 Image(systemName: "shield.fill")
                     .font(.system(size: 26))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.selectedForeground)
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text("Focus Shield")
@@ -405,7 +405,7 @@ struct BlockCardSheet: View {
                                     .fill(col)
                                     .frame(width: 22, height: 22)
                                     .overlay(
-                                        Circle().stroke(Color.white.opacity(0.9), lineWidth: colorName == c ? 2 : 0)
+                                        Circle().stroke(theme.primaryText.opacity(0.9), lineWidth: colorName == c ? 2 : 0)
                                             .padding(2)
                                     )
                                     .overlay(

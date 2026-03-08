@@ -147,13 +147,19 @@ struct AIPromptBuilder {
     }
 
     static func batchCategorizationPrompt(items: [BatchCategorizeItem]) -> String {
+        let categories = CategoryManager.shared.allCategories
+        let categoryLines = categories.map { cat -> String in
+            if !cat.aiPrompt.isEmpty { return "- \(cat.name): \(cat.aiPrompt)" }
+            if cat.isSystem { return "- \(cat.name)" }
+            return "- \(cat.name): \(cat.isProductive ? "productive" : "non-productive") activity"
+        }.joined(separator: "\n")
+        let categoryNames = categories.map(\.name).joined(separator: ", ")
+
         var prompt = """
         You are a productivity tracker AI. Categorize each computer activity into EXACTLY one category.
 
         Categories:
-        - Work: coding, professional tools, project management, business communication, cloud/deployment, design tools, creative work, learning/tutorials
-        - Distraction: social media, news sites, forums, streaming video, gaming, music streaming, shopping, personal apps, system utilities
-        - Uncategorized: cannot determine
+        \(categoryLines)
 
         Activities to categorize:
         """
@@ -162,7 +168,7 @@ struct AIPromptBuilder {
             if let url = item.url { line += " | Domain:\(domainOnly(from: url))" }
             prompt += line
         }
-        prompt += "\n\nRespond with ONLY numbered categories, one per line: \"1. CategoryName\""
+        prompt += "\n\nRespond with ONLY numbered categories, one per line: \"1. CategoryName\" (\(categoryNames))"
         return prompt
     }
 

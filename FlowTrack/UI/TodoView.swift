@@ -332,7 +332,7 @@ struct TodoView: View {
 
                             if !collapsedSections.contains(group.id) {
                                 ForEach(group.tasks) { todo in
-                                    todoRowItem(todo, trackedTime: store.trackedTime(for: todo.id))
+                                    todoRowItem(todo, trackedTime: store.trackedTimeIncludingSubtasks(for: todo.id))
                                 }
                             }
                         }

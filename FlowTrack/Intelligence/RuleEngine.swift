@@ -416,10 +416,11 @@ final class RuleEngine: @unchecked Sendable {
                 let pattern = rule.pattern.lowercased()
                 matched = bid == pattern || bid.hasPrefix(pattern + ".")
             case .domain:
-                if let url = url?.lowercased() {
+                if let url = url {
+                    let extracted = RuleEngine.extractDomain(from: url).lowercased()
                     let pattern = rule.pattern.lowercased()
-                    // Match domain anywhere in URL (handles https://, subdomains, paths)
-                    matched = url.contains(pattern)
+                    // Match: exact domain, or subdomain suffix (e.g. "github.com" matches "api.github.com")
+                    matched = extracted == pattern || extracted.hasSuffix("." + pattern)
                 } else {
                     matched = false
                 }
@@ -502,7 +503,12 @@ final class RuleEngine: @unchecked Sendable {
 
     func addRule(_ rule: Rule) {
         lock.lock()
-        customRules.append(rule)
+        // Replace existing rule with same matchType:pattern, or append new
+        if let idx = customRules.firstIndex(where: { $0.id == rule.id }) {
+            customRules[idx] = rule
+        } else {
+            customRules.append(rule)
+        }
         lock.unlock()
         saveCustomRules()
     }

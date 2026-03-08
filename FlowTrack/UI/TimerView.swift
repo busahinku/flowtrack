@@ -188,16 +188,55 @@ struct TimerView: View {
             Divider()
             let active = todos.todos.filter { $0.status != .done }
             ForEach(active) { todo in
-                Button {
-                    timer.setTodo(todo.id)
-                } label: {
-                    HStack {
-                        Circle()
-                            .fill(todo.priority.color)
-                            .frame(width: 6, height: 6)
-                        Text(todo.title)
-                        if timer.selectedTodoId == todo.id {
-                            Image(systemName: "checkmark")
+                if todo.subtasks.isEmpty {
+                    Button {
+                        timer.setTodo(todo.id)
+                    } label: {
+                        HStack {
+                            Circle()
+                                .fill(todo.priority.color)
+                                .frame(width: 6, height: 6)
+                            Text(todo.title)
+                            if timer.selectedTodoId == todo.id {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                } else {
+                    // Parent task with subtasks — show as submenu
+                    Menu {
+                        Button {
+                            timer.setTodo(todo.id)
+                        } label: {
+                            HStack {
+                                Text(todo.title)
+                                if timer.selectedTodoId == todo.id {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                        Divider()
+                        ForEach(todo.subtasks.filter { $0.status != .done }) { sub in
+                            Button {
+                                timer.setTodo(sub.id)
+                            } label: {
+                                HStack {
+                                    Text(sub.title)
+                                    if timer.selectedTodoId == sub.id {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack {
+                            Circle()
+                                .fill(todo.priority.color)
+                                .frame(width: 6, height: 6)
+                            Text(todo.title)
+                            if timer.selectedTodoId == todo.id || todo.subtasks.contains(where: { $0.id == timer.selectedTodoId }) {
+                                Image(systemName: "checkmark")
+                            }
                         }
                     }
                 }
@@ -217,13 +256,13 @@ struct TimerView: View {
                 }
 
                 if let todoId = timer.selectedTodoId,
-                   let todo = todos.todos.first(where: { $0.id == todoId }) {
+                   let resolved = resolvedTodo(for: todoId) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(todo.title)
+                        Text(resolved.title)
                             .font(.subheadline.weight(.medium))
                             .lineLimit(1)
                             .foregroundStyle(theme.primaryText)
-                        Text("Linked task")
+                        Text(resolved.isSubtask ? "Subtask" : "Linked task")
                             .font(.caption2)
                             .foregroundStyle(theme.secondaryText)
                     }
@@ -382,6 +421,18 @@ struct TimerView: View {
 
     // MARK: - Helpers
 
+    private func resolvedTodo(for id: String) -> (title: String, isSubtask: Bool)? {
+        if let todo = todos.todos.first(where: { $0.id == id }) {
+            return (todo.title, false)
+        }
+        for parent in todos.todos {
+            if let sub = parent.subtasks.first(where: { $0.id == id }) {
+                return (sub.title, true)
+            }
+        }
+        return nil
+    }
+
     private func skipPhase() {
         timer.skipPhase()
     }
@@ -487,6 +538,7 @@ struct TimerConfigSheet: View {
 
 struct TimerHistorySheet: View {
     @Environment(\.dismiss) private var dismiss
+    @State private var showClearConfirm = false
     private var store: TodoStore { TodoStore.shared }
     private var theme: AppTheme { AppSettings.shared.appTheme }
 
@@ -509,6 +561,10 @@ struct TimerHistorySheet: View {
         }
     }
 
+    private var totalDuration: TimeInterval {
+        store.timerSessions.reduce(0) { $0 + $1.duration }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -518,6 +574,23 @@ struct TimerHistorySheet: View {
                 Text("Timer History")
                     .font(.title2.bold())
                 Spacer()
+                if !sortedSessions.isEmpty {
+                    Button(role: .destructive) {
+                        showClearConfirm = true
+                    } label: {
+                        Label("Clear All", systemImage: "trash")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(theme.errorColor)
+                    .confirmationDialog("Clear all timer sessions?", isPresented: $showClearConfirm) {
+                        Button("Clear All Sessions", role: .destructive) {
+                            store.clearTimerSessions()
+                        }
+                    } message: {
+                        Text("This will permanently delete all \(store.timerSessions.count) session(s).")
+                    }
+                }
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.defaultAction)
             }
@@ -541,11 +614,26 @@ struct TimerHistorySheet: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
+                // Summary bar
+                HStack(spacing: 16) {
+                    summaryPill(icon: "number", label: "\(store.timerSessions.count) sessions")
+                    summaryPill(icon: "clock.fill", label: "Total: \(durationString(totalDuration))")
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+
                 List {
                     ForEach(groupedSessions, id: \.0) { (dateLabel, items) in
                         Section(dateLabel) {
                             ForEach(items) { session in
                                 sessionRow(session)
+                                    .swipeActions(edge: .trailing) {
+                                        Button(role: .destructive) {
+                                            store.deleteTimerSession(session.id)
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
+                                        }
+                                    }
                             }
                         }
                     }
@@ -555,6 +643,20 @@ struct TimerHistorySheet: View {
             }
         }
         .frame(width: 440, height: 520)
+    }
+
+    private func summaryPill(icon: String, label: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 9))
+                .foregroundStyle(theme.accentColor)
+            Text(label)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(theme.secondaryText)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(theme.cardBg, in: Capsule())
     }
 
     private func sessionRow(_ session: TimerSession) -> some View {
@@ -595,9 +697,17 @@ struct TimerHistorySheet: View {
     }
 
     private func sessionTitle(_ session: TimerSession) -> String {
-        if let todoId = session.todoId,
-           let todo = store.todos.first(where: { $0.id == todoId }) {
-            return todo.title
+        if let todoId = session.todoId {
+            // Check top-level todos
+            if let todo = store.todos.first(where: { $0.id == todoId }) {
+                return todo.title
+            }
+            // Check subtasks
+            for parent in store.todos {
+                if let sub = parent.subtasks.first(where: { $0.id == todoId }) {
+                    return sub.title
+                }
+            }
         }
         return session.mode.rawValue
     }

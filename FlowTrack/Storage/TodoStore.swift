@@ -100,6 +100,17 @@ final class TodoStore {
         timerSessions.filter { $0.todoId == todoId }.reduce(0) { $0 + $1.duration }
     }
 
+    /// Total tracked time for a todo including all its subtask sessions.
+    func trackedTimeIncludingSubtasks(for todoId: String) -> TimeInterval {
+        var total = trackedTime(for: todoId)
+        if let todo = todos.first(where: { $0.id == todoId }) {
+            for sub in todo.subtasks {
+                total += trackedTime(for: sub.id)
+            }
+        }
+        return total
+    }
+
     // MARK: - Subtask CRUD
 
     func addSubtask(_ subtask: TodoItem, to parentId: String) {
@@ -152,6 +163,11 @@ final class TodoStore {
     }
 
 
+
+    func deleteTimerSession(_ sessionId: String) {
+        timerSessions.removeAll { $0.id == sessionId }
+        saveSessions()
+    }
 
     func clearTimerSessions() {
         timerSessions.removeAll()

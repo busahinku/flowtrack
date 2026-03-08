@@ -16,6 +16,9 @@ build/
 *.dSYM.zip
 *.dSYM
 
+# Release builds
+.release_build/
+
 # Swift Package Manager
 .build/
 Packages/

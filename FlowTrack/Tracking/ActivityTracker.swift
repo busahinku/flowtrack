@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import Combine
 import IOKit.ps
+import IOKit.pwr_mgt
 import UserNotifications
 import OSLog
 
@@ -36,6 +37,8 @@ final class ActivityTracker: ObservableObject {
     private var lastSavedIsIdle: Bool = false
     private var lastSavedAppName: String = ""
     private var lastSavedCategory: Category = .uncategorized
+
+    private var lastSavedDocumentPath: String? = nil
 
     // Accurate duration tracking — time of last DB write per bundleID
     private var lastWriteDate: Date = Date()
@@ -193,6 +196,13 @@ final class ActivityTracker: ObservableObject {
         )
         let nowIdle = idleSecs > idleThreshold
 
+        // Smart exception: if an app is preventing display sleep (video call, presentation, media),
+        // don't mark as idle — the user is actively engaged even without keyboard/mouse input.
+        if nowIdle && hasActiveDisplayAssertion() {
+            if !nowIdle { lastActivity = Date() }
+            return  // Skip idle transition
+        }
+
         if nowIdle && !isCurrentlyIdle {
             // Transition: active → idle. End the current active segment.
             isCurrentlyIdle = true
@@ -200,13 +210,37 @@ final class ActivityTracker: ObservableObject {
             trackerLogger.debug("Idle detected after \(Int(idleSecs))s — segment closed")
         } else if !nowIdle && isCurrentlyIdle {
             // Transition: idle → active. Start fresh segment.
+            let idleDuration = Date().timeIntervalSince(currentSegmentStart)
             isCurrentlyIdle = false
             currentSegmentStart = Date()
             lastCheckpointDate = nil
+
+            // If idle > 5 min, prompt user about what they were doing
+            if idleDuration > 300 {
+                let minutes = Int(idleDuration / 60)
+                sendReturnFromIdleNotification(minutes: minutes)
+            }
             trackerLogger.debug("Activity resumed — new segment started")
         }
         // Update lastActivity for distraction alert timing
         if !nowIdle { lastActivity = Date() }
+    }
+
+    /// Check if any process holds a display sleep assertion (video calls, presentations, media).
+    private nonisolated func hasActiveDisplayAssertion() -> Bool {
+        var assertions: Unmanaged<CFDictionary>?
+        guard IOPMCopyAssertionsByProcess(&assertions) == kIOReturnSuccess,
+              let dict = assertions?.takeRetainedValue() as? [String: [[String: Any]]] else { return false }
+        for (_, appAssertions) in dict {
+            for assertion in appAssertions {
+                if let type = assertion[kIOPMAssertionTypeKey] as? String,
+                   type == kIOPMAssertionTypePreventUserIdleDisplaySleep ||
+                   type == kIOPMAssertionTypeNoDisplaySleep {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     // MARK: - Checkpoint Timer (5-min crash recovery writes for long sessions)
@@ -232,7 +266,8 @@ final class ActivityTracker: ObservableObject {
         writeRecord(appName: lastSavedAppName, bundleID: lastSavedBundleID,
                     title: lastSavedTitle, url: lastSavedURL,
                     category: lastSavedCategory, isIdle: false,
-                    duration: elapsed, segmentStart: checkpointBase)
+                    duration: elapsed, segmentStart: checkpointBase,
+                    documentPath: lastSavedDocumentPath)
         // Advance segment start so next checkpoint/endSegment only writes incremental time
         currentSegmentStart = now
         lastCheckpointDate = now
@@ -254,7 +289,8 @@ final class ActivityTracker: ObservableObject {
                     title: lastSavedTitle, url: lastSavedURL,
                     category: forceIdle ? .idle : lastSavedCategory,
                     isIdle: forceIdle || lastSavedIsIdle,
-                    duration: elapsed, segmentStart: currentSegmentStart)
+                    duration: elapsed, segmentStart: currentSegmentStart,
+                    documentPath: lastSavedDocumentPath)
         // Advance start and clear checkpoint so no double-counting if checkpoint fires before caller sets new start
         currentSegmentStart = now
         lastCheckpointDate = nil
@@ -298,7 +334,8 @@ final class ActivityTracker: ObservableObject {
         lastBrowserTitle = ""
         lastWriteDate = now
 
-        let title = AppSettings.shared.captureWindowTitles ? getWindowTitle(for: app) : ""
+        let windowInfo = AppSettings.shared.captureWindowTitles ? getWindowInfo(for: app) : (title: "", documentPath: nil)
+        let title = windowInfo.title
         currentTitle = title
         lastFrontmostPID = app.processIdentifier
         lastTitleFetchDate = now
@@ -309,6 +346,7 @@ final class ActivityTracker: ObservableObject {
         // Update dedup state immediately so checkpoint doesn't double-record
         lastSavedBundleID = bundleID; lastSavedTitle = title
         lastSavedURL = nil; lastSavedIsIdle = false; lastSavedAppName = appName
+        lastSavedDocumentPath = windowInfo.documentPath
 
         let isBrowser = knownBrowsers.contains(where: { appName.contains($0) })
         if isBrowser {
@@ -382,11 +420,13 @@ final class ActivityTracker: ObservableObject {
         guard !AppSettings.shared.excludedBundleIDs.contains(bundleID) else { return }
         guard bundleID != "com.apple.loginwindow" else { return }
         currentApp = appName
-        let title = AppSettings.shared.captureWindowTitles ? getWindowTitle(for: frontApp) : ""
+        let windowInfo = AppSettings.shared.captureWindowTitles ? getWindowInfo(for: frontApp) : (title: "", documentPath: nil)
+        let title = windowInfo.title
         currentTitle = title
         lastSavedBundleID = bundleID
         lastSavedAppName = appName
         lastSavedTitle = title
+        lastSavedDocumentPath = windowInfo.documentPath
         currentSegmentStart = Date()
         lastCheckpointDate = nil
         lastWriteDate = Date()
@@ -438,18 +478,21 @@ final class ActivityTracker: ObservableObject {
 
     /// Called by the AXObserver C callback when window title changes within the same app.
     /// This handles: browser tab switches, file opens in Xcode, document navigation, etc.
-    /// Debounces for 2s to avoid micro-segments from rapid title changes (loading states, autosave, etc.).
+    /// Browsers use a short 0.3s debounce for near-instant tab tracking; other apps use 2s.
     func handleAXTitleChange() {
         guard isTracking, !isScreenAsleep, !isCurrentlyIdle else { return }
         guard let frontApp = NSWorkspace.shared.frontmostApplication else { return }
 
-        let newTitle = AppSettings.shared.captureWindowTitles ? getWindowTitle(for: frontApp) : ""
+        let windowInfo = AppSettings.shared.captureWindowTitles ? getWindowInfo(for: frontApp) : (title: "", documentPath: nil)
+        let newTitle = windowInfo.title
+        lastSavedDocumentPath = windowInfo.documentPath
         guard newTitle != lastSavedTitle && !newTitle.isEmpty else { return }
 
         let appName = frontApp.localizedName ?? "Unknown"
         let bundleID = frontApp.bundleIdentifier ?? ""
         guard !AppSettings.shared.excludedBundleIDs.contains(bundleID) else { return }
 
+        let isBrowser = knownBrowsers.contains(where: { appName.contains($0) })
         trackerLogger.debug("AX title change: \"\(newTitle.prefix(60), privacy: .private)\"")
 
         // If the previous title was empty (page was loading when segment started),
@@ -464,26 +507,56 @@ final class ActivityTracker: ObservableObject {
         // Update UI immediately for responsiveness, but defer the segment split
         currentTitle = newTitle
 
-        // Notify StudyTracker and FocusMode immediately — don't wait for the 2s+1s
-        // segment debounce. The window title is already available for keyword matching;
-        // URL-based matching will follow when updateBrowserInfo completes.
-        let immediateCategory = resolveCategory(appName: appName, bundleID: bundleID, title: newTitle, url: cachedBrowserURL, isIdle: false)
-        StudyTrackerEngine.shared.checkActivity(category: immediateCategory, appName: appName, windowTitle: newTitle, url: cachedBrowserURL)
-        FocusModeEngine.shared.checkActivity(category: immediateCategory, appName: appName, windowTitle: newTitle, url: cachedBrowserURL)
+        // Notify StudyTracker and FocusMode immediately — don't wait for the debounce.
+        // Pass nil for URL because cachedBrowserURL is stale (from the previous tab) when
+        // switching tabs. The full URL-based check follows when updateBrowserInfo completes.
+        let immediateCategory = resolveCategory(appName: appName, bundleID: bundleID, title: newTitle, url: nil, isIdle: false)
+        StudyTrackerEngine.shared.checkActivity(category: immediateCategory, appName: appName, windowTitle: newTitle)
+        FocusModeEngine.shared.checkActivity(category: immediateCategory, appName: appName, windowTitle: newTitle)
 
-        // Debounce: cancel any pending title change, wait 2s before splitting
+        // For browsers: start URL fetch immediately in parallel so it's ready when debounce fires.
+        // This eliminates the sequential 2s+1s delay (now: 0.3s debounce with URL pre-fetched).
+        if isBrowser {
+            browserURLTask?.cancel()
+            browserFetchGeneration &+= 1
+            let fetchGen = browserFetchGeneration
+            isBrowserFetchPending = true
+            browserURLTask = Task {
+                let info = await ActivityTracker.fetchBrowserInfo(appName: appName)
+                guard !Task.isCancelled, self.browserFetchGeneration == fetchGen else { return }
+                self.isBrowserFetchPending = false
+                self.cachedBrowserURL = info.url
+                self.lastSavedURL = info.url
+                let resolvedTitle = info.pageTitle.flatMap { $0.isEmpty ? nil : $0 } ?? newTitle
+                if self.lastSavedTitle == newTitle {
+                    self.currentTitle = resolvedTitle
+                    self.lastSavedTitle = resolvedTitle
+                }
+                let metadata = ContentMetadataExtractor.extract(url: info.url, windowTitle: resolvedTitle, appName: appName)
+                let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: resolvedTitle, url: info.url, isIdle: false, contentMetadata: metadata)
+                self.checkDistractionAlert(category: cat)
+                FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url)
+                StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url)
+                self.lastSavedCategory = cat
+            }
+        }
+
+        // Debounce: browsers get 0.3s (near-instant), other apps get 2s (avoids micro-segments)
+        let debounceDelay: Double = isBrowser ? 0.3 : 2.0
         titleChangeDebounceTask?.cancel()
         titleChangeDebounceTask = Task {
-            try? await Task.sleep(for: .seconds(2.0))
+            try? await Task.sleep(for: .seconds(debounceDelay))
             guard !Task.isCancelled else { return }
 
-            // After debounce: if segment is very short (< 15s), update title in-place
+            // After debounce: if segment is very short (< 15s for non-browser, < 5s for browser),
+            // update title in-place instead of splitting
             let segmentAge = Date().timeIntervalSince(self.currentSegmentStart)
-            if segmentAge < 15 {
+            let minSegmentAge: TimeInterval = isBrowser ? 5 : 15
+            if segmentAge < minSegmentAge {
                 self.lastSavedTitle = newTitle
                 self.lastSavedURL = nil
                 self.cachedBrowserURL = nil
-                self.updateBrowserInfo(appName: appName, bundleID: bundleID, title: newTitle)
+                if !isBrowser { self.updateBrowserInfo(appName: appName, bundleID: bundleID, title: newTitle) }
                 return
             }
 
@@ -495,23 +568,25 @@ final class ActivityTracker: ObservableObject {
             self.lastSavedTitle = newTitle
             self.lastSavedURL = nil
             self.cachedBrowserURL = nil
-            self.updateBrowserInfo(appName: appName, bundleID: bundleID, title: newTitle)
+            if !isBrowser { self.updateBrowserInfo(appName: appName, bundleID: bundleID, title: newTitle) }
         }
     }
 
-    /// Fetch browser URL and update category for a title change. Shared by handleAXTitleChange paths.
+    /// Fetch browser URL and update category for a title change.
+    /// For browsers: used only for initial empty-title fill-in (handleAXTitleChange handles tab switches directly).
+    /// For non-browsers: resolves category and notifies FocusMode/StudyTracker.
     private func updateBrowserInfo(appName: String, bundleID: String, title: String) {
         let isBrowser = knownBrowsers.contains(where: { appName.contains($0) })
         if isBrowser {
             browserURLTask?.cancel()
             let capturedTitle = title
+            browserFetchGeneration &+= 1
+            let fetchGen = browserFetchGeneration
+            isBrowserFetchPending = true
             browserURLTask = Task {
-                // Small debounce to avoid AppleScript on rapid tab switches
-                try? await Task.sleep(for: .seconds(1.0))
-                guard !Task.isCancelled else { return }
                 let info = await ActivityTracker.fetchBrowserInfo(appName: appName)
-                guard !Task.isCancelled else { return }
-                // Use AppleScript page title if AX title was empty or just got replaced
+                guard !Task.isCancelled, self.browserFetchGeneration == fetchGen else { return }
+                self.isBrowserFetchPending = false
                 let resolvedTitle = info.pageTitle.flatMap { $0.isEmpty ? nil : $0 } ?? capturedTitle
                 self.cachedBrowserURL = info.url
                 self.lastSavedURL = info.url
@@ -542,7 +617,7 @@ final class ActivityTracker: ObservableObject {
         return RuleEngine.shared.categorize(appName: appName, bundleID: bundleID, windowTitle: title, url: url, contentMetadata: contentMetadata) ?? .uncategorized
     }
 
-    private func writeRecord(appName: String, bundleID: String, title: String, url: String?, category: Category, isIdle: Bool, duration: TimeInterval, segmentStart: Date? = nil, contentMetadata: ContentMetadata? = nil) {
+    private func writeRecord(appName: String, bundleID: String, title: String, url: String?, category: Category, isIdle: Bool, duration: TimeInterval, segmentStart: Date? = nil, contentMetadata: ContentMetadata? = nil, documentPath: String? = nil) {
         guard duration >= 5 || isIdle else { return }
 
         // Resolve contentMetadata if not provided
@@ -570,7 +645,8 @@ final class ActivityTracker: ObservableObject {
             timestamp: segmentStart ?? Date(),
             appName: appName, bundleID: bundleID,
             windowTitle: title, url: url, category: category,
-            isIdle: isIdle, duration: duration, contentMetadata: metadataJSON
+            isIdle: isIdle, duration: duration, contentMetadata: metadataJSON,
+            documentPath: documentPath
         )
         Task(priority: .utility) {
             let maxRetries = 3
@@ -618,26 +694,44 @@ final class ActivityTracker: ObservableObject {
     }
 
     private func getWindowTitle(for app: NSRunningApplication) -> String {
+        getWindowInfo(for: app).title
+    }
+
+    /// Returns both the window title and the document file path (via kAXDocumentAttribute) for the focused window.
+    private func getWindowInfo(for app: NSRunningApplication) -> (title: String, documentPath: String?) {
         let pid = app.processIdentifier
         let appElement = AXUIElementCreateApplication(pid)
         var value: AnyObject?
         let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &value)
         if result != .success {
-            // .cannotComplete is normal during app transitions — only log other failures
             if result != .cannotComplete {
                 trackerLogger.debug("AX focused window failed for PID \(pid): \(result.rawValue)")
             }
-            return ""
+            return ("", nil)
         }
         guard let rawValue = value,
-              CFGetTypeID(rawValue as CFTypeRef) == AXUIElementGetTypeID() else { return "" }
+              CFGetTypeID(rawValue as CFTypeRef) == AXUIElementGetTypeID() else { return ("", nil) }
         let axElement = rawValue as! AXUIElement
+
+        // Title
         var titleValue: AnyObject?
         let titleResult = AXUIElementCopyAttributeValue(axElement, kAXTitleAttribute as CFString, &titleValue)
         if titleResult != .success && titleResult != .cannotComplete {
             trackerLogger.debug("AX title fetch failed for PID \(pid): \(titleResult.rawValue)")
         }
-        return titleValue as? String ?? ""
+        let title = titleValue as? String ?? ""
+
+        // Document path (kAXDocumentAttribute returns a file:// URL string)
+        var docValue: AnyObject?
+        AXUIElementCopyAttributeValue(axElement, kAXDocumentAttribute as CFString, &docValue)
+        let docPath: String?
+        if let urlStr = docValue as? String, let url = URL(string: urlStr) {
+            docPath = url.path
+        } else {
+            docPath = nil
+        }
+
+        return (title, docPath)
     }
 
     /// Fetches both the URL and page title for the active browser tab.
@@ -812,6 +906,21 @@ final class ActivityTracker: ObservableObject {
             if distractionStartTime != nil && distractionPausedAt == nil {
                 distractionPausedAt = Date()
             }
+        }
+    }
+
+    private func sendReturnFromIdleNotification(minutes: Int) {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = "Welcome Back"
+            content.body = "You were away for \(minutes) min. Open FlowTrack to log what you were doing."
+            content.sound = .default
+            let request = UNNotificationRequest(
+                identifier: "idle-return-\(Int(Date().timeIntervalSince1970))",
+                content: content, trigger: nil
+            )
+            UNUserNotificationCenter.current().add(request)
         }
     }
 

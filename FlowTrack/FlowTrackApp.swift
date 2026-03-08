@@ -48,18 +48,23 @@ class FlowTrackAppDelegate: NSObject, NSApplicationDelegate {
     var reopenDashboard: (() -> Void)?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let showDock = AppSettings.shared.showDockIcon
-        NSApp.setActivationPolicy(showDock ? .regular : .accessory)
         // Start activity tracking immediately on launch
         ActivityTracker.shared.startTracking()
         // Ensure the dashboard window is visible and focused on every launch
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            // Temporarily show dock icon so macOS creates/activates the window
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
             if let win = NSApp.windows.first(where: { $0.identifier?.rawValue == "dashboard" }) {
                 win.makeKeyAndOrderFront(nil)
             } else {
                 self.reopenDashboard?()
+            }
+            // Restore user's dock preference after the window is visible
+            if !AppSettings.shared.showDockIcon {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    NSApp.setActivationPolicy(.accessory)
+                }
             }
         }
     }
@@ -70,14 +75,24 @@ class FlowTrackAppDelegate: NSObject, NSApplicationDelegate {
 
     // Dock icon clicked — show existing window or recreate it
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showDashboard()
+        return true
+    }
+
+    /// Show the dashboard window, temporarily enabling dock icon if needed.
+    func showDashboard() {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "dashboard" }) {
             window.makeKeyAndOrderFront(nil)
         } else {
-            // Window was deallocated — recreate via stored openWindow closure
             reopenDashboard?()
         }
-        return true
+        // Restore accessory mode if user disabled dock icon
+        if !AppSettings.shared.showDockIcon {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                NSApp.setActivationPolicy(.accessory)
+            }
+        }
     }
 }

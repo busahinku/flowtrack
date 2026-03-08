@@ -6,7 +6,7 @@ private nonisolated let studyLog = Logger(subsystem: "com.flowtrack", category: 
 // MARK: - StudyTrackerEngine
 
 /// Auto-starts a stopwatch **only** when the current activity matches an
-/// Auto Catch–enabled todo. Stops within 10 seconds of distraction.
+/// Auto Catch–enabled todo. Stops within 20 seconds of distraction.
 ///
 /// Two-tier matching (runs every ~5 s via ActivityTracker):
 /// 1. **Keyword match (instant):** checks window title, URL, and app name
@@ -33,11 +33,11 @@ final class StudyTrackerEngine {
     /// Seconds of consecutive matched activity before auto-starting (keyword match).
     private let keywordStartGrace: TimeInterval = 3
     /// Seconds of consecutive matched activity before auto-starting (AI match).
-    private let aiStartGrace: TimeInterval = 5
+    private let aiStartGrace: TimeInterval = 8
     /// Seconds of non-matching activity before auto-stopping the stopwatch.
     private let stopGrace: TimeInterval = 10
     /// Minimum seconds between successive AI todo-matching calls.
-    private let aiCooldown: TimeInterval = 10
+    private let aiCooldown: TimeInterval = 20
 
     // MARK: - Internal State
 
@@ -51,6 +51,8 @@ final class StudyTrackerEngine {
     private var lastAIContext: String = ""
     /// The todo ID found by the latest keyword or AI match (before timer starts).
     private var pendingMatchTodoId: String? = nil
+    /// The todo ID from the last auto-tracking session — enables instant restart on return.
+    private var lastTrackedTodoId: String? = nil
 
     private init() {}
 
@@ -59,6 +61,14 @@ final class StudyTrackerEngine {
     /// Called by ActivityTracker after every category resolution (~every 5 seconds).
     func checkActivity(category: Category, appName: String, windowTitle: String, url: String? = nil) {
         guard category != .idle else { return }
+
+        // Distraction sites (Reddit, Instagram, etc.) should never trigger auto-start,
+        // even if they happen to contain a matching keyword in the title.
+        // Educational YouTube already gets category = .work from RuleEngine's ContentMetadata check.
+        guard category != .distraction else {
+            handleUnmatched()
+            return
+        }
 
         let autoCatchTodos = TodoStore.shared.todos.filter { $0.autoCatch && $0.status != .done }
         guard !autoCatchTodos.isEmpty else {
@@ -81,17 +91,10 @@ final class StudyTrackerEngine {
             scheduleAIMatch(appName: appName, windowTitle: windowTitle, url: url, todos: autoCatchTodos)
         }
 
-        // While waiting for AI, if we're currently tracking and the context looks like it might
-        // still be relevant (same app), give it the benefit of the doubt — don't stop yet.
+        // While waiting for AI, if we're currently tracking and keywords didn't match,
+        // schedule a stop. The AI result will cancel the stop if it finds a match.
         if isAutoTracking {
-            // Cancel any pending stop — we're still potentially on-task.
-            // The stop will be scheduled only if AI confirms no match.
-            if aiMatchTask != nil {
-                cancelPendingStop()
-            } else {
-                // AI already finished and didn't match → treat as unmatched
-                handleUnmatched()
-            }
+            handleUnmatched()
         }
     }
 
@@ -107,6 +110,8 @@ final class StudyTrackerEngine {
             let keywords = todo.parsedKeywords
             guard !keywords.isEmpty else { continue }
             for keyword in keywords {
+                // Skip keywords shorter than 3 chars — prevents "go", "ai", "js" matching everything
+                guard keyword.count >= 3 else { continue }
                 if title.contains(keyword) || app.contains(keyword) || urlLower.contains(keyword) {
                     return todo
                 }
@@ -115,7 +120,8 @@ final class StudyTrackerEngine {
             let todoTitleLower = todo.title.lowercased()
             let titleWords = todoTitleLower.split(separator: " ").filter { $0.count > 3 }
             let matchCount = titleWords.filter { title.contains($0) || urlLower.contains($0) }.count
-            if titleWords.count > 0 && matchCount >= max(1, titleWords.count / 2) {
+            // Require at least 2 filterable words and at least 2 matches (or half, whichever is larger)
+            if titleWords.count >= 2 && matchCount >= max(2, (titleWords.count + 1) / 2) {
                 return todo
             }
         }
@@ -139,6 +145,13 @@ final class StudyTrackerEngine {
             return
         }
 
+        // Instant restart: if returning to the same todo that was just stopped,
+        // skip the grace period entirely and resume immediately.
+        if todo.id == lastTrackedTodoId {
+            startAutoTracking(todo: todo, appName: appName, windowTitle: windowTitle)
+            return
+        }
+
         // Not yet tracking — schedule auto-start after grace
         let newMatchId = todo.id
         if pendingMatchTodoId == newMatchId && pendingStartTask != nil {
@@ -156,6 +169,17 @@ final class StudyTrackerEngine {
         pendingStartTask = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(grace)) } catch { return }
             guard let self, self.matchedSince != nil else { return }
+
+            // Re-verify: confirm the current frontmost app/title still matches
+            // the same todo — catches cases where the user navigated away during grace.
+            let currentApp = ActivityTracker.shared.currentApp
+            let currentTitle = ActivityTracker.shared.currentTitle
+            let activeTodos = TodoStore.shared.todos.filter { $0.autoCatch && $0.status != .done }
+            guard self.keywordMatch(appName: currentApp, windowTitle: currentTitle, url: nil, todos: activeTodos)?.id == capturedTodo.id else {
+                self.cancelPendingStart(); self.matchedSince = nil; self.pendingMatchTodoId = nil
+                return
+            }
+
             self.startAutoTracking(todo: capturedTodo, appName: capturedApp, windowTitle: capturedTitle)
         }
     }
@@ -231,6 +255,7 @@ final class StudyTrackerEngine {
 
         isAutoTracking = true
         matchedTodoId = todo.id
+        lastTrackedTodoId = todo.id
         pendingStartTask = nil
         pendingMatchTodoId = nil
         unmatchedSince = nil
