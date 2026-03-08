@@ -464,6 +464,13 @@ final class ActivityTracker: ObservableObject {
         // Update UI immediately for responsiveness, but defer the segment split
         currentTitle = newTitle
 
+        // Notify StudyTracker and FocusMode immediately — don't wait for the 2s+1s
+        // segment debounce. The window title is already available for keyword matching;
+        // URL-based matching will follow when updateBrowserInfo completes.
+        let immediateCategory = resolveCategory(appName: appName, bundleID: bundleID, title: newTitle, url: cachedBrowserURL, isIdle: false)
+        StudyTrackerEngine.shared.checkActivity(category: immediateCategory, appName: appName, windowTitle: newTitle, url: cachedBrowserURL)
+        FocusModeEngine.shared.checkActivity(category: immediateCategory, appName: appName, windowTitle: newTitle, url: cachedBrowserURL)
+
         // Debounce: cancel any pending title change, wait 2s before splitting
         titleChangeDebounceTask?.cancel()
         titleChangeDebounceTask = Task {

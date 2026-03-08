@@ -129,7 +129,7 @@ final class TimerStore {
             let anchor = Date()
             var lastTickCount = 0
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(for: .seconds(1), tolerance: .milliseconds(200))
                 guard !Task.isCancelled else { break }
                 // How many full seconds have elapsed since anchor?
                 let elapsed = Int(Date().timeIntervalSince(anchor))
@@ -278,26 +278,6 @@ final class TimerStore {
         )
         TodoStore.shared.saveTimerSession(session)
         AchievementEngine.shared.checkSessionAchievements(duration: duration, startedAt: startedAt)
-
-        // Save to main activities DB for timeline/stats integration
-        let todoTitle: String
-        if let tid = selectedTodoId, let todo = TodoStore.shared.todos.first(where: { $0.id == tid }) {
-            todoTitle = todo.title
-        } else {
-            todoTitle = mode.rawValue
-        }
-        let record = ActivityRecord(
-            timestamp: session.startedAt,
-            appName: "FlowTrack Timer",
-            bundleID: "com.flowtrack.timer",
-            windowTitle: todoTitle,
-            url: nil,
-            category: Category("Work"),
-            isIdle: false,
-            duration: session.duration,
-            contentMetadata: nil
-        )
-        Task(priority: .utility) { try? Database.shared.saveActivity(record) }
     }
 
     // MARK: - Focus Milestone Notifications

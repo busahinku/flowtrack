@@ -12,7 +12,7 @@ struct MenuBarView: View {
     @State private var quickAddText: String = ""
     @State private var hoveredTodoId: String?
     @Namespace private var modeNS
-    private let sessionTimer = Timer.publish(every: 15, on: .main, in: .common).autoconnect()
+    private let sessionTimer = Timer.publish(every: 60, tolerance: 10, on: .main, in: .common).autoconnect()
     private var theme: AppTheme { AppSettings.shared.appTheme }
 
     private var phaseColor: Color {
