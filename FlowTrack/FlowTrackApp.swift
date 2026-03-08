@@ -96,13 +96,15 @@ class FlowTrackAppDelegate: NSObject, NSApplicationDelegate {
             object: window,
             queue: .main
         ) { [weak self] _ in
-            guard let self else { return }
-            if !AppSettings.shared.showDockIcon {
-                NSApp.setActivationPolicy(.accessory)
-            }
-            if let obs = self.windowCloseObserver {
-                NotificationCenter.default.removeObserver(obs)
-                self.windowCloseObserver = nil
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if !AppSettings.shared.showDockIcon {
+                    NSApp.setActivationPolicy(.accessory)
+                }
+                if let obs = self.windowCloseObserver {
+                    NotificationCenter.default.removeObserver(obs)
+                    self.windowCloseObserver = nil
+                }
             }
         }
     }
