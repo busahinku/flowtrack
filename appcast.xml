@@ -6,13 +6,13 @@
     <description>Updates for FlowTrack</description>
     <language>en</language>
     <item>
-      <title>FlowTrack 0.4.730-beta</title>
+      <title>FlowTrack 0.4.735-beta</title>
       <description><![CDATA[<p>update implementation, removed quick fallback for flowtrack</p>]]></description>
-      <pubDate>Sun, 08 Mar 2026 22:27:25 +0300</pubDate>
-      <sparkle:version>0.4.730-beta</sparkle:version>
-      <sparkle:shortVersionString>0.4.730-beta</sparkle:shortVersionString>
+      <pubDate>Sun, 08 Mar 2026 22:35:56 +0300</pubDate>
+      <sparkle:version>0.4.735-beta</sparkle:version>
+      <sparkle:shortVersionString>0.4.735-beta</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
-      <enclosure url="" type="application/octet-stream" sparkle:edSignature="" length="7371461" length="7371461" />
+      <enclosure url="" type="application/octet-stream" sparkle:edSignature="EThkwNs30vtMZw9i+t3aHtEXPB0i54ihFGN4Ou8vW+GdNuksbAraz5D5XDRnmE5825rhrOHgz8UtA+RoUT4DDw==" length="7370466" length="7370466" />
     </item>
   </channel>
 </rss>
