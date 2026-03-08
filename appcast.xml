@@ -2,17 +2,17 @@
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
   <channel>
     <title>FlowTrack Updates</title>
-    <link>https://raw.githubusercontent.com/busahinku/flowtrack/main/appcast.xml</link>
+    <link>https://raw.githubusercontent.com/busahinku/flowtrack/master/appcast.xml</link>
     <description>Updates for FlowTrack</description>
     <language>en</language>
     <item>
-      <title>FlowTrack 0.4.780-beta</title>
+      <title>FlowTrack 0.4.788-beta</title>
       <description><![CDATA[<p>update implementation, removed quick fallback for flowtrack</p>]]></description>
-      <pubDate>Sun, 08 Mar 2026 22:46:53 +0300</pubDate>
-      <sparkle:version>0.4.780-beta</sparkle:version>
-      <sparkle:shortVersionString>0.4.780-beta</sparkle:shortVersionString>
+      <pubDate>Sun, 08 Mar 2026 22:51:02 +0300</pubDate>
+      <sparkle:version>0.4.788-beta</sparkle:version>
+      <sparkle:shortVersionString>0.4.788-beta</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
-      <enclosure url="" type="application/octet-stream" sparkle:edSignature="oGMa8cESc6gHWbPWNC49LaTUk+ANereBnANlhM0h0+SnhyGqKbM8kEeLhqu+XY/+1NA2y4uXFH/+hYz34DrtAw==" length="7370382" length="7370382" />
+      <enclosure url="" type="application/octet-stream" sparkle:edSignature="KfejDnvFWrv2A1B+wBcsfx809YF/xDQHDa8f6bpf9oL2JsjJ1ARGSmXhwoJ7jOdpaTKsE0X37liCY87MhzNsCA==" length="7370328" length="7370328" />
     </item>
   </channel>
 </rss>
