@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>SUFeedURL</key>
-	<string>https://raw.githubusercontent.com/busahinku/flowtrack/main/appcast.xml</string>
+	<string>https://raw.githubusercontent.com/busahinku/flowtrack/master/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>pMIz7EGdKrOLJNN53Of53XJL1oUhzmZQr31O//Nz+sY=</string>
 </dict>

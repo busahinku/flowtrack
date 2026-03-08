@@ -180,7 +180,7 @@ cat > "$APPCAST_FILE" << APPCASTEOF
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
   <channel>
     <title>FlowTrack Updates</title>
-    <link>https://raw.githubusercontent.com/busahinku/flowtrack/main/appcast.xml</link>
+    <link>https://raw.githubusercontent.com/busahinku/flowtrack/master/appcast.xml</link>
     <description>Updates for FlowTrack</description>
     <language>en</language>
     <item>
@@ -201,7 +201,7 @@ echo "✅ appcast.xml updated"
 # Commit and push appcast.xml so raw.githubusercontent.com serves it
 git add "$APPCAST_FILE"
 git commit -m "Update appcast.xml for $TAG" --allow-empty 2>/dev/null || true
-git push origin main 2>/dev/null || echo "⚠️  Could not push appcast.xml — push manually."
+git push origin master 2>/dev/null || echo "⚠️  Could not push appcast.xml — push manually."
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
