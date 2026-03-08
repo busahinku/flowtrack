@@ -5,5 +5,14 @@
     <link>https://raw.githubusercontent.com/busahinku/flowtrack/main/appcast.xml</link>
     <description>Updates for FlowTrack</description>
     <language>en</language>
+    <item>
+      <title>FlowTrack 0.4.550-beta</title>
+      <description><![CDATA[<p>update implementation, removed quick fallback for flowtrack</p>]]></description>
+      <pubDate>Sun, 08 Mar 2026 22:07:15 +0300</pubDate>
+      <sparkle:version>0.4.550-beta</sparkle:version>
+      <sparkle:shortVersionString>0.4.550-beta</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <enclosure url="" type="application/octet-stream" sparkle:edSignature="" length="7370073" length="7370073" />
+    </item>
   </channel>
 </rss>
