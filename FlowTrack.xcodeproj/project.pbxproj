@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		7A918CE62F5A12B1007FA75D /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = AA000001AAAA0001AAAAAAAA /* GRDB */; };
 		7A918CF02F5A1400007FA75E /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 7A918CF12F5A1400007FA75E /* KeychainSwift */; };
+		BB000001BBBB0002BBBBBBBB /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = BB000001BBBB0001BBBBBBBB /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -60,6 +61,7 @@
 			files = (
 				7A918CE62F5A12B1007FA75D /* GRDB in Frameworks */,
 				7A918CF02F5A1400007FA75E /* KeychainSwift in Frameworks */,
+				BB000001BBBB0002BBBBBBBB /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -127,6 +129,7 @@
 			packageProductDependencies = (
 				AA000001AAAA0001AAAAAAAA /* GRDB */,
 				7A918CF12F5A1400007FA75E /* KeychainSwift */,
+				BB000001BBBB0001BBBBBBBB /* Sparkle */,
 			);
 			productName = FlowTrack;
 			productReference = 7A918BDE2F59C8A2007FA75D /* FlowTrack.app */;
@@ -213,6 +216,7 @@
 			packageReferences = (
 				AA000001AAAA0000AAAAAAAA /* XCRemoteSwiftPackageReference "GRDB.swift" */,
 				7A918D732F5A12F4007FA75D /* XCRemoteSwiftPackageReference "keychain-swift" */,
+				BB000001BBBB0000BBBBBBBB /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 7A918BDF2F59C8A2007FA75D /* Products */;
@@ -425,6 +429,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = FlowTrack/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAccessibilityUsageDescription = "FlowTrack reads window titles to accurately track how you spend your time.";
@@ -461,6 +466,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = FlowTrack/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAccessibilityUsageDescription = "FlowTrack reads window titles to accurately track how you spend your time.";
@@ -602,6 +608,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		BB000001BBBB0000BBBBBBBB /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.6.0;
+			};
+		};
 		7A918D732F5A12F4007FA75D /* XCRemoteSwiftPackageReference "keychain-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/evgenyneu/keychain-swift";
@@ -621,6 +635,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		BB000001BBBB0001BBBBBBBB /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BB000001BBBB0000BBBBBBBB /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
 		7A918CF12F5A1400007FA75E /* KeychainSwift */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 7A918D732F5A12F4007FA75D /* XCRemoteSwiftPackageReference "keychain-swift" */;

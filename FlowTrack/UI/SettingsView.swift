@@ -3,6 +3,7 @@ import ServiceManagement
 import UniformTypeIdentifiers
 import Combine
 import OSLog
+import Sparkle
 
 private let settingsLog = Logger(subsystem: "com.flowtrack", category: "Settings")
 
@@ -36,6 +37,7 @@ struct GeneralTab: View {
     @Bindable var settings = AppSettings.shared
     @State private var hasAccessibility = PermissionChecker.hasAccessibility
     @State private var dbSizeText = "Calculating..."
+    @ObservedObject private var updater = AppUpdater.shared
     private var theme: AppTheme { AppSettings.shared.appTheme }
 
     var body: some View {
@@ -55,6 +57,17 @@ struct GeneralTab: View {
                 Toggle("Show Dock Icon", isOn: $settings.showDockIcon)
                 Toggle("Show App Icons in Timeline", isOn: $settings.showAppIcons)
                 Toggle("24-Hour Clock in Timeline", isOn: $settings.use24HourClock)
+            }
+
+            Section("Updates") {
+                Toggle("Automatically check for updates", isOn: Binding(
+                    get: { updater.updater.automaticallyChecksForUpdates },
+                    set: { updater.updater.automaticallyChecksForUpdates = $0 }
+                ))
+                Button("Check for Updates…") {
+                    updater.checkForUpdates()
+                }
+                .disabled(!updater.canCheckForUpdates)
             }
 
             Section("Permissions") {

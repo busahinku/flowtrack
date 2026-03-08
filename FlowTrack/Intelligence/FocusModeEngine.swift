@@ -21,6 +21,7 @@ private nonisolated let focusLog = Logger(subsystem: "com.flowtrack", category: 
 @MainActor @Observable
 final class FocusModeEngine {
     static let shared = FocusModeEngine()
+    private let flowTrackBundleID = "com.flowtrack.app"
 
     // MARK: - Public State
 
@@ -51,21 +52,20 @@ final class FocusModeEngine {
     private var distractionSince: Date? = nil
     private var lastInterventionAt: Date? = nil
     private var pendingInterventionTask: Task<Void, Never>? = nil
-    /// The most recent distraction app name — used to pick the right AppleScript redirect.
-    private var lastDistractionApp: String = ""
+    private var pendingRedirectTask: Task<Void, Never>? = nil
+    private var sessionGeneration: UInt64 = 0
 
     // MARK: - Init
 
     private init() {
-        isActive = UserDefaults.standard.bool(forKey: "focusModeActive")
+        isActive = false
     }
 
     // MARK: - Toggle
 
     func enable() {
         guard !isActive else { return }
-        pendingInterventionTask?.cancel()
-        pendingInterventionTask = nil
+        cancelPendingWork(bumpGeneration: true)
         isActive = true
         startedAt = Date()
         interventionCount = 0
@@ -76,18 +76,22 @@ final class FocusModeEngine {
     }
 
     func disable() {
-        guard isActive else { return }
+        let wasActive = isActive
         isActive = false
         startedAt = nil
-        pendingInterventionTask?.cancel()
-        pendingInterventionTask = nil
-        distractionSince = nil
+        cancelPendingWork(bumpGeneration: true)
         UserDefaults.standard.set(false, forKey: "focusModeActive")
-        focusLog.info("Focus Mode disabled — \(self.interventionCount) intervention(s) this session")
+        if wasActive {
+            focusLog.info("Focus Mode disabled — \(self.interventionCount) intervention(s) this session")
+        }
     }
 
     func toggle() {
         isActive ? disable() : enable()
+    }
+
+    func handleTrackingStopped() {
+        disable()
     }
 
     // MARK: - Activity Check
@@ -96,10 +100,13 @@ final class FocusModeEngine {
     /// Fires on every app switch and browser tab change — reacts within seconds.
     func checkActivity(category: Category, appName: String, windowTitle: String = "", url: String? = nil) {
         guard isActive else { return }
+        guard !isFlowTrackForegroundApp(appName: appName) else {
+            distractionSince = nil
+            cancelPendingRedirects()
+            return
+        }
 
         if category == .distraction {
-            lastDistractionApp = appName
-
             if distractionSince == nil {
                 // Fresh distraction — start tracking
                 distractionSince = Date()
@@ -111,8 +118,7 @@ final class FocusModeEngine {
             }
         } else {
             distractionSince = nil
-            pendingInterventionTask?.cancel()
-            pendingInterventionTask = nil
+            cancelPendingRedirects()
         }
     }
 
@@ -120,6 +126,7 @@ final class FocusModeEngine {
 
     private func schedulePendingIntervention(appName: String, windowTitle: String, url: String?) {
         pendingInterventionTask?.cancel()
+        let generation = sessionGeneration
 
         // For YouTube: kick off AI classification immediately, in parallel with the grace period.
         let isYouTube = url?.contains("youtube") == true || appName.lowercased().contains("youtube")
@@ -162,19 +169,37 @@ final class FocusModeEngine {
                 return
             }
 
-            intervene(appName: lastDistractionApp)
+            guard self.isActive, self.sessionGeneration == generation else {
+                aiTask?.cancel()
+                self.pendingInterventionTask = nil
+                return
+            }
+
+            let currentFrontmostName = NSWorkspace.shared.frontmostApplication?.localizedName ?? ""
+            guard currentFrontmostName.caseInsensitiveCompare(appName) == .orderedSame ||
+                  currentFrontmostName.localizedCaseInsensitiveContains(appName) ||
+                  appName.localizedCaseInsensitiveContains(currentFrontmostName) else {
+                focusLog.debug("Intervention skipped — frontmost app changed to \(currentFrontmostName, privacy: .public)")
+                self.pendingInterventionTask = nil
+                return
+            }
+
+            intervene(appName: appName, generation: generation)
         }
     }
 
     // MARK: - Intervention
 
-    private func intervene(appName: String) {
+    private func intervene(appName: String, generation: UInt64) {
+        guard isActive, sessionGeneration == generation else { return }
+        guard !isFlowTrackForegroundApp(appName: appName) else { return }
         lastInterventionAt = Date()
         interventionCount += 1
         focusLog.info("Intervention #\(self.interventionCount) — \(appName)")
 
-        // Redirect the CURRENT browser tab to the motivation video.
-        redirectCurrentBrowserTab(appName: appName)
+        // Step 1.0: For browsers, only replace the active distraction tab.
+        // For native apps, quit the distraction app before opening the reset video.
+        interveneAgainstFrontmostDistraction(appName: appName, generation: generation)
 
         sendNotification()
 
@@ -184,68 +209,147 @@ final class FocusModeEngine {
         pendingInterventionTask = nil
     }
 
-    // MARK: - Browser Redirect via AppleScript
+    // MARK: - Intervention Redirect
 
-    /// Replaces the URL of the active browser tab with the motivation video.
-    /// Falls back to opening a new tab for unsupported browsers (e.g. Firefox).
-    /// Retries once on failure and falls back to NSWorkspace.open if both attempts fail.
-    private func redirectCurrentBrowserTab(appName: String) {
-        let urlStr = motivationURL.absoluteString
-        let app = appName.lowercased()
+    private func interveneAgainstFrontmostDistraction(appName: String, generation: UInt64) {
+        pendingRedirectTask?.cancel()
+        let expectedName = appName
         let motivURL = motivationURL
 
-        let script: String
-        if app.contains("safari") {
-            script = """
-            tell application "Safari"
-                if (count windows) > 0 then set URL of current tab of front window to "\(urlStr)"
-            end tell
-            """
-        } else if app.contains("chrome") {
-            script = """
-            tell application "Google Chrome"
-                if (count windows) > 0 then set URL of active tab of front window to "\(urlStr)"
-            end tell
-            """
-        } else if app.contains("brave") {
-            script = """
-            tell application "Brave Browser"
-                if (count windows) > 0 then set URL of active tab of front window to "\(urlStr)"
-            end tell
-            """
-        } else if app.contains("edge") {
-            script = """
-            tell application "Microsoft Edge"
-                if (count windows) > 0 then set URL of active tab of front window to "\(urlStr)"
-            end tell
-            """
-        } else if app.contains("arc") {
-            script = """
-            tell application "Arc"
-                if (count windows) > 0 then set URL of active tab of front window to "\(urlStr)"
-            end tell
-            """
-        } else {
-            // Firefox and others don't support tab URL setting via AppleScript.
-            NSWorkspace.shared.open(motivURL)
-            return
-        }
-
-        // Run osascript on a background thread to avoid blocking the MainActor.
-        Task.detached(priority: .userInitiated) {
-            let success = await Self.runAppleScript(script)
-            if !success {
-                focusLog.debug("First redirect attempt failed, retrying…")
-                let retrySuccess = await Self.runAppleScript(script)
-                if !retrySuccess {
-                    focusLog.debug("Redirect retry failed — falling back to NSWorkspace.open")
-                    await MainActor.run { NSWorkspace.shared.open(motivURL) }
-                }
+        pendingRedirectTask = Task { [weak self] in
+            guard let self else { return }
+            guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
+                  let frontmostName = frontmostApp.localizedName,
+                  frontmostName.caseInsensitiveCompare(expectedName) == .orderedSame ||
+                  frontmostName.localizedCaseInsensitiveContains(expectedName) ||
+                  expectedName.localizedCaseInsensitiveContains(frontmostName) else {
+                self.pendingRedirectTask = nil
+                return
             }
+
+            let bundleID = frontmostApp.bundleIdentifier?.lowercased() ?? ""
+            if self.isSupportedBrowser(bundleID: bundleID, appName: frontmostName) {
+                await self.replaceBrowserDistractionTab(appName: frontmostName, targetURL: motivURL, generation: generation)
+                return
+            }
+
+            guard bundleID != self.flowTrackBundleID else {
+                self.pendingRedirectTask = nil
+                return
+            }
+
+            _ = frontmostApp.terminate()
+            try? await Task.sleep(for: .milliseconds(700))
+
+            guard !Task.isCancelled, self.isActive, self.sessionGeneration == generation else {
+                self.pendingRedirectTask = nil
+                return
+            }
+
+            NSWorkspace.shared.open(motivURL)
+            self.pendingRedirectTask = nil
         }
     }
 
-    /// Runs an AppleScript string via osascript on a background thread. Returns true on success.
+    private func cancelPendingWork(bumpGeneration: Bool) {
+        if bumpGeneration {
+            sessionGeneration &+= 1
+        }
+        cancelPendingRedirects()
+        distractionSince = nil
+    }
+
+    private func cancelPendingRedirects() {
+        pendingInterventionTask?.cancel()
+        pendingInterventionTask = nil
+        pendingRedirectTask?.cancel()
+        pendingRedirectTask = nil
+    }
+
+    private func isFlowTrackForegroundApp(appName: String) -> Bool {
+        if appName.caseInsensitiveCompare("FlowTrack") == .orderedSame {
+            return true
+        }
+        return NSWorkspace.shared.frontmostApplication?.bundleIdentifier?.lowercased() == flowTrackBundleID
+    }
+
+    private func isSupportedBrowser(bundleID: String, appName: String) -> Bool {
+        if ["com.apple.safari", "com.apple.safaritechnologypreview", "com.google.chrome",
+            "com.google.chrome.canary", "com.brave.browser", "com.microsoft.edgemac",
+            "com.opera.opera", "com.vivaldi.vivaldi", "company.thebrowser.browser",
+            "com.chromium.chromium"].contains(bundleID) {
+            return true
+        }
+
+        let name = appName.lowercased()
+        return ["safari", "chrome", "brave", "edge", "opera", "vivaldi", "arc", "chromium"]
+            .contains(where: { name.contains($0) })
+    }
+
+    private func replaceBrowserDistractionTab(appName: String, targetURL: URL, generation: UInt64) async {
+        let urlStr = targetURL.absoluteString.replacingOccurrences(of: "\"", with: "\\\"")
+        guard let script = browserReplaceTabScript(appName: appName, urlString: urlStr) else {
+            guard !Task.isCancelled, isActive, sessionGeneration == generation else {
+                pendingRedirectTask = nil
+                return
+            }
+            NSWorkspace.shared.open(targetURL)
+            pendingRedirectTask = nil
+            return
+        }
+
+        let success = await Self.runAppleScript(script)
+        guard !Task.isCancelled, isActive, sessionGeneration == generation else {
+            pendingRedirectTask = nil
+            return
+        }
+
+        if !success {
+            NSWorkspace.shared.open(targetURL)
+        }
+        pendingRedirectTask = nil
+    }
+
+    private func browserReplaceTabScript(appName: String, urlString: String) -> String? {
+        let lowerName = appName.lowercased()
+        if lowerName.contains("safari") {
+            return """
+            tell application "\(appName)"
+                if (count windows) = 0 then
+                    make new document with properties {URL:"\(urlString)"}
+                else
+                    tell front window
+                        set current tab to (make new tab with properties {URL:"\(urlString)"})
+                        if (count tabs) > 1 then close tab -2
+                    end tell
+                end if
+                activate
+            end tell
+            """
+        }
+
+        if ["chrome", "brave", "edge", "opera", "vivaldi", "arc", "chromium"].contains(where: { lowerName.contains($0) }) {
+            return """
+            tell application "\(appName)"
+                if (count windows) = 0 then
+                    make new window
+                    set URL of active tab of front window to "\(urlString)"
+                else
+                    tell front window
+                        set oldIndex to active tab index
+                        make new tab with properties {URL:"\(urlString)"}
+                        set active tab index to (count tabs)
+                        if (count tabs) > 1 then close tab oldIndex
+                    end tell
+                end if
+                activate
+            end tell
+            """
+        }
+
+        return nil
+    }
+
     private nonisolated static func runAppleScript(_ script: String) async -> Bool {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {

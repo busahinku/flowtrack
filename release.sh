@@ -136,6 +136,65 @@ fi
 
 RELEASE_URL=$(gh release view "$TAG" --json url -q '.url' --repo busahinku/flowtrack)
 
+# ── Appcast (Sparkle auto-update feed) ────────────────────────────────────────
+
+echo "📡 Updating appcast.xml..."
+
+DMG_DOWNLOAD_URL=$(gh release view "$TAG" --json assets --repo busahinku/flowtrack \
+    -q '.assets[] | select(.name | endswith(".dmg")) | .browserDownloadUrl')
+DMG_SIZE=$(stat -f%z "$DMG_PATH" 2>/dev/null || stat --format=%s "$DMG_PATH")
+PUB_DATE=$(date -R 2>/dev/null || date "+%a, %d %b %Y %H:%M:%S %z")
+
+# EdDSA signature (requires Sparkle's sign_update tool)
+SPARKLE_SIGN=""
+SPARKLE_BIN=$(find ~/Library/Developer/Xcode/DerivedData -path "*/Sparkle/bin/sign_update" -type f 2>/dev/null | head -1)
+if [[ -n "$SPARKLE_BIN" && -x "$SPARKLE_BIN" ]]; then
+    SIG=$("$SPARKLE_BIN" "$DMG_PATH" 2>/dev/null || true)
+    if [[ -n "$SIG" ]]; then
+        SPARKLE_SIGN="sparkle:edSignature=\"$(echo "$SIG" | grep -oE 'sparkle:edSignature="[^"]*"' | cut -d'"' -f2)\" length=\"$DMG_SIZE\""
+        echo "✅ EdDSA signature generated"
+    fi
+elif command -v sign_update &>/dev/null; then
+    SIG=$(sign_update "$DMG_PATH" 2>/dev/null || true)
+    if [[ -n "$SIG" ]]; then
+        SPARKLE_SIGN="sparkle:edSignature=\"$(echo "$SIG" | grep -oE 'sparkle:edSignature="[^"]*"' | cut -d'"' -f2)\" length=\"$DMG_SIZE\""
+        echo "✅ EdDSA signature generated"
+    fi
+else
+    echo "⚠️  sign_update not found — appcast will not include EdDSA signature."
+    echo "   Run: ./sparkle-setup.sh to generate signing keys."
+fi
+
+# Build appcast.xml
+APPCAST_FILE="$SCRIPT_DIR/appcast.xml"
+cat > "$APPCAST_FILE" << APPCASTEOF
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>FlowTrack Updates</title>
+    <link>https://raw.githubusercontent.com/busahinku/flowtrack/main/appcast.xml</link>
+    <description>Updates for FlowTrack</description>
+    <language>en</language>
+    <item>
+      <title>FlowTrack $VERSION</title>
+      <description><![CDATA[<p>$NOTES</p>]]></description>
+      <pubDate>$PUB_DATE</pubDate>
+      <sparkle:version>$VERSION</sparkle:version>
+      <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <enclosure url="$DMG_DOWNLOAD_URL" type="application/octet-stream" $SPARKLE_SIGN length="$DMG_SIZE" />
+    </item>
+  </channel>
+</rss>
+APPCASTEOF
+
+echo "✅ appcast.xml updated"
+
+# Commit and push appcast.xml so raw.githubusercontent.com serves it
+git add "$APPCAST_FILE"
+git commit -m "Update appcast.xml for $TAG" --allow-empty 2>/dev/null || true
+git push origin main 2>/dev/null || echo "⚠️  Could not push appcast.xml — push manually."
+
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "✅  Released: FlowTrack $TAG"

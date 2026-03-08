@@ -8,6 +8,132 @@ import OSLog
 
 private let trackerLogger = Logger(subsystem: "com.flowtrack", category: "ActivityTracker")
 
+private struct BrowserDescriptor: Sendable {
+    let bundleIDs: Set<String>
+    let nameMarkers: [String]
+    let usesSafariScript: Bool
+    let usesChromiumScript: Bool
+    let usesFirefoxAX: Bool
+    let appleScriptAppName: String?
+}
+
+private nonisolated func browserDescriptor(appName: String, bundleID: String) -> BrowserDescriptor? {
+    let browserDescriptors: [BrowserDescriptor] = [
+        BrowserDescriptor(
+            bundleIDs: ["com.apple.safari"],
+            nameMarkers: ["safari"],
+            usesSafariScript: true,
+            usesChromiumScript: false,
+            usesFirefoxAX: false,
+            appleScriptAppName: "Safari"
+        ),
+        BrowserDescriptor(
+            bundleIDs: ["com.apple.safaritechnologypreview"],
+            nameMarkers: ["safari technology preview"],
+            usesSafariScript: true,
+            usesChromiumScript: false,
+            usesFirefoxAX: false,
+            appleScriptAppName: "Safari Technology Preview"
+        ),
+        BrowserDescriptor(
+            bundleIDs: ["com.google.chrome"],
+            nameMarkers: ["google chrome"],
+            usesSafariScript: false,
+            usesChromiumScript: true,
+            usesFirefoxAX: false,
+            appleScriptAppName: "Google Chrome"
+        ),
+        BrowserDescriptor(
+            bundleIDs: ["com.google.chrome.canary"],
+            nameMarkers: ["chrome canary"],
+            usesSafariScript: false,
+            usesChromiumScript: true,
+            usesFirefoxAX: false,
+            appleScriptAppName: "Google Chrome Canary"
+        ),
+        BrowserDescriptor(
+            bundleIDs: ["com.brave.browser"],
+            nameMarkers: ["brave browser", "brave"],
+            usesSafariScript: false,
+            usesChromiumScript: true,
+            usesFirefoxAX: false,
+            appleScriptAppName: "Brave Browser"
+        ),
+        BrowserDescriptor(
+            bundleIDs: ["com.microsoft.edgemac"],
+            nameMarkers: ["microsoft edge", "edge"],
+            usesSafariScript: false,
+            usesChromiumScript: true,
+            usesFirefoxAX: false,
+            appleScriptAppName: "Microsoft Edge"
+        ),
+        BrowserDescriptor(
+            bundleIDs: ["com.opera.opera"],
+            nameMarkers: ["opera"],
+            usesSafariScript: false,
+            usesChromiumScript: true,
+            usesFirefoxAX: false,
+            appleScriptAppName: "Opera"
+        ),
+        BrowserDescriptor(
+            bundleIDs: ["com.vivaldi.vivaldi"],
+            nameMarkers: ["vivaldi"],
+            usesSafariScript: false,
+            usesChromiumScript: true,
+            usesFirefoxAX: false,
+            appleScriptAppName: "Vivaldi"
+        ),
+        BrowserDescriptor(
+            bundleIDs: ["company.thebrowser.browser"],
+            nameMarkers: ["arc"],
+            usesSafariScript: false,
+            usesChromiumScript: true,
+            usesFirefoxAX: false,
+            appleScriptAppName: "Arc"
+        ),
+        BrowserDescriptor(
+            bundleIDs: ["com.chromium.chromium"],
+            nameMarkers: ["chromium"],
+            usesSafariScript: false,
+            usesChromiumScript: true,
+            usesFirefoxAX: false,
+            appleScriptAppName: "Chromium"
+        ),
+        BrowserDescriptor(
+            bundleIDs: ["org.mozilla.firefox", "org.mozilla.nightly"],
+            nameMarkers: ["firefox", "nightly"],
+            usesSafariScript: false,
+            usesChromiumScript: false,
+            usesFirefoxAX: true,
+            appleScriptAppName: nil
+        ),
+        BrowserDescriptor(
+            bundleIDs: ["com.kagi.orion"],
+            nameMarkers: ["orion"],
+            usesSafariScript: false,
+            usesChromiumScript: false,
+            usesFirefoxAX: false,
+            appleScriptAppName: nil
+        ),
+        BrowserDescriptor(
+            bundleIDs: ["com.duckduckgo.macos.browser"],
+            nameMarkers: ["duckduckgo"],
+            usesSafariScript: false,
+            usesChromiumScript: false,
+            usesFirefoxAX: false,
+            appleScriptAppName: nil
+        ),
+    ]
+    let normalizedBundleID = bundleID.lowercased()
+    let normalizedName = appName.lowercased()
+    if let exactBundleMatch = browserDescriptors.first(where: { $0.bundleIDs.contains(normalizedBundleID) }) {
+        return exactBundleMatch
+    }
+    return browserDescriptors.first {
+        $0.nameMarkers.contains(where: { normalizedName.contains($0) })
+    }
+}
+
 @MainActor
 final class ActivityTracker: ObservableObject {
     static let shared = ActivityTracker()
@@ -17,6 +143,7 @@ final class ActivityTracker: ObservableObject {
         didSet { if currentApp != oldValue { currentAppSince = Date() } }
     }
     @Published var currentTitle: String = ""
+    @Published private(set) var currentURL: String? = nil
     private(set) var currentAppSince: Date = Date()
     /// App switches today — a proxy for context-switching / fragmentation
     private(set) var todaySwitchCount: Int = 0
@@ -59,6 +186,7 @@ final class ActivityTracker: ObservableObject {
     private var isBrowserFetchPending: Bool = false
     // Generation counter — prevents stale browser fetch results from overwriting newer state
     private var browserFetchGeneration: UInt64 = 0
+    private var trackingGeneration: UInt64 = 0
 
     // App Nap exemption token
     private var activityToken: NSObjectProtocol?
@@ -77,8 +205,6 @@ final class ActivityTracker: ObservableObject {
     private var distractionStartTime: Date?
     private var distractionPausedAt: Date?
     private var lastDistractionAlertFired: Date?
-
-    private let knownBrowsers = ["Safari", "Google Chrome", "Firefox", "Arc", "Brave Browser", "Microsoft Edge", "Opera"]
 
     // MARK: - Segment Tracking State
     /// When the current focus segment started — used as timestamp for the segment's DB record
@@ -106,6 +232,7 @@ final class ActivityTracker: ObservableObject {
 
     func startTracking() {
         guard !isTracking else { return }
+        trackingGeneration &+= 1
         isTracking = true
         cachedOnBattery = isOnBattery()
 
@@ -158,9 +285,16 @@ final class ActivityTracker: ObservableObject {
     }
 
     func stopTracking() {
+        guard isTracking else { return }
+        trackingGeneration &+= 1
+        endCurrentSegment()
         isTracking = false
+        isBrowserFetchPending = false
         idleTimer?.invalidate(); idleTimer = nil
         checkpointTimer?.invalidate(); checkpointTimer = nil
+        browserFetchTask?.cancel(); browserFetchTask = nil
+        browserURLTask?.cancel(); browserURLTask = nil
+        titleChangeDebounceTask?.cancel(); titleChangeDebounceTask = nil
         unregisterAXObserver()
         if let source = powerSourceCallback {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .defaultMode)
@@ -175,6 +309,9 @@ final class ActivityTracker: ObservableObject {
         if let obs = systemWakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(obs) }
         appSwitchObserver = nil; screenSleepObserver = nil; screenWakeObserver = nil
         systemSleepObserver = nil; systemWakeObserver = nil
+        currentApp = ""
+        currentTitle = ""
+        currentURL = nil
     }
 
     // MARK: - Idle Timer (replaces heartbeat — 30s, only checks CGEventSource, zero AX overhead)
@@ -329,6 +466,7 @@ final class ActivityTracker: ObservableObject {
         lastCheckpointDate = nil
         isCurrentlyIdle = false
         currentApp = appName
+        currentURL = nil
         consecutiveIdleCount = 0
         cachedBrowserURL = nil
         lastBrowserTitle = ""
@@ -348,33 +486,38 @@ final class ActivityTracker: ObservableObject {
         lastSavedURL = nil; lastSavedIsIdle = false; lastSavedAppName = appName
         lastSavedDocumentPath = windowInfo.documentPath
 
-        let isBrowser = knownBrowsers.contains(where: { appName.contains($0) })
-        if isBrowser {
+        let browser = browserDescriptor(appName: appName, bundleID: bundleID)
+        if browser != nil {
             // Cancel any in-flight fetch from a prior browser switch, then start a fresh one
             browserFetchTask?.cancel()
             isBrowserFetchPending = true
             browserFetchGeneration &+= 1
             let fetchGen = browserFetchGeneration
-            browserFetchTask = Task.detached(priority: .utility) {
-                let info = await ActivityTracker.fetchBrowserInfo(appName: appName)
-                await MainActor.run { [weak self] in
-                    guard let self, self.browserFetchGeneration == fetchGen else { return }
-                    self.isBrowserFetchPending = false
-                    self.cachedBrowserURL = info.url
-                    self.lastBrowserTitle = title
-                    // Use AppleScript page title if AX title was empty (page was loading)
-                    let resolvedTitle = info.pageTitle.flatMap { $0.isEmpty ? nil : $0 } ?? title
-                    if self.lastSavedTitle == title || self.lastSavedTitle.isEmpty {
-                        self.currentTitle = resolvedTitle
-                        self.lastSavedTitle = resolvedTitle
-                    }
-                    let metadata = ContentMetadataExtractor.extract(url: info.url, windowTitle: resolvedTitle, appName: appName)
-                    let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: resolvedTitle, url: info.url, isIdle: false, contentMetadata: metadata)
-                    self.checkDistractionAlert(category: cat)
-                    FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url)
-                    StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url)
-                    self.lastSavedCategory = cat
+            let trackingGen = trackingGeneration
+            browserFetchTask = Task {
+                let info = await ActivityTracker.fetchBrowserInfo(appName: appName, bundleID: bundleID)
+                guard !Task.isCancelled,
+                      self.isTracking,
+                      self.trackingGeneration == trackingGen,
+                      self.browserFetchGeneration == fetchGen,
+                      self.lastSavedBundleID == bundleID else { return }
+                self.isBrowserFetchPending = false
+                self.cachedBrowserURL = info.url
+                self.currentURL = info.url
+                self.lastBrowserTitle = self.currentTitle
+                // Use AppleScript page title if AX title was empty (page was loading)
+                let resolvedTitle = info.pageTitle.flatMap { $0.isEmpty ? nil : $0 } ?? title
+                if self.currentTitle == title || self.currentTitle.isEmpty || self.lastSavedTitle.isEmpty {
+                    self.currentTitle = resolvedTitle
+                    self.lastSavedTitle = resolvedTitle
                 }
+                self.lastSavedURL = info.url
+                let metadata = ContentMetadataExtractor.extract(url: info.url, windowTitle: resolvedTitle, appName: appName)
+                let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: resolvedTitle, url: info.url, isIdle: false, contentMetadata: metadata)
+                self.checkDistractionAlert(category: cat)
+                FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url)
+                StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url)
+                self.lastSavedCategory = cat
             }
         } else {
             let cat = resolveCategory(appName: appName, bundleID: bundleID, title: title, url: nil, isIdle: false)
@@ -423,6 +566,7 @@ final class ActivityTracker: ObservableObject {
         let windowInfo = AppSettings.shared.captureWindowTitles ? getWindowInfo(for: frontApp) : (title: "", documentPath: nil)
         let title = windowInfo.title
         currentTitle = title
+        currentURL = nil
         lastSavedBundleID = bundleID
         lastSavedAppName = appName
         lastSavedTitle = title
@@ -433,8 +577,15 @@ final class ActivityTracker: ObservableObject {
         lastFrontmostPID = frontApp.processIdentifier
         // Register AXObserver for current frontmost app
         registerAXTitleObserver(for: frontApp)
-        let cat = resolveCategory(appName: appName, bundleID: bundleID, title: title, url: nil, isIdle: false)
-        lastSavedCategory = cat
+        if browserDescriptor(appName: appName, bundleID: bundleID) != nil {
+            updateBrowserInfo(appName: appName, bundleID: bundleID, title: title)
+        } else {
+            let cat = resolveCategory(appName: appName, bundleID: bundleID, title: title, url: nil, isIdle: false)
+            checkDistractionAlert(category: cat)
+            FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: title)
+            StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: title)
+            lastSavedCategory = cat
+        }
     }
 
     // MARK: - AXObserver (event-driven window title change detection)
@@ -492,7 +643,7 @@ final class ActivityTracker: ObservableObject {
         let bundleID = frontApp.bundleIdentifier ?? ""
         guard !AppSettings.shared.excludedBundleIDs.contains(bundleID) else { return }
 
-        let isBrowser = knownBrowsers.contains(where: { appName.contains($0) })
+        let isBrowser = browserDescriptor(appName: appName, bundleID: bundleID) != nil
         trackerLogger.debug("AX title change: \"\(newTitle.prefix(60), privacy: .private)\"")
 
         // If the previous title was empty (page was loading when segment started),
@@ -520,15 +671,21 @@ final class ActivityTracker: ObservableObject {
             browserURLTask?.cancel()
             browserFetchGeneration &+= 1
             let fetchGen = browserFetchGeneration
+            let trackingGen = trackingGeneration
             isBrowserFetchPending = true
             browserURLTask = Task {
-                let info = await ActivityTracker.fetchBrowserInfo(appName: appName)
-                guard !Task.isCancelled, self.browserFetchGeneration == fetchGen else { return }
+                let info = await ActivityTracker.fetchBrowserInfo(appName: appName, bundleID: bundleID)
+                guard !Task.isCancelled,
+                      self.isTracking,
+                      self.trackingGeneration == trackingGen,
+                      self.browserFetchGeneration == fetchGen,
+                      self.lastSavedBundleID == bundleID else { return }
                 self.isBrowserFetchPending = false
                 self.cachedBrowserURL = info.url
+                self.currentURL = info.url
                 self.lastSavedURL = info.url
                 let resolvedTitle = info.pageTitle.flatMap { $0.isEmpty ? nil : $0 } ?? newTitle
-                if self.lastSavedTitle == newTitle {
+                if self.currentTitle == newTitle || self.lastSavedTitle == newTitle || self.lastSavedTitle.isEmpty {
                     self.currentTitle = resolvedTitle
                     self.lastSavedTitle = resolvedTitle
                 }
@@ -553,9 +710,12 @@ final class ActivityTracker: ObservableObject {
             let segmentAge = Date().timeIntervalSince(self.currentSegmentStart)
             let minSegmentAge: TimeInterval = isBrowser ? 5 : 15
             if segmentAge < minSegmentAge {
-                self.lastSavedTitle = newTitle
-                self.lastSavedURL = nil
-                self.cachedBrowserURL = nil
+                self.lastSavedTitle = self.currentTitle
+                if !isBrowser {
+                    self.lastSavedURL = nil
+                    self.cachedBrowserURL = nil
+                    self.currentURL = nil
+                }
                 if !isBrowser { self.updateBrowserInfo(appName: appName, bundleID: bundleID, title: newTitle) }
                 return
             }
@@ -565,9 +725,14 @@ final class ActivityTracker: ObservableObject {
             self.currentSegmentStart = Date()
             self.lastCheckpointDate = nil
 
-            self.lastSavedTitle = newTitle
-            self.lastSavedURL = nil
-            self.cachedBrowserURL = nil
+            self.lastSavedTitle = self.currentTitle
+            if isBrowser {
+                self.lastSavedURL = self.cachedBrowserURL
+            } else {
+                self.lastSavedURL = nil
+                self.cachedBrowserURL = nil
+                self.currentURL = nil
+            }
             if !isBrowser { self.updateBrowserInfo(appName: appName, bundleID: bundleID, title: newTitle) }
         }
     }
@@ -576,21 +741,27 @@ final class ActivityTracker: ObservableObject {
     /// For browsers: used only for initial empty-title fill-in (handleAXTitleChange handles tab switches directly).
     /// For non-browsers: resolves category and notifies FocusMode/StudyTracker.
     private func updateBrowserInfo(appName: String, bundleID: String, title: String) {
-        let isBrowser = knownBrowsers.contains(where: { appName.contains($0) })
+        let isBrowser = browserDescriptor(appName: appName, bundleID: bundleID) != nil
         if isBrowser {
             browserURLTask?.cancel()
             let capturedTitle = title
             browserFetchGeneration &+= 1
             let fetchGen = browserFetchGeneration
+            let trackingGen = trackingGeneration
             isBrowserFetchPending = true
             browserURLTask = Task {
-                let info = await ActivityTracker.fetchBrowserInfo(appName: appName)
-                guard !Task.isCancelled, self.browserFetchGeneration == fetchGen else { return }
+                let info = await ActivityTracker.fetchBrowserInfo(appName: appName, bundleID: bundleID)
+                guard !Task.isCancelled,
+                      self.isTracking,
+                      self.trackingGeneration == trackingGen,
+                      self.browserFetchGeneration == fetchGen,
+                      self.lastSavedBundleID == bundleID else { return }
                 self.isBrowserFetchPending = false
                 let resolvedTitle = info.pageTitle.flatMap { $0.isEmpty ? nil : $0 } ?? capturedTitle
                 self.cachedBrowserURL = info.url
+                self.currentURL = info.url
                 self.lastSavedURL = info.url
-                if self.lastSavedTitle == capturedTitle {
+                if self.currentTitle == capturedTitle || self.lastSavedTitle == capturedTitle || self.lastSavedTitle.isEmpty {
                     self.currentTitle = resolvedTitle
                     self.lastSavedTitle = resolvedTitle
                 }
@@ -602,6 +773,7 @@ final class ActivityTracker: ObservableObject {
                 self.lastSavedCategory = cat
             }
         } else {
+            currentURL = nil
             let cat = resolveCategory(appName: appName, bundleID: bundleID, title: title, url: nil, isIdle: false)
             checkDistractionAlert(category: cat)
             FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: title)
@@ -736,51 +908,31 @@ final class ActivityTracker: ObservableObject {
 
     /// Fetches both the URL and page title for the active browser tab.
     /// Returns (url, pageTitle) — Firefox only returns url (no AppleScript access).
-    nonisolated static func fetchBrowserInfo(appName: String) async -> (url: String?, pageTitle: String?) {
-        if appName.contains("Firefox") {
-            return (fetchFirefoxURL(), nil)
+    nonisolated static func fetchBrowserInfo(appName: String, bundleID: String) async -> (url: String?, pageTitle: String?) {
+        guard let descriptor = browserDescriptor(appName: appName, bundleID: bundleID) else {
+            return (nil, nil)
+        }
+
+        if descriptor.usesFirefoxAX {
+            return (fetchFirefoxURL(bundleID: bundleID), nil)
+        }
+
+        guard let scriptAppName = descriptor.appleScriptAppName else {
+            return (nil, nil)
         }
 
         // AppleScript that returns "url|||title" in a single call to avoid two round-trips.
         let script: String
-        if appName.contains("Safari") {
+        if descriptor.usesSafariScript {
             script = """
-            tell application "Safari"
+            tell application "\(scriptAppName)"
                 set t to current tab of front window
                 return (URL of t) & "|||" & (name of t)
             end tell
             """
-        } else if appName.contains("Chrome") {
+        } else if descriptor.usesChromiumScript {
             script = """
-            tell application "Google Chrome"
-                set t to active tab of front window
-                return (URL of t) & "|||" & (title of t)
-            end tell
-            """
-        } else if appName.contains("Brave") {
-            script = """
-            tell application "Brave Browser"
-                set t to active tab of front window
-                return (URL of t) & "|||" & (title of t)
-            end tell
-            """
-        } else if appName.contains("Edge") {
-            script = """
-            tell application "Microsoft Edge"
-                set t to active tab of front window
-                return (URL of t) & "|||" & (title of t)
-            end tell
-            """
-        } else if appName.contains("Opera") {
-            script = """
-            tell application "Opera"
-                set t to active tab of front window
-                return (URL of t) & "|||" & (title of t)
-            end tell
-            """
-        } else if appName.contains("Arc") {
-            script = """
-            tell application "Arc"
+            tell application "\(scriptAppName)"
                 set t to active tab of front window
                 return (URL of t) & "|||" & (title of t)
             end tell
@@ -816,14 +968,14 @@ final class ActivityTracker: ObservableObject {
     }
 
     /// Legacy wrapper — used by code that only needs the URL.
-    nonisolated static func fetchBrowserURL(appName: String) async -> String? {
-        await fetchBrowserInfo(appName: appName).url
+    nonisolated static func fetchBrowserURL(appName: String, bundleID: String) async -> String? {
+        await fetchBrowserInfo(appName: appName, bundleID: bundleID).url
     }
 
     /// Reads Firefox URL from the AXUIElement address bar (toolbar item with URL role).
     /// Firefox doesn't support AppleScript URL access, so we use Accessibility API.
-    nonisolated private static func fetchFirefoxURL() -> String? {
-        guard let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "org.mozilla.firefox" }) else { return nil }
+    nonisolated private static func fetchFirefoxURL(bundleID: String) -> String? {
+        guard let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier?.lowercased() == bundleID.lowercased() }) else { return nil }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         var windowRef: AnyObject?
         guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowRef) == .success,

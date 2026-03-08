@@ -1,11 +1,13 @@
 import SwiftUI
 import AppKit
+import Sparkle
 
 @main
 struct FlowTrackApp: App {
     @NSApplicationDelegateAdaptor(FlowTrackAppDelegate.self) var appDelegate
     @State private var showOnboarding = !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
     @Environment(\.openWindow) private var openWindow
+    private let updater = AppUpdater.shared
 
     var body: some Scene {
         // Menu Bar
@@ -49,7 +51,7 @@ class FlowTrackAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Start activity tracking immediately on launch
-        ActivityTracker.shared.startTracking()
+        TrackingLifecycle.shared.startTracking()
         // Ensure the dashboard window is visible and focused on every launch
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             // Temporarily show dock icon so macOS creates/activates the window
@@ -70,6 +72,7 @@ class FlowTrackAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        TrackingLifecycle.shared.stopTracking()
         return .terminateNow
     }
 
@@ -93,6 +96,32 @@ class FlowTrackAppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 NSApp.setActivationPolicy(.accessory)
             }
+        }
+    }
+}
+
+@MainActor
+final class TrackingLifecycle {
+    static let shared = TrackingLifecycle()
+
+    private init() {}
+
+    func startTracking() {
+        StudyTrackerEngine.shared.handleTrackingStarted()
+        ActivityTracker.shared.startTracking()
+    }
+
+    func stopTracking() {
+        FocusModeEngine.shared.handleTrackingStopped()
+        StudyTrackerEngine.shared.handleTrackingStopped()
+        ActivityTracker.shared.stopTracking()
+    }
+
+    func toggleTracking() {
+        if ActivityTracker.shared.isTracking {
+            stopTracking()
+        } else {
+            startTracking()
         }
     }
 }

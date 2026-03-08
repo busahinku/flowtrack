@@ -93,7 +93,7 @@ struct MenuBarView: View {
             Spacer()
 
             Button {
-                if tracker.isTracking { tracker.stopTracking() } else { tracker.startTracking() }
+                TrackingLifecycle.shared.toggleTracking()
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: tracker.isTracking ? "pause.fill" : "play.fill")
