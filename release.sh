@@ -148,29 +148,48 @@ RELEASE_URL=$(gh release view "$TAG" --json url -q '.url' --repo busahinku/flowt
 
 echo "📡 Updating appcast.xml..."
 
-DMG_DOWNLOAD_URL=$(gh release view "$TAG" --json assets --repo busahinku/flowtrack \
-    -q '.assets[] | select(.name | endswith(".dmg")) | .browserDownloadUrl')
+# Wait for GitHub to process the upload, then fetch the DMG download URL
+sleep 3
+DMG_DOWNLOAD_URL=""
+for i in 1 2 3 4 5; do
+    DMG_DOWNLOAD_URL=$(gh release view "$TAG" --json assets --repo busahinku/flowtrack \
+        -q '.assets[] | select(.name | endswith(".dmg")) | .url')
+    if [[ -n "$DMG_DOWNLOAD_URL" ]]; then break; fi
+    echo "   Waiting for GitHub asset to become available (attempt $i)..."
+    sleep 3
+done
+if [[ -z "$DMG_DOWNLOAD_URL" ]]; then
+    echo "❌ Could not get DMG download URL from GitHub release"
+    exit 1
+fi
+
 DMG_SIZE=$(stat -f%z "$DMG_PATH" 2>/dev/null || stat --format=%s "$DMG_PATH")
 PUB_DATE=$(date -R 2>/dev/null || date "+%a, %d %b %Y %H:%M:%S %z")
 
 # EdDSA signature (requires Sparkle's sign_update tool)
-SPARKLE_SIGN=""
+ED_SIGNATURE=""
 SPARKLE_BIN=$(find ~/Library/Developer/Xcode/DerivedData -path "*/Sparkle/bin/sign_update" -type f 2>/dev/null | head -1)
 if [[ -n "$SPARKLE_BIN" && -x "$SPARKLE_BIN" ]]; then
     SIG=$("$SPARKLE_BIN" "$DMG_PATH" 2>/dev/null || true)
     if [[ -n "$SIG" ]]; then
-        SPARKLE_SIGN="sparkle:edSignature=\"$(echo "$SIG" | grep -oE 'sparkle:edSignature="[^"]*"' | cut -d'"' -f2)\" length=\"$DMG_SIZE\""
+        ED_SIGNATURE=$(echo "$SIG" | grep -oE 'sparkle:edSignature="[^"]*"' | cut -d'"' -f2)
         echo "✅ EdDSA signature generated"
     fi
 elif command -v sign_update &>/dev/null; then
     SIG=$(sign_update "$DMG_PATH" 2>/dev/null || true)
     if [[ -n "$SIG" ]]; then
-        SPARKLE_SIGN="sparkle:edSignature=\"$(echo "$SIG" | grep -oE 'sparkle:edSignature="[^"]*"' | cut -d'"' -f2)\" length=\"$DMG_SIZE\""
+        ED_SIGNATURE=$(echo "$SIG" | grep -oE 'sparkle:edSignature="[^"]*"' | cut -d'"' -f2)
         echo "✅ EdDSA signature generated"
     fi
 else
     echo "⚠️  sign_update not found — appcast will not include EdDSA signature."
     echo "   Run: ./sparkle-setup.sh to generate signing keys."
+fi
+
+# Build enclosure attributes cleanly to avoid duplicate attributes
+ENCLOSURE_ATTRS="url=\"$DMG_DOWNLOAD_URL\" type=\"application/octet-stream\" length=\"$DMG_SIZE\""
+if [[ -n "$ED_SIGNATURE" ]]; then
+    ENCLOSURE_ATTRS="$ENCLOSURE_ATTRS sparkle:edSignature=\"$ED_SIGNATURE\""
 fi
 
 # Build appcast.xml
@@ -190,7 +209,7 @@ cat > "$APPCAST_FILE" << APPCASTEOF
       <sparkle:version>$VERSION</sparkle:version>
       <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
-      <enclosure url="$DMG_DOWNLOAD_URL" type="application/octet-stream" $SPARKLE_SIGN length="$DMG_SIZE" />
+      <enclosure $ENCLOSURE_ATTRS />
     </item>
   </channel>
 </rss>
@@ -210,7 +229,7 @@ echo "🔗  $RELEASE_URL"
 echo ""
 echo "Share this download link with your friend:"
 gh release view "$TAG" --json assets --repo busahinku/flowtrack \
-    -q '.assets[] | select(.name | endswith(".dmg")) | .browserDownloadUrl'
+    -q '.assets[] | select(.name | endswith(".dmg")) | .url'
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
