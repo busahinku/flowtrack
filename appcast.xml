@@ -12,7 +12,7 @@
       <sparkle:version>0.4.788-beta</sparkle:version>
       <sparkle:shortVersionString>0.4.788-beta</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
-      <enclosure url="" type="application/octet-stream" sparkle:edSignature="KfejDnvFWrv2A1B+wBcsfx809YF/xDQHDa8f6bpf9oL2JsjJ1ARGSmXhwoJ7jOdpaTKsE0X37liCY87MhzNsCA==" length="7370328" length="7370328" />
+      <enclosure url="https://github.com/busahinku/flowtrack/releases/download/v0.4.788-beta/FlowTrack-v0.4.788-beta.dmg" type="application/octet-stream" length="7370328" sparkle:edSignature="KfejDnvFWrv2A1B+wBcsfx809YF/xDQHDa8f6bpf9oL2JsjJ1ARGSmXhwoJ7jOdpaTKsE0X37liCY87MhzNsCA==" />
     </item>
   </channel>
 </rss>
