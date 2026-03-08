@@ -6,13 +6,13 @@
     <description>Updates for FlowTrack</description>
     <language>en</language>
     <item>
-      <title>FlowTrack 0.5.1</title>
-      <description><![CDATA[<p>fix updater version metadata</p>]]></description>
-      <pubDate>Sun, 08 Mar 2026 23:17:31 +0300</pubDate>
-      <sparkle:version>5001</sparkle:version>
-      <sparkle:shortVersionString>0.5.1</sparkle:shortVersionString>
+      <title>FlowTrack 0.5.2</title>
+      <description><![CDATA[<p>update test</p>]]></description>
+      <pubDate>Sun, 08 Mar 2026 23:20:52 +0300</pubDate>
+      <sparkle:version>5002</sparkle:version>
+      <sparkle:shortVersionString>0.5.2</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/busahinku/flowtrack/releases/download/v0.5.1/FlowTrack-v0.5.1.dmg" type="application/octet-stream" length="7371731" sparkle:edSignature="/Ld5jAzrdLZpEzLbu6qGP43BqGXfXF2PWwiF+IhOpDIp4iMdMbc0VfJKGPxhqSSbAuw03VspJ/WuME3LXt5GAw==" />
+      <enclosure url="https://github.com/busahinku/flowtrack/releases/download/v0.5.2/FlowTrack-v0.5.2.dmg" type="application/octet-stream" length="7371773" sparkle:edSignature="WSs3mlmt1bgxvesQcdOl55tc9ZcXXhpbtLq9pH1PkloNVLv4csw97aKNmbtFmlUjosrA3vpfcwx5bk9rsFtHDg==" />
     </item>
   </channel>
 </rss>

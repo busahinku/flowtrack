@@ -15,7 +15,7 @@ private nonisolated let studyLog = Logger(subsystem: "com.flowtrack", category: 
 ///    todo best fits the current context. Only fires when keywords miss.
 ///
 /// YouTube override: if the URL contains "youtube" and a keyword matches the
-/// window title, the activity is as productive even though
+/// window title, the activity is as productive even
 /// `DefaultRules.json` categorises YouTube as Distraction.
 @MainActor @Observable
 final class StudyTrackerEngine {
