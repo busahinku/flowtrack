@@ -96,7 +96,7 @@ extension AIProvider {
 @MainActor
 struct AIProviderFactory {
     static func create(for type: AIProviderType, model: String? = nil) -> any AIProvider {
-        let modelName = model ?? AppSettings.shared.modelName(for: type)
+        let modelName = model ?? SettingsStorage.shared.modelName(for: type)
         switch type {
         case .claudeCLI: return CLIProvider(command: "claude", model: modelName)
         case .chatgptCLI: return CLIProvider(command: "codex", model: modelName)

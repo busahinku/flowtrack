@@ -152,7 +152,7 @@ final class ActivityTracker: ObservableObject {
     private var heartbeatTimer: Timer?  // kept for legacy compatibility; use idleTimer instead
     private var powerSourceCallback: CFRunLoopSource?
     private var lastActivity: Date = Date()
-    private var idleThreshold: TimeInterval { TimeInterval(AppSettings.shared.idleThresholdSeconds) }
+    private var idleThreshold: TimeInterval { TimeInterval(SettingsStorage.shared.idleThresholdSeconds) }
     private var consecutiveIdleCount = 0
     private var cachedOnBattery: Bool = false
     private var isScreenAsleep = false
@@ -420,7 +420,7 @@ final class ActivityTracker: ObservableObject {
         let elapsed = now.timeIntervalSince(currentSegmentStart)
         guard elapsed >= 5 else { return }  // Ignore sub-5s micro-segments
         guard !lastSavedBundleID.isEmpty, !lastSavedAppName.isEmpty else { return }
-        guard !AppSettings.shared.excludedBundleIDs.contains(lastSavedBundleID) else { return }
+        guard !SettingsStorage.shared.excludedBundleIDs.contains(lastSavedBundleID) else { return }
 
         writeRecord(appName: lastSavedAppName, bundleID: lastSavedBundleID,
                     title: lastSavedTitle, url: lastSavedURL,
@@ -442,7 +442,7 @@ final class ActivityTracker: ObservableObject {
 
         // loginwindow = macOS screen lock — treat as idle, never record as activity
         guard bundleID != "com.apple.loginwindow" && appName.lowercased() != "loginwindow" else { return }
-        if AppSettings.shared.excludedBundleIDs.contains(bundleID) { return }
+        if SettingsStorage.shared.excludedBundleIDs.contains(bundleID) { return }
         guard bundleID != lastSavedBundleID else { return } // same app, skip
 
         // Cancel any pending browser URL debounce from previous app
@@ -472,7 +472,7 @@ final class ActivityTracker: ObservableObject {
         lastBrowserTitle = ""
         lastWriteDate = now
 
-        let windowInfo = AppSettings.shared.captureWindowTitles ? getWindowInfo(for: app) : (title: "", documentPath: nil)
+        let windowInfo = SettingsStorage.shared.captureWindowTitles ? getWindowInfo(for: app) : (title: "", documentPath: nil)
         let title = windowInfo.title
         currentTitle = title
         lastFrontmostPID = app.processIdentifier
@@ -560,10 +560,10 @@ final class ActivityTracker: ObservableObject {
         guard let frontApp = NSWorkspace.shared.frontmostApplication else { return }
         let appName = frontApp.localizedName ?? "Unknown"
         let bundleID = frontApp.bundleIdentifier ?? ""
-        guard !AppSettings.shared.excludedBundleIDs.contains(bundleID) else { return }
+        guard !SettingsStorage.shared.excludedBundleIDs.contains(bundleID) else { return }
         guard bundleID != "com.apple.loginwindow" else { return }
         currentApp = appName
-        let windowInfo = AppSettings.shared.captureWindowTitles ? getWindowInfo(for: frontApp) : (title: "", documentPath: nil)
+        let windowInfo = SettingsStorage.shared.captureWindowTitles ? getWindowInfo(for: frontApp) : (title: "", documentPath: nil)
         let title = windowInfo.title
         currentTitle = title
         currentURL = nil
@@ -634,14 +634,14 @@ final class ActivityTracker: ObservableObject {
         guard isTracking, !isScreenAsleep, !isCurrentlyIdle else { return }
         guard let frontApp = NSWorkspace.shared.frontmostApplication else { return }
 
-        let windowInfo = AppSettings.shared.captureWindowTitles ? getWindowInfo(for: frontApp) : (title: "", documentPath: nil)
+        let windowInfo = SettingsStorage.shared.captureWindowTitles ? getWindowInfo(for: frontApp) : (title: "", documentPath: nil)
         let newTitle = windowInfo.title
         lastSavedDocumentPath = windowInfo.documentPath
         guard newTitle != lastSavedTitle && !newTitle.isEmpty else { return }
 
         let appName = frontApp.localizedName ?? "Unknown"
         let bundleID = frontApp.bundleIdentifier ?? ""
-        guard !AppSettings.shared.excludedBundleIDs.contains(bundleID) else { return }
+        guard !SettingsStorage.shared.excludedBundleIDs.contains(bundleID) else { return }
 
         let isBrowser = browserDescriptor(appName: appName, bundleID: bundleID) != nil
         trackerLogger.debug("AX title change: \"\(newTitle.prefix(60), privacy: .private)\"")
@@ -1030,7 +1030,7 @@ final class ActivityTracker: ObservableObject {
     }
 
     private func checkDistractionAlert(category: Category) {
-        let alertMinutes = AppSettings.shared.distractionAlertMinutes
+        let alertMinutes = SettingsStorage.shared.distractionAlertMinutes
         guard alertMinutes > 0 else { distractionStartTime = nil; distractionPausedAt = nil; return }
 
         if category == .distraction {

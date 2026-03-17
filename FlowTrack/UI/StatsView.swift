@@ -43,7 +43,7 @@ struct StatsView: View {
     @State private var cachedProductivePercent: Double = 0
     @State private var cachedDistractionSecs: Double = 0
 
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     var body: some View {
         ScrollView {
@@ -65,7 +65,7 @@ struct StatsView: View {
             }
             .padding()
         }
-        .background(theme.timelineBg)
+        .background(theme.timelineBackgroundColor)
         .toolbarBackground(.hidden, for: .windowToolbar)
         .onAppear { loadTask?.cancel(); loadTask = Task { loadData() } }
         .onChange(of: selectedDate) { loadTask?.cancel(); loadTask = Task { loadData() } }
@@ -73,12 +73,15 @@ struct StatsView: View {
         .onChange(of: statsSection) { selectedHourStat = nil; selectedFlowHour = nil }
         .sheet(item: $selectedApp) { app in
             AppDetailSheet(app: app, allActivities: allActivities)
+                .withEnvironment()
         }
         .sheet(item: $selectedSessionSlot) { slot in
             SessionDetailView(slot: slot)
+                .withEnvironment()
         }
         .sheet(item: $selectedCatStat) { stat in
             CategoryDetailSheet(stat: stat, activities: allActivities.filter { $0.category.rawValue == stat.category.rawValue })
+                .withEnvironment()
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -102,7 +105,7 @@ struct StatsView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(theme.timelineBg)
+        .background(theme.timelineBackgroundColor)
     }
 
     // MARK: - Section Picker (Activity | Timer & Tasks)
@@ -114,7 +117,7 @@ struct StatsView: View {
                 } label: {
                     Text(sec.rawValue)
                         .font(.subheadline.weight(statsSection == sec ? .semibold : .regular))
-                        .foregroundStyle(statsSection == sec ? theme.selectedForeground : theme.secondaryText)
+                        .foregroundStyle(statsSection == sec ? theme.selectedForegroundColor : theme.secondaryTextColor)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .frame(maxWidth: .infinity)
@@ -142,7 +145,7 @@ struct StatsView: View {
                 } label: {
                     Text(p.rawValue)
                         .font(.subheadline.weight(period == p ? .semibold : .regular))
-                        .foregroundStyle(period == p ? theme.selectedForeground : theme.secondaryText)
+                        .foregroundStyle(period == p ? theme.selectedForegroundColor : theme.secondaryTextColor)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .frame(maxWidth: .infinity)
@@ -178,7 +181,7 @@ struct StatsView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(theme.secondaryText)
+            .foregroundStyle(theme.secondaryTextColor)
 
             Button { showDatePicker.toggle() } label: {
                 Text(dateRangeLabel)
@@ -201,7 +204,7 @@ struct StatsView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(theme.secondaryText)
+            .foregroundStyle(theme.secondaryTextColor)
         }
     }
 
@@ -219,7 +222,7 @@ struct StatsView: View {
             HStack(spacing: 12) {
                 SummaryCard(
                     title: "Active",
-                    value: Theme.formatDuration(totalActiveSeconds),
+                    value: totalActiveSeconds.formattedDuration(),
                     icon: "clock.fill",
                     color: theme.infoColor,
                     delta: activeDelta
@@ -231,7 +234,7 @@ struct StatsView: View {
                     color: theme.accentColor,
                     delta: focusDelta
                 )
-                SummaryCard(title: "Distraction", value: Theme.formatDuration(distractionSeconds),
+                SummaryCard(title: "Distraction", value: distractionSeconds.formattedDuration(),
                            icon: "eye.slash.fill", color: theme.errorColor)
                 SummaryCard(title: "Sessions", value: "\(periodTimeSlots.filter { !$0.isIdle }.count)",
                            icon: "square.stack.fill", color: theme.infoColor)
@@ -286,12 +289,12 @@ struct StatsView: View {
                     .foregroundStyle(trend >= 0 ? theme.successColor : theme.errorColor)
                 Text("7-day trend")
                     .font(.caption2)
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(theme.cardBg)
+        .background(theme.cardBackgroundColor)
         .cornerRadius(10)
     }
 
@@ -304,7 +307,7 @@ struct StatsView: View {
             if catStats.isEmpty {
                 Text("No data for this period")
                     .font(.caption)
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
                     .frame(height: 200)
             } else {
                 Chart(catStats) { stat in
@@ -313,7 +316,7 @@ struct StatsView: View {
                         innerRadius: .ratio(0.6),
                         angularInset: 1.5
                     )
-                    .foregroundStyle(Theme.color(for: stat.category))
+                    .foregroundStyle(stat.category.color)
                     .opacity(selectedCatStat == nil || selectedCatStat?.id == stat.id ? 1.0 : 0.4)
                 }
                 .chartOverlay { _ in
@@ -352,15 +355,15 @@ struct StatsView: View {
                         if let selected = selectedCatStat ?? catStats.first {
                             Image(systemName: selected.category.icon)
                                 .font(.title3)
-                                .foregroundStyle(Theme.color(for: selected.category))
+                                .foregroundStyle(selected.category.color)
                             Text(selected.category.rawValue)
                                 .font(.caption.bold())
-                            Text(Theme.formatDuration(selected.totalSeconds))
+                            Text(selected.totalSeconds.formattedDuration())
                                 .font(.caption2)
-                                .foregroundStyle(theme.secondaryText)
+                                .foregroundStyle(theme.secondaryTextColor)
                             Text("\(Int(selected.percentage))%")
                                 .font(.caption2.bold())
-                                .foregroundStyle(Theme.color(for: selected.category))
+                                .foregroundStyle(selected.category.color)
                         }
                     }
                     .allowsHitTesting(false)  // let taps pass through to chartOverlay
@@ -371,7 +374,7 @@ struct StatsView: View {
                         Button(action: { selectedCatStat = stat }) {
                             HStack(spacing: 6) {
                                 Circle()
-                                    .fill(Theme.color(for: stat.category))
+                                    .fill(stat.category.color)
                                     .frame(width: 10, height: 10)
                                 Image(systemName: stat.category.icon)
                                     .font(.caption)
@@ -379,9 +382,9 @@ struct StatsView: View {
                                 Text(stat.category.rawValue)
                                     .font(.caption)
                                 Spacer()
-                                Text(Theme.formatDuration(stat.totalSeconds))
+                                Text(stat.totalSeconds.formattedDuration())
                                     .font(.caption)
-                                    .foregroundStyle(theme.secondaryText)
+                                    .foregroundStyle(theme.secondaryTextColor)
                                 Text("\(Int(stat.percentage))%")
                                     .font(.caption.bold())
                                     .frame(width: 35, alignment: .trailing)
@@ -396,7 +399,7 @@ struct StatsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
-        .background(theme.cardBg)
+        .background(theme.cardBackgroundColor)
         .cornerRadius(12)
     }
 
@@ -415,7 +418,7 @@ struct StatsView: View {
                     }
                 }
                 .font(.caption)
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
                 .background(theme.accentColor.opacity(selectedHourStat != nil ? 0.1 : 0))
@@ -432,7 +435,7 @@ struct StatsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
-        .background(theme.cardBg)
+        .background(theme.cardBackgroundColor)
         .cornerRadius(12)
     }
 
@@ -445,7 +448,7 @@ struct StatsView: View {
                 y: .value("Minutes", stat.minutes),
                 width: .fixed(max(8, 400.0 / 24.0 - 2))
             )
-            .foregroundStyle(Theme.color(for: stat.category))
+            .foregroundStyle(stat.category.color)
             .opacity(selectedHourStat == nil || selectedHourStat == stat.hour ? 1.0 : 0.5)
         }
         .chartXScale(domain: 0...23)
@@ -476,7 +479,7 @@ struct StatsView: View {
     private var weekActivityChart: some View {
         Chart(dailyActivityStats) { stat in
             BarMark(x: .value("Day", stat.x), y: .value("Minutes", stat.minutes))
-                .foregroundStyle(Theme.color(for: stat.category))
+                .foregroundStyle(stat.category.color)
                 .opacity(selectedHourStat == nil || selectedHourStat == stat.x ? 1.0 : 0.5)
         }
         .chartXScale(domain: 0...6)
@@ -505,7 +508,7 @@ struct StatsView: View {
         let days = daysInCurrentMonth
         return Chart(dailyActivityStats) { stat in
             BarMark(x: .value("Day", stat.x), y: .value("Minutes", stat.minutes))
-                .foregroundStyle(Theme.color(for: stat.category))
+                .foregroundStyle(stat.category.color)
                 .opacity(selectedHourStat == nil || selectedHourStat == stat.x ? 1.0 : 0.5)
         }
         .chartXScale(domain: 1...days)
@@ -569,7 +572,7 @@ struct StatsView: View {
                             .foregroundStyle(theme.successColor.opacity(0.6))
                         Text("avg \(Int(avgScore))%")
                             .font(.caption2)
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                     }
                 }
                 Group {
@@ -580,7 +583,7 @@ struct StatsView: View {
                     }
                 }
                 .font(.caption)
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
                 .background(theme.successColor.opacity(selectedFlowHour != nil ? 0.1 : 0))
@@ -594,7 +597,7 @@ struct StatsView: View {
             }
         }
         .padding()
-        .background(theme.cardBg)
+        .background(theme.cardBackgroundColor)
         .cornerRadius(12)
     }
 
@@ -604,7 +607,7 @@ struct StatsView: View {
             if validPoints.isEmpty {
                 Text("Not enough data to show productivity flow")
                     .font(.caption)
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
                     .frame(height: 180, alignment: .center)
                     .frame(maxWidth: .infinity)
             } else {
@@ -657,7 +660,7 @@ struct StatsView: View {
             if filtered.isEmpty {
                 Text("Not enough data to show productivity flow")
                     .font(.caption)
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
                     .frame(height: 180, alignment: .center)
                     .frame(maxWidth: .infinity)
             } else {
@@ -734,16 +737,16 @@ struct StatsView: View {
             HStack {
                 Label("Distraction Breakdown", systemImage: "eye.slash.fill")
                     .font(.headline)
-                    .foregroundStyle(theme.primaryText)
+                    .foregroundStyle(theme.primaryTextColor)
                 Spacer()
                 VStack(alignment: .trailing, spacing: 1) {
-                    Text(Theme.formatDuration(distractionSeconds))
+                    Text(distractionSeconds.formattedDuration())
                         .font(.subheadline.bold())
                         .foregroundStyle(theme.errorColor)
                     if totalActiveSeconds > 0 {
                         Text("\(Int(distractionSeconds / totalActiveSeconds * 100))% of active time")
                             .font(.caption2)
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                     }
                 }
             }
@@ -751,7 +754,7 @@ struct StatsView: View {
             if distractionApps.isEmpty {
                 Text("No distraction time recorded for this period")
                     .font(.caption)
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
                     .padding(.vertical, 8)
                     .frame(maxWidth: .infinity)
             } else {
@@ -773,16 +776,16 @@ struct StatsView: View {
                             }
                         }
                         .frame(width: 100, height: 6)
-                        Text(Theme.formatDuration(app.duration))
+                        Text(app.duration.formattedDuration())
                             .font(.caption.monospacedDigit())
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                             .frame(width: 52, alignment: .trailing)
                     }
                 }
             }
         }
         .padding()
-        .background(theme.cardBg)
+        .background(theme.cardBackgroundColor)
         .cornerRadius(12)
     }
 
@@ -795,7 +798,7 @@ struct StatsView: View {
                 Spacer()
                 Text("\(appUsages.count) apps")
                     .font(.caption)
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
             }
 
             let displayApps = showAllApps ? appUsages : Array(appUsages.prefix(10))
@@ -809,18 +812,18 @@ struct StatsView: View {
                                 .font(.subheadline.bold())
                             Text(app.category.rawValue)
                                 .font(.caption2)
-                                .foregroundStyle(theme.secondaryText)
+                                .foregroundStyle(theme.secondaryTextColor)
                         }
                         Spacer()
-                        Text(Theme.formatDuration(app.duration))
+                        Text(app.duration.formattedDuration())
                             .font(.caption)
                             .monospacedDigit()
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
 
                         // Usage bar
                         let fraction = CGFloat(app.duration / max(totalActiveSeconds, 1))
                         RoundedRectangle(cornerRadius: 3)
-                            .fill(Theme.color(for: app.category))
+                            .fill(app.category.color)
                             .frame(width: 80 * fraction, height: 8)
                             .frame(width: 80, alignment: .leading)
                     }
@@ -849,7 +852,7 @@ struct StatsView: View {
             }
         }
         .padding()
-        .background(theme.cardBg)
+        .background(theme.cardBackgroundColor)
         .cornerRadius(12)
     }
 
@@ -861,11 +864,11 @@ struct StatsView: View {
                     .font(.headline)
                 Text("(\(filteredSessions.count))")
                     .font(.caption)
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
                 Spacer()
                 HStack(spacing: 4) {
                     Image(systemName: "magnifyingglass")
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                     TextField("Search", text: $searchText)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 180)
@@ -875,7 +878,7 @@ struct StatsView: View {
             if filteredSessions.isEmpty {
                 Text("No sessions found")
                     .font(.caption)
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
                     .padding(.vertical, 20)
                     .frame(maxWidth: .infinity)
             }
@@ -884,15 +887,15 @@ struct StatsView: View {
                 Button(action: { selectedSessionSlot = slot }) {
                     HStack(spacing: 8) {
                         RoundedRectangle(cornerRadius: 3)
-                            .fill(Theme.color(for: slot.category))
+                            .fill(slot.category.color)
                             .frame(width: 4, height: 40)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(appState.sessionTitle(for: slot))
                                 .font(.subheadline.bold())
                                 .lineLimit(1)
-                            Text(Theme.formatTimeRange(slot.startTime, slot.endTime))
+                            Text(slot.startTime.formattedRange(to: slot.endTime))
                                 .font(.caption2)
-                                .foregroundStyle(theme.secondaryText)
+                                .foregroundStyle(theme.secondaryTextColor)
                         }
                         Spacer()
                         HStack(spacing: 4) {
@@ -903,12 +906,12 @@ struct StatsView: View {
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background(Theme.color(for: slot.category).opacity(0.12))
+                        .background(slot.category.color.opacity(0.12))
                         .cornerRadius(6)
 
-                        Text(Theme.formatDuration(slot.activeDuration))
+                        Text(slot.activeDuration.formattedDuration())
                             .font(.caption.monospacedDigit())
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                             .frame(width: 50, alignment: .trailing)
                     }
                     .contentShape(Rectangle())
@@ -919,7 +922,7 @@ struct StatsView: View {
             }
         }
         .padding()
-        .background(theme.cardBg)
+        .background(theme.cardBackgroundColor)
         .cornerRadius(12)
     }
 
@@ -959,18 +962,18 @@ struct StatsView: View {
 
             if total == 0 {
                 Text("No tasks linked to sessions for this period")
-                    .font(.caption).foregroundStyle(theme.secondaryText)
+                    .font(.caption).foregroundStyle(theme.secondaryTextColor)
                     .frame(maxWidth: .infinity, alignment: .center)
             } else {
                 // Progress bar
                 HStack {
                     Text("\(Int(rate * 100))% complete")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(theme.primaryText)
+                        .foregroundStyle(theme.primaryTextColor)
                     Spacer()
                     Text("\(done) / \(total)")
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
@@ -988,12 +991,12 @@ struct StatsView: View {
                 HStack(spacing: 0) {
                     statusPill(label: "Done", count: done, color: theme.successColor)
                     statusPill(label: "In Progress", count: inProg, color: theme.warningColor)
-                    statusPill(label: "Pending", count: pending, color: theme.secondaryText)
+                    statusPill(label: "Pending", count: pending, color: theme.secondaryTextColor)
                 }
             }
         }
         .padding()
-        .background(theme.cardBg)
+        .background(theme.cardBackgroundColor)
         .cornerRadius(12)
     }
 
@@ -1001,10 +1004,10 @@ struct StatsView: View {
     private func statusPill(label: String, count: Int, color: Color) -> some View {
         HStack(spacing: 5) {
             Circle().fill(color).frame(width: 8, height: 8)
-            Text(label).font(.caption).foregroundStyle(theme.secondaryText)
+            Text(label).font(.caption).foregroundStyle(theme.secondaryTextColor)
             Text("\(count)")
                 .font(.caption.weight(.semibold).monospacedDigit())
-                .foregroundStyle(theme.primaryText)
+                .foregroundStyle(theme.primaryTextColor)
         }
         .padding(.horizontal, 10).padding(.vertical, 5)
         .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
@@ -1013,7 +1016,7 @@ struct StatsView: View {
 
     private var timerSummaryCards: some View {
         HStack(spacing: 12) {
-            SummaryCard(title: "Timer Total", value: timerTotalSeconds >= 60 ? Theme.formatDuration(timerTotalSeconds) : "—",
+            SummaryCard(title: "Timer Total", value: timerTotalSeconds >= 60 ? timerTotalSeconds.formattedDuration() : "—",
                        icon: "timer", color: theme.accentColor)
             let sessionCount = filteredTimerSessions.filter { $0.mode == .pomodoro }.count
             SummaryCard(title: "Sessions", value: sessionCount > 0 ? "\(sessionCount)" : "—",
@@ -1043,8 +1046,8 @@ struct StatsView: View {
         } ?? "—"
 
         return HStack(spacing: 12) {
-            StatMiniCard(title: "Avg Session", value: avgSecs >= 60 ? Theme.formatDuration(avgSecs) : "—")
-            StatMiniCard(title: "Longest", value: longestSecs >= 60 ? Theme.formatDuration(longestSecs) : "—")
+            StatMiniCard(title: "Avg Session", value: avgSecs >= 60 ? avgSecs.formattedDuration() : "—")
+            StatMiniCard(title: "Longest", value: longestSecs >= 60 ? longestSecs.formattedDuration() : "—")
             StatMiniCard(title: "Peak Hour", value: peakLabel)
             StatMiniCard(title: "Sessions", value: "\(sessions.count)")
         }
@@ -1064,7 +1067,7 @@ struct StatsView: View {
 
             if byMode.isEmpty {
                 Text("No sessions for this period")
-                    .font(.caption).foregroundStyle(theme.secondaryText)
+                    .font(.caption).foregroundStyle(theme.secondaryTextColor)
                     .frame(maxWidth: .infinity, minHeight: 80, alignment: .center)
             } else {
                 ForEach(byMode, id: \.mode) { item in
@@ -1082,14 +1085,14 @@ struct StatsView: View {
                                     .frame(width: max(4, geo.size.width * CGFloat(fraction)), height: 6)
                             }
                         }.frame(width: 80, height: 6)
-                        Text(Theme.formatDuration(item.duration))
-                            .font(.caption.monospacedDigit()).foregroundStyle(theme.secondaryText).frame(width: 52, alignment: .trailing)
+                        Text(item.duration.formattedDuration())
+                            .font(.caption.monospacedDigit()).foregroundStyle(theme.secondaryTextColor).frame(width: 52, alignment: .trailing)
                     }
                 }
             }
         }
         .padding()
-        .background(theme.cardBg)
+        .background(theme.cardBackgroundColor)
         .cornerRadius(12)
     }
 
@@ -1119,7 +1122,7 @@ struct StatsView: View {
 
             if data.isEmpty {
                 Text("No sessions for this period")
-                    .font(.caption).foregroundStyle(theme.secondaryText)
+                    .font(.caption).foregroundStyle(theme.secondaryTextColor)
                     .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
             } else {
                 Chart(data, id: \.x) { item in
@@ -1151,7 +1154,7 @@ struct StatsView: View {
             }
         }
         .padding()
-        .background(theme.cardBg)
+        .background(theme.cardBackgroundColor)
         .cornerRadius(12)
     }
 
@@ -1161,7 +1164,7 @@ struct StatsView: View {
             switch status {
             case .done:       return ("Done", theme.successColor)
             case .inProgress: return ("Active", theme.warningColor)
-            case .pending:    return ("Pending", theme.secondaryText)
+            case .pending:    return ("Pending", theme.secondaryTextColor)
             }
         }()
         Text(label)
@@ -1188,7 +1191,7 @@ struct StatsView: View {
 
             if byTask.isEmpty {
                 Text("No sessions linked to tasks for this period")
-                    .font(.caption).foregroundStyle(theme.secondaryText)
+                    .font(.caption).foregroundStyle(theme.secondaryTextColor)
                     .frame(maxWidth: .infinity, minHeight: 60, alignment: .center)
             } else {
                 ForEach(Array(byTask.enumerated()), id: \.offset) { _, item in
@@ -1201,7 +1204,7 @@ struct StatsView: View {
                                 .font(.subheadline.weight(.medium)).lineLimit(1)
                             if let todo = item.todo {
                                 Text(todo.status.rawValue.capitalized)
-                                    .font(.caption2).foregroundStyle(theme.secondaryText)
+                                    .font(.caption2).foregroundStyle(theme.secondaryTextColor)
                             }
                         }
                         Spacer()
@@ -1213,15 +1216,15 @@ struct StatsView: View {
                                     .frame(width: max(4, geo.size.width * CGFloat(fraction)), height: 6)
                             }
                         }.frame(width: 100, height: 6)
-                        Text(Theme.formatDuration(item.duration))
-                            .font(.caption.monospacedDigit()).foregroundStyle(theme.secondaryText).frame(width: 52, alignment: .trailing)
+                        Text(item.duration.formattedDuration())
+                            .font(.caption.monospacedDigit()).foregroundStyle(theme.secondaryTextColor).frame(width: 52, alignment: .trailing)
                     }
                     .padding(.vertical, 3)
                 }
             }
         }
         .padding()
-        .background(theme.cardBg)
+        .background(theme.cardBackgroundColor)
         .cornerRadius(12)
     }
 
@@ -1231,13 +1234,13 @@ struct StatsView: View {
                 Text("Sessions")
                     .font(.headline)
                 Text("(\(filteredTimerSessions.count))")
-                    .font(.caption).foregroundStyle(theme.secondaryText)
+                    .font(.caption).foregroundStyle(theme.secondaryTextColor)
                 Spacer()
             }
 
             if filteredTimerSessions.isEmpty {
                 Text("No timer sessions for this period")
-                    .font(.caption).foregroundStyle(theme.secondaryText)
+                    .font(.caption).foregroundStyle(theme.secondaryTextColor)
                     .frame(maxWidth: .infinity, minHeight: 60, alignment: .center)
             } else {
                 let sorted = filteredTimerSessions.sorted { $0.startedAt > $1.startedAt }
@@ -1257,12 +1260,12 @@ struct StatsView: View {
                             } else {
                                 Text(session.mode.rawValue).font(.subheadline.weight(.medium))
                             }
-                            Text(Theme.formatTimeRange(session.startedAt, session.endedAt))
-                                .font(.caption2).foregroundStyle(theme.secondaryText)
+                            Text(session.startedAt.formattedRange(to: session.endedAt))
+                                .font(.caption2).foregroundStyle(theme.secondaryTextColor)
                         }
                         Spacer()
-                        Text(Theme.formatDuration(session.duration))
-                            .font(.caption.monospacedDigit()).foregroundStyle(theme.secondaryText)
+                        Text(session.duration.formattedDuration())
+                            .font(.caption.monospacedDigit()).foregroundStyle(theme.secondaryTextColor)
                     }
                     .padding(.vertical, 3)
                     Divider()
@@ -1270,7 +1273,7 @@ struct StatsView: View {
             }
         }
         .padding()
-        .background(theme.cardBg)
+        .background(theme.cardBackgroundColor)
         .cornerRadius(12)
     }
 
@@ -1633,10 +1636,10 @@ struct SummaryCard: View {
     let icon: String
     let color: Color
     var delta: String? = nil
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     private func deltaColor(_ d: String) -> Color {
-        d.hasPrefix("+") ? AppSettings.shared.appTheme.successColor : AppSettings.shared.appTheme.errorColor
+        d.hasPrefix("+") ? theme.successColor : theme.errorColor
     }
 
     var body: some View {
@@ -1651,7 +1654,7 @@ struct SummaryCard: View {
                 .frame(height: 20) // stable height regardless of content
             Text(title)
                 .font(.caption2)
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
             if let d = delta {
                 Text(d)
                     .font(.system(size: 9, weight: .semibold))
@@ -1660,7 +1663,7 @@ struct SummaryCard: View {
         }
         .frame(maxWidth: .infinity, minHeight: 80)
         .padding(.vertical, 12)
-        .background(AppSettings.shared.appTheme.cardBg)
+        .background(theme.cardBackgroundColor)
         .cornerRadius(10)
     }
 }
@@ -1669,15 +1672,15 @@ struct SummaryCard: View {
 private struct StatMiniCard: View {
     let title: String
     let value: String
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
     var body: some View {
         VStack(spacing: 4) {
             Text(value).font(.title3.weight(.semibold))
-            Text(title).font(.caption2).foregroundStyle(theme.secondaryText)
+            Text(title).font(.caption2).foregroundStyle(theme.secondaryTextColor)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 10)
-        .background(theme.cardBg)
+        .background(theme.cardBackgroundColor)
         .cornerRadius(10)
     }
 }
@@ -1687,7 +1690,7 @@ struct AppDetailSheet: View {
     let app: AppUsageInfo
     let allActivities: [ActivityRecord]
     @Environment(\.dismiss) private var dismiss
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     private var appActivities: [ActivityRecord] {
         allActivities.filter { $0.appName == app.appName && !$0.isIdle }
@@ -1716,17 +1719,17 @@ struct AppDetailSheet: View {
                         .font(.title2.bold())
                     HStack(spacing: 6) {
                         Image(systemName: app.category.icon)
-                            .foregroundStyle(Theme.color(for: app.category))
+                            .foregroundStyle(app.category.color)
                         Text(app.category.rawValue)
                             .font(.subheadline)
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                     }
                 }
                 Spacer()
                 Button(action: { dismiss() }) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.title2)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
                 .buttonStyle(.plain)
             }
@@ -1736,25 +1739,25 @@ struct AppDetailSheet: View {
             // Stats
             HStack(spacing: 24) {
                 VStack {
-                    Text(Theme.formatDuration(app.duration))
+                    Text(app.duration.formattedDuration())
                         .font(.title3.bold())
                     Text("Total Time")
                         .font(.caption)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
                 VStack {
                     Text("\(uniqueTitles.count)")
                         .font(.title3.bold())
                     Text("Windows")
                         .font(.caption)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
                 VStack {
                     Text("\(appActivities.count)")
                         .font(.title3.bold())
                     Text("Records")
                         .font(.caption)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
             }
 
@@ -1770,9 +1773,9 @@ struct AppDetailSheet: View {
                                     .font(.caption)
                                     .lineLimit(2)
                                 Spacer()
-                                Text(Theme.formatDuration(item.duration))
+                                Text(item.duration.formattedDuration())
                                     .font(.caption2)
-                                    .foregroundStyle(theme.secondaryText)
+                                    .foregroundStyle(theme.secondaryTextColor)
                                     .monospacedDigit()
                             }
                             .padding(.vertical, 3)
@@ -1790,9 +1793,9 @@ struct AppDetailSheet: View {
                         .font(.headline)
                     let firstTime = app.timestamps.first!
                     let lastTime = app.timestamps.last!
-                    Text("\(Theme.formatTime(firstTime)) – \(Theme.formatTime(lastTime))")
+                    Text("\(firstTime.formattedTime()) – \(lastTime.formattedTime())")
                         .font(.caption)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
             }
         }
@@ -1806,7 +1809,7 @@ struct CategoryDetailSheet: View {
     let stat: CategoryStat
     let activities: [ActivityRecord]
     @Environment(\.dismiss) private var dismiss
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     private var appBreakdown: [(name: String, bundleID: String, duration: Double)] {
         var dict: [String: (bundleID: String, duration: Double)] = [:]
@@ -1824,19 +1827,19 @@ struct CategoryDetailSheet: View {
             HStack {
                 Image(systemName: stat.category.icon)
                     .font(.title2)
-                    .foregroundStyle(Theme.color(for: stat.category))
+                    .foregroundStyle(stat.category.color)
                 VStack(alignment: .leading) {
                     Text(stat.category.rawValue)
                         .font(.title2.bold())
-                    Text("\(Int(stat.percentage))% of total • \(Theme.formatDuration(stat.totalSeconds))")
+                    Text("\(Int(stat.percentage))% of total • \(stat.totalSeconds.formattedDuration())")
                         .font(.subheadline)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
                 Spacer()
                 Button(action: { dismiss() }) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.title2)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
                 .buttonStyle(.plain)
             }
@@ -1854,13 +1857,13 @@ struct CategoryDetailSheet: View {
                             Text(item.name)
                                 .font(.subheadline)
                             Spacer()
-                            Text(Theme.formatDuration(item.duration))
+                            Text(item.duration.formattedDuration())
                                 .font(.caption)
                                 .monospacedDigit()
-                                .foregroundStyle(theme.secondaryText)
+                                .foregroundStyle(theme.secondaryTextColor)
                             let frac = CGFloat(item.duration / max(stat.totalSeconds, 1))
                             RoundedRectangle(cornerRadius: 3)
-                                .fill(Theme.color(for: stat.category))
+                                .fill(stat.category.color)
                                 .frame(width: 60 * frac, height: 8)
                                 .frame(width: 60, alignment: .leading)
                         }

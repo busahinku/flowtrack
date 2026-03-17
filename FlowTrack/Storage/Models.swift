@@ -372,147 +372,6 @@ enum SyncProvider: String, CaseIterable, Sendable {
     }
 }
 
-// MARK: - AppSettings
-@MainActor @Observable
-final class AppSettings {
-    static let shared = AppSettings()
-
-    var aiProvider: AIProviderType {
-        didSet { UserDefaults.standard.set(aiProvider.rawValue, forKey: "aiProvider") }
-    }
-    var secondaryProvider: AIProviderType? {
-        didSet { UserDefaults.standard.set(secondaryProvider?.rawValue, forKey: "secondaryProvider") }
-    }
-    var tertiaryProvider: AIProviderType? {
-        didSet { UserDefaults.standard.set(tertiaryProvider?.rawValue, forKey: "tertiaryProvider") }
-    }
-    var aiSummariesEnabled: Bool {
-        didSet { UserDefaults.standard.set(aiSummariesEnabled, forKey: "aiSummariesEnabled") }
-    }
-    var aiBatchIntervalMinutes: Int {
-        didSet {
-            UserDefaults.standard.set(aiBatchIntervalMinutes, forKey: "aiBatchIntervalMinutes")
-            AppState.shared.resetAITimer()
-        }
-    }
-    var aiBatchSize: Int {
-        didSet { UserDefaults.standard.set(aiBatchSize, forKey: "aiBatchSize") }
-    }
-    var showDockIcon: Bool {
-        didSet {
-            UserDefaults.standard.set(showDockIcon, forKey: "showDockIcon")
-            NSApp?.setActivationPolicy(showDockIcon ? .regular : .accessory)
-        }
-    }
-    var showAppIcons: Bool {
-        didSet { UserDefaults.standard.set(showAppIcons, forKey: "showAppIcons") }
-    }
-    var launchAtLogin: Bool {
-        didSet { UserDefaults.standard.set(launchAtLogin, forKey: "launchAtLogin") }
-    }
-    var hasCompletedOnboarding: Bool {
-        didSet { UserDefaults.standard.set(hasCompletedOnboarding, forKey: "hasCompletedOnboarding") }
-    }
-    var appTheme: AppTheme {
-        didSet { UserDefaults.standard.set(appTheme.rawValue, forKey: "appTheme") }
-    }
-    var captureWindowTitles: Bool {
-        didSet { UserDefaults.standard.set(captureWindowTitles, forKey: "captureWindowTitles") }
-    }
-    var excludedBundleIDs: [String] {
-        didSet { UserDefaults.standard.set(excludedBundleIDs, forKey: "excludedBundleIDs") }
-    }
-    var idleThresholdSeconds: Int {
-        didSet { UserDefaults.standard.set(idleThresholdSeconds, forKey: "idleThresholdSeconds") }
-    }
-    var distractionAlertMinutes: Int {
-        didSet { UserDefaults.standard.set(distractionAlertMinutes, forKey: "distractionAlertMinutes") }
-    }
-    var retentionDays: Int {
-        didSet { UserDefaults.standard.set(retentionDays, forKey: "retentionDays") }
-    }
-    var sessionWorkMinutes: Int {
-        didSet { UserDefaults.standard.set(sessionWorkMinutes, forKey: "sessionWorkMinutes") }
-    }
-    var sessionBreakMinutes: Int {
-        didSet { UserDefaults.standard.set(sessionBreakMinutes, forKey: "sessionBreakMinutes") }
-    }
-    var sessionLongBreakMinutes: Int {
-        didSet { UserDefaults.standard.set(sessionLongBreakMinutes, forKey: "sessionLongBreakMinutes") }
-    }
-    var sessionsBeforeLong: Int {
-        didSet { UserDefaults.standard.set(sessionsBeforeLong, forKey: "sessionsBeforeLong") }
-    }
-    var countdownMinutes: Int {
-        didSet { UserDefaults.standard.set(countdownMinutes, forKey: "countdownMinutes") }
-    }
-    var use24HourClock: Bool {
-        didSet { UserDefaults.standard.set(use24HourClock, forKey: "use24HourClock") }
-    }
-    var defaultTimerMode: TimerMode {
-        didSet { UserDefaults.standard.set(defaultTimerMode.rawValue, forKey: "defaultTimerMode") }
-    }
-    var sessionGapSeconds: Int {
-        didSet { UserDefaults.standard.set(sessionGapSeconds, forKey: "sessionGapSeconds") }
-    }
-    var syncProvider: SyncProvider {
-        didSet { UserDefaults.standard.set(syncProvider.rawValue, forKey: "syncProvider") }
-    }
-    var lastSyncDate: Date? {
-        didSet { UserDefaults.standard.set(lastSyncDate, forKey: "lastSyncDate") }
-    }
-    var autoSyncEnabled: Bool {
-        didSet { UserDefaults.standard.set(autoSyncEnabled, forKey: "autoSyncEnabled") }
-    }
-    var autoSyncIntervalDays: Int {
-        didSet { UserDefaults.standard.set(autoSyncIntervalDays, forKey: "autoSyncIntervalDays") }
-    }
-
-    private init() {
-        let defaults = UserDefaults.standard
-        self.aiProvider = AIProviderType(rawValue: defaults.string(forKey: "aiProvider") ?? "") ?? .claudeCLI
-        self.secondaryProvider = AIProviderType(rawValue: defaults.string(forKey: "secondaryProvider") ?? "")
-        self.tertiaryProvider = AIProviderType(rawValue: defaults.string(forKey: "tertiaryProvider") ?? "")
-        self.aiSummariesEnabled = defaults.object(forKey: "aiSummariesEnabled") as? Bool ?? true
-        self.aiBatchIntervalMinutes = defaults.object(forKey: "aiBatchIntervalMinutes") as? Int ?? 30
-        self.aiBatchSize = defaults.object(forKey: "aiBatchSize") as? Int ?? 30
-        self.showDockIcon = defaults.bool(forKey: "showDockIcon")
-        self.showAppIcons = defaults.object(forKey: "showAppIcons") as? Bool ?? true
-        self.launchAtLogin = defaults.bool(forKey: "launchAtLogin")
-        self.hasCompletedOnboarding = defaults.bool(forKey: "hasCompletedOnboarding")
-        self.appTheme = AppTheme(rawValue: defaults.string(forKey: "appTheme") ?? "") ?? .system
-        self.captureWindowTitles = defaults.object(forKey: "captureWindowTitles") as? Bool ?? true
-        self.excludedBundleIDs = defaults.stringArray(forKey: "excludedBundleIDs") ?? []
-        self.idleThresholdSeconds = defaults.object(forKey: "idleThresholdSeconds") as? Int ?? 120
-        self.distractionAlertMinutes = defaults.object(forKey: "distractionAlertMinutes") as? Int ?? 0
-        self.retentionDays = defaults.object(forKey: "retentionDays") as? Int ?? 90
-        self.sessionWorkMinutes = (defaults.object(forKey: "sessionWorkMinutes") ?? defaults.object(forKey: "pomodoroWorkMinutes")) as? Int ?? 25
-        self.sessionBreakMinutes = (defaults.object(forKey: "sessionBreakMinutes") ?? defaults.object(forKey: "pomodoroBreakMinutes")) as? Int ?? 5
-        self.sessionLongBreakMinutes = (defaults.object(forKey: "sessionLongBreakMinutes") ?? defaults.object(forKey: "pomodoroLongBreakMinutes")) as? Int ?? 15
-        self.sessionsBeforeLong = (defaults.object(forKey: "sessionsBeforeLong") ?? defaults.object(forKey: "pomodoroSessionsBeforeLong")) as? Int ?? 4
-        self.countdownMinutes = defaults.object(forKey: "countdownMinutes") as? Int ?? 25
-        self.use24HourClock = defaults.object(forKey: "use24HourClock") as? Bool ?? true
-        self.defaultTimerMode = TimerMode(rawValue: defaults.string(forKey: "defaultTimerMode") ?? "") ?? .stopwatch
-        self.sessionGapSeconds = defaults.object(forKey: "sessionGapSeconds") as? Int ?? 300
-        self.syncProvider = SyncProvider(rawValue: defaults.string(forKey: "syncProvider") ?? "") ?? .none
-        self.lastSyncDate = defaults.object(forKey: "lastSyncDate") as? Date
-        self.autoSyncEnabled = defaults.bool(forKey: "autoSyncEnabled")
-        self.autoSyncIntervalDays = defaults.object(forKey: "autoSyncIntervalDays") as? Int ?? 1
-    }
-
-    func modelName(for provider: AIProviderType) -> String {
-        UserDefaults.standard.string(forKey: "model_\(provider.rawValue)") ?? provider.defaultModel
-    }
-
-    func setModelName(_ name: String, for provider: AIProviderType) {
-        UserDefaults.standard.set(name, forKey: "model_\(provider.rawValue)")
-    }
-
-    var currentModelName: String {
-        modelName(for: aiProvider)
-    }
-}
-
 // MARK: - Todo Models
 
 enum TodoStatus: String, Codable, CaseIterable, Sendable {
@@ -529,7 +388,7 @@ enum TodoPriority: Int, Codable, CaseIterable, Sendable {
     case low = 0, medium = 1, high = 2
     var label: String { ["Low", "Medium", "High"][rawValue] }
     var color: Color {
-        let theme = AppSettings.shared.appTheme
+        let theme = Theme.shared
         switch self {
         case .low:    return theme.successColor
         case .medium: return theme.warningColor
@@ -583,7 +442,7 @@ enum SessionPhase: String, Sendable {
         switch self { case .work: "Focus"; case .shortBreak: "Short Break"; case .longBreak: "Long Break" }
     }
     var color: Color {
-        let theme = AppSettings.shared.appTheme
+        let theme = Theme.shared
         switch self {
         case .work:       return theme.infoColor
         case .shortBreak: return theme.successColor

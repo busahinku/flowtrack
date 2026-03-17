@@ -46,7 +46,7 @@ actor ContentAIClassifier {
     private func classifyWithAI(_ title: String) async -> Bool? {
         // Read provider config on the main actor
         let (providerType, isCliProvider, provider): (AIProviderType, Bool, any AIProvider) = await MainActor.run {
-            let settings = AppSettings.shared
+            let settings = SettingsStorage.shared
             let type = settings.aiProvider
             // CLI tools spawn child processes — unsuitable for real-time 1-word calls
             let cli = type.isCLI

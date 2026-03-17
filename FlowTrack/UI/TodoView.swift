@@ -25,13 +25,13 @@ private enum DueSection: String {
     }
 
     var color: Color {
-        let t = AppSettings.shared.appTheme
+        let t = Theme.shared
         switch self {
         case .overdue:          return t.errorColor
         case .today:            return t.infoColor
         case .tomorrow:         return t.warningColor
         case .thisWeek:         return t.infoColor
-        case .later, .someday:  return t.secondaryText
+        case .later, .someday:  return t.secondaryTextColor
         case .completed:        return t.successColor
         }
     }
@@ -52,7 +52,8 @@ struct TodoView: View {
     @State private var collapsedSections: Set<String> = ["Completed"]
     @Namespace private var filterNS
 
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
+    @Environment(SettingsStorage.self) private var settings
 
     var body: some View {
         VStack(spacing: 0) {
@@ -60,12 +61,14 @@ struct TodoView: View {
             todoHeader
             todoList
         }
-        .background(theme.timelineBg)
+        .background(theme.timelineBackgroundColor)
         .sheet(isPresented: $showAdd) {
             TodoEditSheet(todo: nil, defaultDueDate: isFutureDate ? selectedDate : nil)
+                .withEnvironment()
         }
         .sheet(item: $editingTodo) { todo in
             TodoEditSheet(todo: todo)
+                .withEnvironment()
         }
         .toolbar {
             ToolbarItem(placement: .principal) { todoDateNav }
@@ -73,7 +76,7 @@ struct TodoView: View {
                 Button { showAdd = true } label: {
                     Label("New Task", systemImage: "plus")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(theme.selectedForeground)
+                        .foregroundStyle(theme.selectedForegroundColor)
                         .padding(.horizontal, 12).padding(.vertical, 6)
                         .background(theme.accentColor, in: RoundedRectangle(cornerRadius: 8))
                 }
@@ -125,7 +128,7 @@ struct TodoView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(theme.secondaryText)
+            .foregroundStyle(theme.secondaryTextColor)
 
             Button { showDatePicker.toggle() } label: {
                 HStack(spacing: 5) {
@@ -156,7 +159,7 @@ struct TodoView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(theme.secondaryText)
+            .foregroundStyle(theme.secondaryTextColor)
         }
     }
 
@@ -198,7 +201,7 @@ struct TodoView: View {
                     } else {
                         Text("\(undone) left")
                             .font(.caption.weight(.medium))
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                     }
                     CircularProgress(
                         progress: total > 0 ? Double(done) / Double(total) : 0,
@@ -222,7 +225,7 @@ struct TodoView: View {
                 Text(label)
             }
             .font(.subheadline.weight(isSelected ? .semibold : .regular))
-            .foregroundStyle(isSelected ? theme.selectedForeground : theme.secondaryText)
+            .foregroundStyle(isSelected ? theme.selectedForegroundColor : theme.secondaryTextColor)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .contentShape(Rectangle())
@@ -360,11 +363,11 @@ struct TodoView: View {
                     .foregroundStyle(group.section.color)
                 Text(group.section.rawValue.uppercased())
                     .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
                     .tracking(0.5)
                 Text("\(group.tasks.count)")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(theme.selectedForeground)
+                    .foregroundStyle(theme.selectedForegroundColor)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
                     .background(group.section.color.opacity(0.75), in: Capsule())
@@ -391,7 +394,7 @@ struct TodoView: View {
                 Task { await store.breakdown(todo: todo) }
             },
             onSetTimer:  {
-                let defaultMode = AppSettings.shared.defaultTimerMode
+                let defaultMode = settings.defaultTimerMode
                 if timerStore.mode != defaultMode { timerStore.switchMode(defaultMode) }
                 timerStore.setTodo(todo.id)
                 AppState.shared.requestedTab = .timer
@@ -444,7 +447,7 @@ struct TodoView: View {
                 .multilineTextAlignment(.center)
             Text("Schedule a task with this date as its due date")
                 .font(.subheadline)
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
                 .multilineTextAlignment(.center)
             Button { showAdd = true } label: {
                 Label("Schedule Task", systemImage: "calendar.badge.plus")
@@ -470,7 +473,7 @@ struct TodoView: View {
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 12)
-        .background(theme.cardBg, in: RoundedRectangle(cornerRadius: 10))
+        .background(theme.cardBackgroundColor, in: RoundedRectangle(cornerRadius: 10))
     }
 
     // MARK: - Past Date List
@@ -530,7 +533,7 @@ struct TodoView: View {
                 .font(.title3.bold())
             Text("No timer sessions were recorded on this day")
                 .font(.subheadline)
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 260)
         }
@@ -545,15 +548,15 @@ struct TodoView: View {
                 .foregroundStyle(theme.accentColor)
             Text("\(count) task\(count == 1 ? "" : "s")")
                 .font(.subheadline.weight(.semibold))
-            Text("·").foregroundStyle(theme.secondaryText)
-            Text(totalTime >= 60 ? "\(Theme.formatDuration(totalTime)) tracked" : "No time tracked")
+            Text("·").foregroundStyle(theme.secondaryTextColor)
+            Text(totalTime >= 60 ? "\(totalTime.formattedDuration()) tracked" : "No time tracked")
                 .font(.subheadline)
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
             Spacer()
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 12)
-        .background(theme.cardBg, in: RoundedRectangle(cornerRadius: 10))
+        .background(theme.cardBackgroundColor, in: RoundedRectangle(cornerRadius: 10))
     }
 
     // MARK: - Empty State (Today)
@@ -578,7 +581,7 @@ struct TodoView: View {
                  ? "Try a different search term"
                  : (filterStatus == nil ? "Tap + to add your first task" : "Tasks will appear here when status matches"))
                 .font(.subheadline)
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 260)
             if filterStatus == nil && searchText.isEmpty {
@@ -658,7 +661,7 @@ struct TodoRowView: View {
     @State private var subtasksExpanded = true
     @State private var newSubtaskTitle = ""
     @State private var showingAddSubtask = false
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
     private var store: TodoStore { TodoStore.shared }
 
     private var isOverdue: Bool {
@@ -685,7 +688,7 @@ struct TodoRowView: View {
                             Circle().fill(theme.successColor).frame(width: 22, height: 22)
                             Image(systemName: "checkmark")
                                 .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(theme.selectedForeground)
+                                .foregroundStyle(theme.selectedForegroundColor)
                         } else if todo.status == .inProgress {
                             Circle().fill(todo.priority.color.opacity(0.15)).frame(width: 22, height: 22)
                             Circle().fill(todo.priority.color).frame(width: 8, height: 8)
@@ -704,8 +707,8 @@ struct TodoRowView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(todo.title)
                                 .font(.body.weight(todo.status == .inProgress ? .semibold : .regular))
-                                .foregroundStyle(todo.status == .done ? theme.secondaryText : theme.primaryText)
-                                .strikethrough(todo.status == .done, color: theme.secondaryText.opacity(0.5))
+                                .foregroundStyle(todo.status == .done ? theme.secondaryTextColor : theme.primaryTextColor)
+                                .strikethrough(todo.status == .done, color: theme.secondaryTextColor.opacity(0.5))
                                 .lineLimit(2)
                                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -745,7 +748,7 @@ struct TodoRowView: View {
                                         Image(systemName: "clock.fill").font(.system(size: 8))
                                         Text(formatDuration(trackedTime)).font(.system(size: 10, weight: .medium))
                                     }
-                                    .foregroundStyle(theme.secondaryText)
+                                    .foregroundStyle(theme.secondaryTextColor)
                                     .padding(.horizontal, 6).padding(.vertical, 2)
                                     .background(.quaternary, in: Capsule())
                                 }
@@ -776,10 +779,10 @@ struct TodoRowView: View {
                             Text("\(todo.completedSubtaskCount)/\(todo.subtasks.count)")
                                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(todo.completedSubtaskCount == todo.subtasks.count
-                                                 ? theme.successColor : theme.secondaryText)
+                                                 ? theme.successColor : theme.secondaryTextColor)
                             Image(systemName: subtasksExpanded ? "chevron.up" : "chevron.down")
                                 .font(.system(size: 9, weight: .semibold))
-                                .foregroundStyle(theme.secondaryText)
+                                .foregroundStyle(theme.secondaryTextColor)
                         }
                         .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(theme.dividerColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
@@ -797,8 +800,7 @@ struct TodoRowView: View {
                             subtask: subtask,
                             parentId: todo.id,
                             index: index,
-                            count: todo.subtasks.count,
-                            theme: theme
+                            count: todo.subtasks.count
                         )
                     }
                     .animation(.easeInOut(duration: 0.2), value: todo.subtasks.map(\.id))
@@ -822,7 +824,7 @@ struct TodoRowView: View {
                                 showingAddSubtask = false
                             }
                             .font(.caption)
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                         }
                         .padding(.vertical, 6)
                         .padding(.trailing, 12)
@@ -834,7 +836,7 @@ struct TodoRowView: View {
                                 Image(systemName: "plus").font(.system(size: 10, weight: .semibold))
                                 Text("Add subtask").font(.system(size: 11))
                             }
-                            .foregroundStyle(theme.secondaryText.opacity(0.6))
+                            .foregroundStyle(theme.secondaryTextColor.opacity(0.6))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.leading, 38)
                             .padding(.vertical, 5)
@@ -847,7 +849,7 @@ struct TodoRowView: View {
         }
         .background {
             RoundedRectangle(cornerRadius: 10)
-                .fill(theme.cardBg)
+                .fill(theme.cardBackgroundColor)
                 .shadow(
                     color: isHovered ? theme.shadowColor.opacity(0.08) : theme.shadowColor.opacity(0.03),
                     radius: isHovered ? 6 : 3, y: 1
@@ -921,7 +923,7 @@ struct TodoRowView: View {
                 return ("Tomorrow", t.warningColor, "sunrise.fill")
             } else {
                 let fmt = DateFormatter(); fmt.dateFormat = "MMM d"
-                return (fmt.string(from: due), t.secondaryText, "calendar")
+                return (fmt.string(from: due), t.secondaryTextColor, "calendar")
             }
         }()
 
@@ -929,9 +931,9 @@ struct TodoRowView: View {
             Image(systemName: icon).font(.system(size: 8))
             Text(label).font(.system(size: 10, weight: .medium))
         }
-        .foregroundStyle(todo.status == .done ? t.secondaryText : color)
+        .foregroundStyle(todo.status == .done ? t.secondaryTextColor : color)
         .padding(.horizontal, 6).padding(.vertical, 2)
-        .background((todo.status == .done ? t.secondaryText : color).opacity(0.1), in: Capsule())
+        .background((todo.status == .done ? t.secondaryTextColor : color).opacity(0.1), in: Capsule())
     }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {
@@ -949,7 +951,7 @@ private struct SubtaskRowView: View {
     let parentId: String
     let index: Int
     let count: Int
-    let theme: AppTheme
+    @Environment(Theme.self) private var theme
     @State private var isEditing = false
     @State private var editTitle = ""
     @State private var isHovered = false
@@ -979,7 +981,7 @@ private struct SubtaskRowView: View {
             // Drag handle — visible on hover
             Image(systemName: "line.3.horizontal")
                 .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(theme.secondaryText.opacity(isHovered ? 0.45 : 0))
+                .foregroundStyle(theme.secondaryTextColor.opacity(isHovered ? 0.45 : 0))
                 .frame(width: 16)
                 .padding(.leading, 6)
 
@@ -1006,7 +1008,7 @@ private struct SubtaskRowView: View {
                     if subtask.status == .done {
                         Circle().fill(statusColor).frame(width: 16, height: 16)
                         Image(systemName: "checkmark").font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(theme.selectedForeground)
+                            .foregroundStyle(theme.selectedForegroundColor)
                     } else if subtask.status == .inProgress {
                         Circle().fill(statusColor.opacity(0.2)).frame(width: 16, height: 16)
                         Circle().fill(statusColor).frame(width: 8, height: 8)
@@ -1028,8 +1030,8 @@ private struct SubtaskRowView: View {
             } else {
                 Text(subtask.title)
                     .font(.system(size: 13))
-                    .foregroundStyle(subtask.status == .done ? theme.secondaryText : theme.primaryText)
-                    .strikethrough(subtask.status == .done, color: theme.secondaryText.opacity(0.5))
+                    .foregroundStyle(subtask.status == .done ? theme.secondaryTextColor : theme.primaryTextColor)
+                    .strikethrough(subtask.status == .done, color: theme.secondaryTextColor.opacity(0.5))
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -1050,7 +1052,7 @@ private struct SubtaskRowView: View {
                     Image(systemName: "clock.fill").font(.system(size: 8))
                     Text(formatDuration(subtaskTrackedTime)).font(.system(size: 9, weight: .medium))
                 }
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
                 .padding(.horizontal, 5).padding(.vertical, 2)
                 .background(.quaternary, in: Capsule())
             }
@@ -1145,7 +1147,7 @@ struct TodoEditSheet: View {
     @State private var autoCatch = false
     @State private var autoCatchKeywords = ""
 
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
     private var isEditing: Bool { todo != nil }
 
     var body: some View {
@@ -1178,7 +1180,7 @@ struct TodoEditSheet: View {
                     .font(.body)
                     .frame(height: 70)
                     .padding(4)
-                    .background(theme.cardBg)
+                    .background(theme.cardBackgroundColor)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.2)))
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
@@ -1194,7 +1196,7 @@ struct TodoEditSheet: View {
                                     Image(systemName: p.icon).font(.system(size: 10, weight: .bold))
                                     Text(p.label).font(.caption.weight(.medium))
                                 }
-                                .foregroundStyle(priority == p ? theme.selectedForeground : p.color)
+                                .foregroundStyle(priority == p ? theme.selectedForegroundColor : p.color)
                                 .padding(.horizontal, 10).padding(.vertical, 5)
                                 .background(priority == p ? p.color : p.color.opacity(0.1), in: Capsule())
                             }
@@ -1257,13 +1259,13 @@ struct TodoEditSheet: View {
                 if autoCatch {
                     Text("Auto-starts a stopwatch when your activity matches this task.")
                         .font(.caption)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                     TextField("Keywords (comma-separated)", text: $autoCatchKeywords)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 13))
                     Text("e.g. python, calculus, react tutorial")
                         .font(.caption2)
-                        .foregroundStyle(theme.secondaryText.opacity(0.7))
+                        .foregroundStyle(theme.secondaryTextColor.opacity(0.7))
                 }
             }
             .padding(.horizontal, 12)

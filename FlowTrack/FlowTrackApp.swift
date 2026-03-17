@@ -5,26 +5,30 @@ import Sparkle
 @main
 struct FlowTrackApp: App {
     @NSApplicationDelegateAdaptor(FlowTrackAppDelegate.self) var appDelegate
-    @State private var showOnboarding = !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
+    @State private var theme = Theme.shared
+    @State private var settings = SettingsStorage.shared
+    @State private var showOnboarding = !SettingsStorage.shared.hasCompletedOnboarding
     @Environment(\.openWindow) private var openWindow
     private let updater = AppUpdater.shared
 
     var body: some Scene {
-        // Menu Bar
         MenuBarExtra {
             MenuBarView()
-                .preferredColorScheme(AppSettings.shared.appTheme.colorScheme)
+                .withAppDependency()
+                .preferredColorScheme(theme.colorScheme)
         } label: {
             MenuBarLabelView()
+                .withAppDependency()
         }
         .menuBarExtraStyle(.window)
 
-        // Dashboard Window
         Window("FlowTrack", id: "dashboard") {
             DashboardView()
-                .preferredColorScheme(AppSettings.shared.appTheme.colorScheme)
+                .withAppDependency()
+                .preferredColorScheme(theme.colorScheme)
                 .sheet(isPresented: $showOnboarding) {
                     OnboardingView(isPresented: $showOnboarding)
+                        .withEnvironment()
                 }
                 .onAppear {
                     AppBlockerMonitor.shared.start()
@@ -35,10 +39,10 @@ struct FlowTrackApp: App {
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
 
-        // Settings
         Settings {
             SettingsView()
-                .preferredColorScheme(AppSettings.shared.appTheme.colorScheme)
+                .withAppDependency()
+                .preferredColorScheme(theme.colorScheme)
         }
     }
 }
@@ -98,7 +102,7 @@ class FlowTrackAppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                if !AppSettings.shared.showDockIcon {
+                if !SettingsStorage.shared.showDockIcon {
                     NSApp.setActivationPolicy(.accessory)
                 }
                 if let obs = self.windowCloseObserver {

@@ -13,7 +13,7 @@ struct MenuBarView: View {
     @State private var hoveredTodoId: String?
     @Namespace private var modeNS
     private let sessionTimer = Timer.publish(every: 60, tolerance: 10, on: .main, in: .common).autoconnect()
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     private var phaseColor: Color {
         timer.mode == .pomodoro ? timer.phase.color : theme.accentColor
@@ -63,7 +63,7 @@ struct MenuBarView: View {
 
             footerRow
         }
-        .background(theme.sidebarBg)
+        .background(theme.sidebarBackgroundColor)
         .frame(width: 360)
         .onReceive(sessionTimer) { _ in updateSessionDuration() }
         .onAppear { updateSessionDuration() }
@@ -78,7 +78,7 @@ struct MenuBarView: View {
                     ThemeAwareMenuIcon(size: 13)
                     Text("FlowTrack")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(theme.primaryText)
+                        .foregroundStyle(theme.primaryTextColor)
                 }
                 HStack(spacing: 5) {
                     Circle()
@@ -86,7 +86,7 @@ struct MenuBarView: View {
                         .frame(width: 5, height: 5)
                     Text(tracker.isTracking ? "Tracking · \(todayActiveTime)" : "Not tracking")
                         .font(.caption)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
             }
 
@@ -103,10 +103,10 @@ struct MenuBarView: View {
                 }
                 .padding(.horizontal, 9)
                 .padding(.vertical, 5)
-                .foregroundStyle(tracker.isTracking ? theme.secondaryText : theme.selectedForeground)
+                .foregroundStyle(tracker.isTracking ? theme.secondaryTextColor : theme.selectedForegroundColor)
                 .background(
                     tracker.isTracking
-                        ? theme.secondaryText.opacity(0.12)
+                        ? theme.secondaryTextColor.opacity(0.12)
                         : theme.accentColor,
                     in: RoundedRectangle(cornerRadius: 6)
                 )
@@ -128,7 +128,7 @@ struct MenuBarView: View {
                 ForEach(appState.categoryStats.prefix(6)) { stat in
                     let fraction = total > 0 ? CGFloat(stat.totalSeconds / total) : 0
                     RoundedRectangle(cornerRadius: 0)
-                        .fill(Theme.color(for: stat.category))
+                        .fill(stat.category.color)
                         .frame(width: geo.size.width * fraction)
                 }
             }
@@ -166,7 +166,7 @@ struct MenuBarView: View {
                             Text(mode.rawValue)
                         }
                         .font(.caption.weight(timer.mode == mode ? .semibold : .regular))
-                        .foregroundStyle(timer.mode == mode ? theme.selectedForeground : theme.secondaryText)
+                        .foregroundStyle(timer.mode == mode ? theme.selectedForegroundColor : theme.secondaryTextColor)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 5)
                         .contentShape(Rectangle())
@@ -190,7 +190,7 @@ struct MenuBarView: View {
                 if timer.mode != .stopwatch {
                     ZStack {
                         Circle()
-                            .stroke(theme.secondaryText.opacity(0.1), lineWidth: 2.5)
+                            .stroke(theme.secondaryTextColor.opacity(0.1), lineWidth: 2.5)
                             .frame(width: 28, height: 28)
                         Circle()
                             .trim(from: 0, to: timer.progress)
@@ -215,7 +215,7 @@ struct MenuBarView: View {
                     // Time
                     Text(timer.formattedTime)
                         .font(.system(size: 22, weight: .light, design: .monospaced))
-                        .foregroundStyle(theme.primaryText)
+                        .foregroundStyle(theme.primaryTextColor)
 
                     // Session dots OR today total
                     if timer.mode == .pomodoro && timer.completedSessions > 0 {
@@ -227,7 +227,7 @@ struct MenuBarView: View {
                             }
                             if timer.completedSessions > 8 {
                                 Text("+\(timer.completedSessions - 8)")
-                                    .font(.caption2).foregroundStyle(theme.secondaryText)
+                                    .font(.caption2).foregroundStyle(theme.secondaryTextColor)
                             }
                         }
                     } else {
@@ -235,9 +235,9 @@ struct MenuBarView: View {
                             .filter { Calendar.current.isDateInToday($0.startedAt) }
                             .reduce(0.0) { $0 + $1.duration }
                         if total >= 60 {
-                            Text("Today \(Theme.formatDuration(total))")
+                            Text("Today \(total.formattedDuration())")
                                 .font(.caption2)
-                                .foregroundStyle(theme.secondaryText)
+                                .foregroundStyle(theme.secondaryTextColor)
                         }
                     }
                 }
@@ -251,7 +251,7 @@ struct MenuBarView: View {
                             .frame(width: 26, height: 26)
                             .contentShape(Circle())
                             .background(theme.dividerColor.opacity(0.12), in: Circle())
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                     }
                     .buttonStyle(.plain)
 
@@ -262,7 +262,7 @@ struct MenuBarView: View {
                             .font(.system(size: 12))
                             .frame(width: 36, height: 36)
                             .contentShape(Circle())
-                            .foregroundStyle(theme.selectedForeground)
+                            .foregroundStyle(theme.selectedForegroundColor)
                             .background(
                                 phaseColor,
                                 in: Circle()
@@ -272,7 +272,7 @@ struct MenuBarView: View {
                 }
             }
             .padding(10)
-            .background(theme.cardBg, in: RoundedRectangle(cornerRadius: 10))
+            .background(theme.cardBackgroundColor, in: RoundedRectangle(cornerRadius: 10))
 
             // Task selector (compact dropdown)
             Menu {
@@ -316,16 +316,16 @@ struct MenuBarView: View {
                         Text(todo.title)
                             .font(.caption.weight(.medium))
                             .lineLimit(1)
-                            .foregroundStyle(theme.primaryText)
+                            .foregroundStyle(theme.primaryTextColor)
                     } else {
                         Text("No task linked")
                             .font(.caption)
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                     }
                     Spacer()
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.system(size: 7))
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
@@ -345,12 +345,12 @@ struct MenuBarView: View {
                 HStack(spacing: 4) {
                     Text("Tasks")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(theme.primaryText)
+                        .foregroundStyle(theme.primaryTextColor)
                     let pendingCount = todos.todos.filter { $0.status != .done }.count
                     if pendingCount > 0 {
                         Text("\(pendingCount)")
                             .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(theme.selectedForeground)
+                            .foregroundStyle(theme.selectedForegroundColor)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
                             .background(theme.accentColor, in: Capsule())
@@ -380,7 +380,7 @@ struct MenuBarView: View {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 14))
                         .foregroundStyle(quickAddText.trimmingCharacters(in: .whitespaces).isEmpty
-                                         ? theme.secondaryText.opacity(0.4) : theme.accentColor)
+                                         ? theme.secondaryTextColor.opacity(0.4) : theme.accentColor)
                 }
                 .buttonStyle(.plain)
                 .disabled(quickAddText.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -415,7 +415,7 @@ struct MenuBarView: View {
                             Text(todo.title)
                                 .font(.caption)
                                 .lineLimit(1)
-                                .foregroundStyle(theme.primaryText)
+                                .foregroundStyle(theme.primaryTextColor)
 
                             Spacer()
 
@@ -447,7 +447,7 @@ struct MenuBarView: View {
                     }
                 }
                 .padding(.vertical, 2)
-                .background(theme.cardBg, in: RoundedRectangle(cornerRadius: 8))
+                .background(theme.cardBackgroundColor, in: RoundedRectangle(cornerRadius: 8))
             }
         }
     }
@@ -470,18 +470,18 @@ struct MenuBarView: View {
             Text(tracker.currentApp)
                 .font(.caption.weight(.medium))
                 .lineLimit(1)
-                .foregroundStyle(theme.primaryText)
+                .foregroundStyle(theme.primaryTextColor)
             Spacer()
             if !currentSessionDuration.isEmpty {
                 Text(currentSessionDuration)
                     .font(.caption)
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
                     .monospacedDigit()
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(theme.cardBg, in: RoundedRectangle(cornerRadius: 8))
+        .background(theme.cardBackgroundColor, in: RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: - Footer
@@ -495,7 +495,7 @@ struct MenuBarView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(theme.secondaryText)
+            .foregroundStyle(theme.secondaryTextColor)
             .help("Open Dashboard (⌘D)")
 
             SettingsLink {
@@ -505,7 +505,7 @@ struct MenuBarView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(theme.secondaryText)
+            .foregroundStyle(theme.secondaryTextColor)
             .help("Settings (⌘,)")
 
             Spacer()
@@ -548,13 +548,13 @@ struct MenuBarView: View {
 
     private var activeTime: String {
         let total = appState.timeSlots.filter { !$0.isIdle }.reduce(0.0) { $0 + $1.duration }
-        return Theme.formatDuration(total)
+        return total.formattedDuration()
     }
 
     private var todayActiveTime: String {
         let secs = appState.timeSlots.filter { !$0.isIdle }.reduce(0.0) { $0 + $1.duration }
         guard secs >= 60 else { return "just started" }
-        return Theme.formatDuration(secs)
+        return secs.formattedDuration()
     }
 
     private func updateSessionDuration() {
@@ -577,7 +577,7 @@ struct StatPill: View {
     var icon: String = ""
     let label: String
     let value: String
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     var body: some View {
         VStack(spacing: 2) {
@@ -589,11 +589,11 @@ struct StatPill: View {
                 }
                 Text(value)
                     .font(.caption.bold())
-                    .foregroundStyle(theme.primaryText)
+                    .foregroundStyle(theme.primaryTextColor)
             }
             Text(label)
                 .font(.caption2)
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 6)
@@ -605,7 +605,7 @@ struct StatPill: View {
 
 struct MenuBarLabelView: View {
     @Bindable private var timer = TimerStore.shared
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     var body: some View {
         if timer.isRunning {
