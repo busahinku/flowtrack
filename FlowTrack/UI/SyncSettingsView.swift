@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 // MARK: - SyncSettingsView
 
 struct SyncSettingsView: View {
-    @Bindable private var settings = AppSettings.shared
+    @Environment(SettingsStorage.self) private var settings
 
     @State private var detectedLocations: [CloudFolderDetector.CloudLocation] = []
     @State private var isBackingUp  = false
@@ -13,9 +13,10 @@ struct SyncSettingsView: View {
     @State private var statusMessage: String?
     @State private var statusIsError = false
 
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     var body: some View {
+        @Bindable var settings = settings
         Form {
             cloudPickerSection
             if settings.syncProvider != .none, let location = activeLocation {
@@ -40,7 +41,7 @@ struct SyncSettingsView: View {
         Section {
             Text("FlowTrack saves your entire database to a folder in your cloud storage. Install the app on another Mac, connect the same cloud account, and your data syncs automatically.")
                 .font(.caption)
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
 
             if detectedLocations.isEmpty {
                 HStack(spacing: 8) {
@@ -48,7 +49,7 @@ struct SyncSettingsView: View {
                         .foregroundStyle(theme.warningColor)
                     Text("No cloud storage detected. Install Google Drive, Dropbox, OneDrive, or use iCloud Drive on this Mac.")
                         .font(.caption)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
             } else {
                 // Always show "Off" option
@@ -80,20 +81,20 @@ struct SyncSettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(provider.displayName)
                         .font(.callout.weight(isSelected ? .semibold : .regular))
-                        .foregroundStyle(theme.primaryText)
+                        .foregroundStyle(theme.primaryTextColor)
                     if let account = location?.accountName {
                         Text(account)
                             .font(.caption)
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                     } else if provider == .none {
                         Text("Backups disabled")
                             .font(.caption)
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                     } else if let loc = location {
                         let homePath = FileManager.default.homeDirectoryForCurrentUser.path
                         Text(loc.rootURL.path.replacingOccurrences(of: homePath, with: "~"))
                             .font(.caption)
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
@@ -123,7 +124,7 @@ struct SyncSettingsView: View {
                     systemImage: "clock"
                 )
                 .font(.caption)
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
             }
 
             HStack {
@@ -156,7 +157,7 @@ struct SyncSettingsView: View {
                 Divider()
                 Text("Found in \(location.provider.displayName)")
                     .font(.caption.bold())
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
                 ForEach(backups.prefix(5), id: \.path) { fileURL in
                     HStack {
                         Image(systemName: "archivebox")
@@ -169,7 +170,7 @@ struct SyncSettingsView: View {
                         if let mod = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate {
                             Text(mod.formatted(date: .abbreviated, time: .shortened))
                                 .font(.caption2)
-                                .foregroundStyle(theme.secondaryText)
+                                .foregroundStyle(theme.secondaryTextColor)
                         }
                         Button("Restore") {
                             Task { await doRestore(from: fileURL) }
@@ -186,7 +187,8 @@ struct SyncSettingsView: View {
     // MARK: Auto-sync
 
     private var autoSyncSection: some View {
-        Section("Automatic Backup") {
+        @Bindable var settings = settings
+        return Section("Automatic Backup") {
             Toggle("Back up automatically", isOn: $settings.autoSyncEnabled)
             if settings.autoSyncEnabled {
                 Picker("Frequency", selection: $settings.autoSyncIntervalDays) {

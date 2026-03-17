@@ -7,8 +7,8 @@ struct TimerView: View {
     @State private var showHistory = false
     @Namespace private var modeNS
 
-    private var theme: AppTheme { AppSettings.shared.appTheme }
-    private var settings: AppSettings { AppSettings.shared }
+    @Environment(Theme.self) private var theme
+    @Environment(SettingsStorage.self) private var settings
 
     private var phaseColor: Color {
         timer.mode == .pomodoro ? timer.phase.color : theme.accentColor
@@ -26,7 +26,7 @@ struct TimerView: View {
             }
             .padding(20)
         }
-        .background(theme.timelineBg)
+        .background(theme.timelineBackgroundColor)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 modeSelectorBar
@@ -47,8 +47,8 @@ struct TimerView: View {
             }
         }
         .toolbarBackground(.hidden, for: .windowToolbar)
-        .sheet(isPresented: $showConfig) { TimerConfigSheet() }
-        .sheet(isPresented: $showHistory) { TimerHistorySheet() }
+        .sheet(isPresented: $showConfig) { TimerConfigSheet().withEnvironment() }
+        .sheet(isPresented: $showHistory) { TimerHistorySheet().withEnvironment() }
     }
 
     // MARK: - Mode Selector
@@ -65,7 +65,7 @@ struct TimerView: View {
                         Text(mode.rawValue)
                             .font(.subheadline.weight(timer.mode == mode ? .semibold : .regular))
                     }
-                    .foregroundStyle(timer.mode == mode ? theme.selectedForeground : theme.secondaryText)
+                    .foregroundStyle(timer.mode == mode ? theme.selectedForegroundColor : theme.secondaryTextColor)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)
                     .contentShape(Rectangle())
@@ -92,7 +92,7 @@ struct TimerView: View {
             ZStack {
                 // Background track
                 Circle()
-                    .stroke(theme.secondaryText.opacity(0.1), lineWidth: 5)
+                    .stroke(theme.secondaryTextColor.opacity(0.1), lineWidth: 5)
                     .frame(width: 168, height: 168)
 
                 // Progress ring (pomodoro / countdown only)
@@ -121,7 +121,7 @@ struct TimerView: View {
 
                     Text(timer.formattedTime)
                         .font(.system(size: 44, weight: .light, design: .monospaced))
-                        .foregroundStyle(theme.primaryText)
+                        .foregroundStyle(theme.primaryTextColor)
 
                     if timer.mode == .pomodoro {
                         HStack(spacing: 4) {
@@ -146,16 +146,16 @@ struct TimerView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "clock.fill")
                         .font(.caption2)
-                        .foregroundStyle(theme.secondaryText)
-                    Text("Today: \(Theme.formatDuration(todayTimerTotal))")
+                        .foregroundStyle(theme.secondaryTextColor)
+                    Text("Today: \(todayTimerTotal.formattedDuration())")
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
             }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 16)
-        .background(theme.cardBg, in: RoundedRectangle(cornerRadius: 14))
+        .background(theme.cardBackgroundColor, in: RoundedRectangle(cornerRadius: 14))
     }
 
     private var todayTimerTotal: Double {
@@ -242,7 +242,7 @@ struct TimerView: View {
                 }
             }
             if active.isEmpty {
-                Text("No active tasks").foregroundStyle(theme.secondaryText)
+                Text("No active tasks").foregroundStyle(theme.secondaryTextColor)
             }
         } label: {
             HStack(spacing: 10) {
@@ -261,16 +261,16 @@ struct TimerView: View {
                         Text(resolved.title)
                             .font(.subheadline.weight(.medium))
                             .lineLimit(1)
-                            .foregroundStyle(theme.primaryText)
+                            .foregroundStyle(theme.primaryTextColor)
                         Text(resolved.isSubtask ? "Subtask" : "Linked task")
                             .font(.caption2)
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                     }
                 } else {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("No task selected")
                             .font(.subheadline)
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                         Text("Link a task to track time")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
@@ -282,7 +282,7 @@ struct TimerView: View {
                     .foregroundStyle(.tertiary)
             }
             .padding(10)
-            .background(theme.cardBg, in: RoundedRectangle(cornerRadius: 12))
+            .background(theme.cardBackgroundColor, in: RoundedRectangle(cornerRadius: 12))
             .shadow(color: theme.shadowColor.opacity(0.04), radius: 4, y: 1)
         }
         .menuStyle(.borderlessButton)
@@ -300,8 +300,8 @@ struct TimerView: View {
                 Image(systemName: "arrow.counterclockwise")
                     .font(.system(size: 15, weight: .semibold))
                     .frame(width: 44, height: 44)
-                    .foregroundStyle(theme.secondaryText)
-                    .background(theme.cardBg, in: Circle())
+                    .foregroundStyle(theme.secondaryTextColor)
+                    .background(theme.cardBackgroundColor, in: Circle())
             }
             .buttonStyle(.plain)
 
@@ -316,7 +316,7 @@ struct TimerView: View {
 
                     Image(systemName: timer.isRunning ? "pause.fill" : "play.fill")
                         .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(theme.selectedForeground)
+                        .foregroundStyle(theme.selectedForegroundColor)
                         .offset(x: timer.isRunning ? 0 : 1.5)
                 }
             }
@@ -330,8 +330,8 @@ struct TimerView: View {
                     Image(systemName: "forward.end.fill")
                         .font(.system(size: 15, weight: .semibold))
                         .frame(width: 44, height: 44)
-                        .foregroundStyle(theme.secondaryText)
-                        .background(theme.cardBg, in: Circle())
+                        .foregroundStyle(theme.secondaryTextColor)
+                        .background(theme.cardBackgroundColor, in: Circle())
                 }
                 .buttonStyle(.plain)
                 .help("Skip to next phase")
@@ -343,7 +343,7 @@ struct TimerView: View {
                         .font(.system(size: 15, weight: .semibold))
                         .frame(width: 44, height: 44)
                         .foregroundStyle(timer.isRunning ? .secondary : .quaternary)
-                        .background(theme.cardBg, in: Circle())
+                        .background(theme.cardBackgroundColor, in: Circle())
                 }
                 .buttonStyle(.plain)
                 .help("Add lap")
@@ -366,7 +366,7 @@ struct TimerView: View {
                 Spacer()
                 Text("\(timer.laps.count)")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(theme.selectedForeground)
+                    .foregroundStyle(theme.selectedForegroundColor)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 2)
                     .background(phaseColor.opacity(0.7), in: Capsule())
@@ -380,28 +380,28 @@ struct TimerView: View {
                     }
                 }
             }
-            .background(theme.cardBg.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+            .background(theme.cardBackgroundColor.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
         }
         .padding(14)
-        .background(theme.cardBg, in: RoundedRectangle(cornerRadius: 12))
+        .background(theme.cardBackgroundColor, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private func lapRow(_ lap: LapRecord, isFirst: Bool) -> some View {
         HStack(spacing: 10) {
             ZStack {
                 Circle()
-                    .fill(isFirst ? phaseColor.opacity(0.15) : theme.secondaryText.opacity(0.08))
+                    .fill(isFirst ? phaseColor.opacity(0.15) : theme.secondaryTextColor.opacity(0.08))
                     .frame(width: 28, height: 28)
                 Text("\(lap.index)")
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(isFirst ? phaseColor : theme.secondaryText)
+                    .foregroundStyle(isFirst ? phaseColor : theme.secondaryTextColor)
             }
 
             if let todoId = lap.todoId,
                let todo = todos.todos.first(where: { $0.id == todoId }) {
                 Text(todo.title)
                     .font(.caption)
-                    .foregroundStyle(theme.primaryText)
+                    .foregroundStyle(theme.primaryTextColor)
                     .lineLimit(1)
             } else {
                 Text("No task")
@@ -413,7 +413,7 @@ struct TimerView: View {
 
             Text(lapDurationString(lap.duration))
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .foregroundStyle(isFirst ? theme.primaryText : theme.secondaryText)
+                .foregroundStyle(isFirst ? theme.primaryTextColor : theme.secondaryTextColor)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -450,10 +450,11 @@ struct TimerView: View {
 
 struct TimerConfigSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @Bindable private var settings = AppSettings.shared
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(SettingsStorage.self) private var settings
+    @Environment(Theme.self) private var theme
 
     var body: some View {
+        @Bindable var settings = settings
         VStack(alignment: .leading, spacing: 20) {
             HStack {
                 Image(systemName: "slider.horizontal.3")
@@ -540,7 +541,7 @@ struct TimerHistorySheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showClearConfirm = false
     private var store: TodoStore { TodoStore.shared }
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     private var sortedSessions: [TimerSession] {
         store.timerSessions.sorted { $0.startedAt > $1.startedAt }
@@ -610,7 +611,7 @@ struct TimerHistorySheet: View {
                         .font(.title3.bold())
                     Text("Start a timer to see history here")
                         .font(.subheadline)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -652,11 +653,11 @@ struct TimerHistorySheet: View {
                 .foregroundStyle(theme.accentColor)
             Text(label)
                 .font(.caption2.weight(.medium))
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(theme.cardBg, in: Capsule())
+        .background(theme.cardBackgroundColor, in: Capsule())
     }
 
     private func sessionRow(_ session: TimerSession) -> some View {
@@ -676,23 +677,23 @@ struct TimerHistorySheet: View {
                     .lineLimit(1)
                 Text(timeRange(for: session))
                     .font(.caption2)
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
             }
 
             Spacer()
 
             Text(durationString(session.duration))
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
         }
         .padding(.vertical, 2)
     }
 
     private func modeColor(_ mode: TimerMode) -> Color {
         switch mode {
-        case .pomodoro: AppSettings.shared.appTheme.infoColor
-        case .countdown: AppSettings.shared.appTheme.accentColor
-        case .stopwatch: AppSettings.shared.appTheme.warningColor
+        case .pomodoro: theme.infoColor
+        case .countdown: theme.accentColor
+        case .stopwatch: theme.warningColor
         }
     }
 

@@ -104,7 +104,7 @@ private struct IdleGap: Identifiable {
 // MARK: - Idle Gap Indicator
 private struct IdleGapIndicator: View {
     let minutes: Int
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     var body: some View {
         HStack(spacing: 6) {
@@ -117,7 +117,7 @@ private struct IdleGapIndicator: View {
 
     private var dashedLine: some View {
         Rectangle()
-            .fill(theme.secondaryText.opacity(0.2))
+            .fill(theme.secondaryTextColor.opacity(0.2))
             .frame(height: 1)
     }
 
@@ -128,7 +128,7 @@ private struct IdleGapIndicator: View {
             Text(minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m idle" : "\(minutes)m idle")
                 .font(.system(size: 9, weight: .medium))
         }
-        .foregroundStyle(theme.secondaryText.opacity(0.5))
+        .foregroundStyle(theme.secondaryTextColor.opacity(0.5))
         .fixedSize()
     }
 }
@@ -138,7 +138,8 @@ struct TimelineView: View {
     @Bindable var appState = AppState.shared
     @State private var showDatePicker = false
 
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
+    @Environment(SettingsStorage.self) private var settings
 
     var body: some View {
         GeometryReader { geo in
@@ -156,7 +157,7 @@ struct TimelineView: View {
                 }
             }
         }
-        .background(theme.timelineBg)
+        .background(theme.timelineBackgroundColor)
         .toolbarBackground(.hidden, for: .windowToolbar)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -192,7 +193,7 @@ struct TimelineView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(theme.secondaryText)
+            .foregroundStyle(theme.secondaryTextColor)
 
             Button { showDatePicker.toggle() } label: {
                 Text(dateLabel)
@@ -217,7 +218,7 @@ struct TimelineView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(theme.secondaryText)
+            .foregroundStyle(theme.secondaryTextColor)
         }
     }
 
@@ -377,7 +378,7 @@ struct TimelineView: View {
     }
 
     private func hourLabel(_ h: Int) -> String {
-        if AppSettings.shared.use24HourClock {
+        if settings.use24HourClock {
             return String(format: "%02d:00", h)
         }
         if h == 0  { return "12a" }
@@ -396,8 +397,8 @@ struct SessionCardView: View {
     @State private var showDetail = false
     @State private var isHovered = false
 
-    private var theme: AppTheme { AppSettings.shared.appTheme }
-    private var catColor: Color { Theme.color(for: slot.category) }
+    @Environment(Theme.self) private var theme
+    private var catColor: Color { slot.category.color }
 
     private var isLive: Bool { slot.status == .processing || slot.status == .continuous }
 
@@ -427,6 +428,7 @@ struct SessionCardView: View {
             .onHover { isHovered = $0 }
             .sheet(isPresented: $showDetail) {
                 SessionDetailView(slot: slot)
+                    .withEnvironment()
             }
     }
 
@@ -451,7 +453,7 @@ struct SessionCardView: View {
                         .font(.system(size: 10, weight: .semibold))
                         .lineLimit(1)
                     Spacer(minLength: 0)
-                    Text(Theme.formatDuration(slot.activeDuration))
+                    Text(slot.activeDuration.formattedDuration())
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(catColor.opacity(0.9))
                 }
@@ -470,9 +472,9 @@ struct SessionCardView: View {
                             .font(.system(size: 11, weight: .semibold))
                             .lineLimit(1)
                         Spacer(minLength: 0)
-                        Text(Theme.formatTimeRange(slot.startTime, slot.endTime))
+                        Text(slot.startTime.formattedRange(to: slot.endTime))
                             .font(.system(size: 9))
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                             .lineLimit(1)
                     }
 
@@ -486,7 +488,7 @@ struct SessionCardView: View {
                                 .foregroundStyle(.tertiary)
                         }
                         Spacer(minLength: 0)
-                        Text(Theme.formatDuration(slot.activeDuration))
+                        Text(slot.activeDuration.formattedDuration())
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(catColor.opacity(0.9))
                     }
@@ -495,7 +497,7 @@ struct SessionCardView: View {
                         Divider().opacity(0.4)
                         Text(summary)
                             .font(.system(size: 10))
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                             .lineLimit(4)
                             .fixedSize(horizontal: false, vertical: false)
                     }
@@ -507,7 +509,7 @@ struct SessionCardView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
             ZStack {
-                theme.cardBg
+                theme.cardBackgroundColor
                 catColor.opacity(isHovered ? 0.18 : 0.08)
             }
         )
@@ -540,18 +542,18 @@ struct SessionCardView: View {
                     }
                     Text(text)
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                     Spacer(minLength: 0)
-                    Text(Theme.formatTimeRange(slot.startTime, slot.endTime))
+                    Text(slot.startTime.formattedRange(to: slot.endTime))
                         .font(.system(size: 9))
-                        .foregroundStyle(theme.secondaryText.opacity(0.6))
+                        .foregroundStyle(theme.secondaryTextColor.opacity(0.6))
                 }
             }
             .padding(.horizontal, 7)
             .padding(.vertical, 5)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(theme.cardBg.opacity(0.6))
+        .background(theme.cardBackgroundColor.opacity(0.6))
         .clipShape(RoundedRectangle(cornerRadius: TL.cornerRadius))
         .overlay(
             RoundedRectangle(cornerRadius: TL.cornerRadius)

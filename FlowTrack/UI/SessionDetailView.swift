@@ -6,8 +6,8 @@ struct SessionDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var appState = AppState.shared
 
-    private var theme: AppTheme { AppSettings.shared.appTheme }
-    private var catColor: Color { Theme.color(for: slot.category) }
+    @Environment(Theme.self) private var theme
+    private var catColor: Color { slot.category.color }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,19 +28,19 @@ struct SessionDetailView: View {
                 VStack(spacing: 8) {
                     Image(systemName: "sparkles")
                         .font(.system(size: 28))
-                        .foregroundStyle(theme.secondaryText.opacity(0.5))
+                        .foregroundStyle(theme.secondaryTextColor.opacity(0.5))
                     Text("This block is being analyzed")
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                     Text("AI will process this time window shortly.")
                         .font(.system(size: 12))
-                        .foregroundStyle(theme.secondaryText.opacity(0.7))
+                        .foregroundStyle(theme.secondaryTextColor.opacity(0.7))
                 }
                 Spacer()
             }
         }
         .frame(width: 420)
-        .background(theme.timelineBg)
+        .background(theme.timelineBackgroundColor)
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
@@ -81,7 +81,7 @@ struct SessionDetailView: View {
                     Button { dismiss() } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                             .frame(width: 24, height: 24)
                             .background(.secondary.opacity(0.1), in: Circle())
                     }
@@ -90,16 +90,16 @@ struct SessionDetailView: View {
 
                 // Meta row: time range · duration
                 HStack(spacing: 8) {
-                    Label(Theme.formatTimeRange(slot.startTime, slot.endTime), systemImage: "clock")
+                    Label(slot.startTime.formattedRange(to: slot.endTime), systemImage: "clock")
                         .font(.system(size: 12))
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
 
                     Text("·")
                         .foregroundStyle(.tertiary)
 
-                    Text(Theme.formatDuration(slot.activeDuration))
+                    Text(slot.activeDuration.formattedDuration())
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
             }
             .padding(.horizontal, 16)
@@ -120,11 +120,11 @@ struct SessionDetailView: View {
                     .foregroundStyle(theme.infoColor)
                 Text("AI Summary")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
             }
             Text(text)
                 .font(.system(size: 13))
-                .foregroundStyle(theme.primaryText.opacity(0.85))
+                .foregroundStyle(theme.primaryTextColor.opacity(0.85))
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -142,7 +142,7 @@ struct SessionDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Apps Used")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
                 .padding(.horizontal, 12)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
@@ -162,7 +162,7 @@ struct SessionDetailView: View {
                 .padding(.vertical, 8)
             }
         }
-        .background(theme.cardBg, in: RoundedRectangle(cornerRadius: 10))
+        .background(theme.cardBackgroundColor, in: RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .stroke(theme.dividerColor.opacity(0.06), lineWidth: 1)
@@ -176,7 +176,7 @@ struct AppDetailRow: View {
     var totalDuration: TimeInterval = 0
     var catColor: Color = .blue
     @State private var expanded = false
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     private var fraction: Double {
         guard totalDuration > 0 else { return 0 }
@@ -210,9 +210,9 @@ struct AppDetailRow: View {
 
                     Spacer(minLength: 8)
 
-                    Text(Theme.formatDuration(activity.duration))
+                    Text(activity.duration.formattedDuration())
                         .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                         .monospacedDigit()
 
                     Image(systemName: "chevron.right")
@@ -228,7 +228,7 @@ struct AppDetailRow: View {
                     if !activity.title.isEmpty {
                         Text(activity.title)
                             .font(.system(size: 11))
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                             .lineLimit(2)
                     }
                     if let url = activity.url {

@@ -22,7 +22,7 @@ final class TimerStore {
 
     private var timerTask: Task<Void, Never>?
     private var sessionStart: Date?
-    private var settings: AppSettings { AppSettings.shared }
+    private var settings: SettingsStorage { .shared }
     /// ID of the todo that was auto-set to .inProgress when the timer started
     private var autoActivatedTodoId: String? = nil
     /// Milestone thresholds (seconds) already notified in the current stopwatch session
@@ -31,7 +31,7 @@ final class TimerStore {
     private let focusMilestones = [1800, 3600, 7200, 10800, 18000]
 
     private init() {
-        let s = AppSettings.shared
+        let s = SettingsStorage.shared
         self.mode = s.defaultTimerMode
         switch s.defaultTimerMode {
         case .pomodoro:  remainingSeconds = s.sessionWorkMinutes * 60

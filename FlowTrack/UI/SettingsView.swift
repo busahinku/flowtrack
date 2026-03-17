@@ -8,6 +8,8 @@ import Sparkle
 private let settingsLog = Logger(subsystem: "com.flowtrack", category: "Settings")
 
 struct SettingsView: View {
+    @Environment(Theme.self) private var theme
+
     var body: some View {
         TabView {
             GeneralTab()
@@ -28,19 +30,20 @@ struct SettingsView: View {
                 .tabItem { Label("Sync", systemImage: "arrow.triangle.2.circlepath") }
         }
         .frame(width: 660, height: 540)
-        .preferredColorScheme(AppSettings.shared.appTheme.colorScheme)
+        .preferredColorScheme(theme.colorScheme)
     }
 }
 
 // MARK: - General Tab
 struct GeneralTab: View {
-    @Bindable var settings = AppSettings.shared
+    @Environment(SettingsStorage.self) private var settings
     @State private var hasAccessibility = PermissionChecker.hasAccessibility
     @State private var dbSizeText = "Calculating..."
     @ObservedObject private var updater = AppUpdater.shared
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     var body: some View {
+        @Bindable var settings = settings
         Form {
             Section("Startup") {
                 Toggle("Launch at Login", isOn: Binding(
@@ -112,7 +115,7 @@ struct GeneralTab: View {
                     Text("60 min").tag(60)
                 }
                 Text("Alert fires when you've spent this long in a distraction category continuously.")
-                    .font(.caption).foregroundStyle(theme.secondaryText)
+                    .font(.caption).foregroundStyle(theme.secondaryTextColor)
             }
 
             Section("Data Storage") {
@@ -121,7 +124,7 @@ struct GeneralTab: View {
                     Spacer()
                     Text("~/Library/Application Support/FlowTrack/")
                         .font(.caption)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                     Button("Reveal") {
                         let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
                             .appendingPathComponent("FlowTrack")
@@ -133,7 +136,7 @@ struct GeneralTab: View {
                     Spacer()
                     Text(dbSizeText)
                         .font(.caption)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
                 Text("Data older than 90 days is automatically cleaned when DB exceeds 3 GB.")
                     .font(.caption2)
@@ -179,7 +182,7 @@ struct GeneralTab: View {
 
 // MARK: - AI Tab
 struct AITab: View {
-    @Bindable var settings = AppSettings.shared
+    @Environment(SettingsStorage.self) private var settings
     @State private var apiKeyInput = ""
     @State private var testResult: String?
     @State private var isTesting = false
@@ -194,13 +197,14 @@ struct AITab: View {
     @State private var fb2ModelInput = ""
     @State private var fb1SavedIndicator = false
     @State private var fb2SavedIndicator = false
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     enum ProviderHealthStatus {
         case unknown, checking, healthy, unhealthy(String)
     }
 
     var body: some View {
+        @Bindable var settings = settings
         Form {
             Section("Primary Provider") {
                 Picker("Provider", selection: $settings.aiProvider) {
@@ -227,7 +231,7 @@ struct AITab: View {
             Section("Fallback Chain") {
                 Text("If the primary fails, it tries fallback providers in order.")
                     .font(.caption)
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
 
                 fallbackPicker("Fallback 1", selection: Binding(
                     get: {
@@ -321,7 +325,7 @@ struct AITab: View {
                     if let instructions = provider.setupInstructions {
                         Text(instructions)
                             .font(.caption2)
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                     }
                 }
             }
@@ -388,12 +392,12 @@ struct AITab: View {
             }
             Text(provider.modelHint)
                 .font(.caption2)
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
 
             HStack(spacing: 4) {
                 Text("Quick:")
                     .font(.caption2)
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
                 ForEach(provider.suggestedModels, id: \.self) { model in
                     Button(model) {
                         settings.setModelName(model, for: provider)
@@ -414,7 +418,7 @@ struct AITab: View {
             statusDot(for: provider)
             Text(provider.rawValue)
                 .font(.caption)
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
             Spacer()
             if provider.isCLI {
                 if cliDetected[provider.cliCommand ?? ""] != nil {
@@ -471,7 +475,7 @@ struct AITab: View {
         HStack {
             Text("Model:")
                 .font(.caption2)
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
             Text(settings.modelName(for: provider))
                 .font(.caption2)
             Spacer()
@@ -563,7 +567,7 @@ struct CategoriesTab: View {
     @State private var editingCategory: CategoryDefinition?
     @State private var showAddSheet = false
     @State private var categories: [CategoryDefinition] = CategoryManager.shared.allCategories
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     // Protected categories that cannot be deleted
     private let protectedNames: Set<String> = ["Idle", "Uncategorized", "Work", "Distraction"]
@@ -594,7 +598,7 @@ struct CategoriesTab: View {
                         if protectedNames.contains(cat.name) {
                             Image(systemName: "lock.fill")
                                 .font(.caption2)
-                                .foregroundStyle(theme.secondaryText)
+                                .foregroundStyle(theme.secondaryTextColor)
                         }
                     }
                     .contentShape(Rectangle())
@@ -606,7 +610,7 @@ struct CategoriesTab: View {
             HStack {
                 Text("\(categories.count) categories • AI uses these to classify your activity")
                     .font(.caption)
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
                 Spacer()
                 Button(action: { showAddSheet = true }) {
                     Label("Add Category", systemImage: "plus")
@@ -618,11 +622,13 @@ struct CategoriesTab: View {
             EditCategorySheet(category: cat, isProtected: protectedNames.contains(cat.name)) {
                 categories = CategoryManager.shared.allCategories
             }
+            .withEnvironment()
         }
         .sheet(isPresented: $showAddSheet) {
             AddCategorySheet {
                 categories = CategoryManager.shared.allCategories
             }
+            .withEnvironment()
         }
     }
 }
@@ -634,7 +640,7 @@ struct EditCategorySheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var pickedColor: Color
     @State private var showIconPicker = false
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     init(category: CategoryDefinition, isProtected: Bool, onDismiss: @escaping () -> Void) {
         self._category = State(initialValue: category)
@@ -669,7 +675,7 @@ struct EditCategorySheet: View {
                         .frame(width: 44, height: 44)
                     Image(systemName: category.icon)
                         .font(.title3)
-                        .foregroundStyle(theme.selectedForeground)
+                        .foregroundStyle(theme.selectedForegroundColor)
                 }
                 Text(category.name)
                     .font(.title3.bold())
@@ -698,7 +704,7 @@ struct EditCategorySheet: View {
                                 Image(systemName: icon)
                                     .font(.body)
                                     .frame(width: 32, height: 32)
-                                    .foregroundStyle(category.icon == icon ? theme.selectedForeground : .primary)
+                                    .foregroundStyle(category.icon == icon ? theme.selectedForegroundColor : .primary)
                                     .background(
                                         RoundedRectangle(cornerRadius: 6)
                                             .fill(category.icon == icon ? pickedColor : theme.dividerColor.opacity(0.15))
@@ -746,7 +752,7 @@ struct AddCategorySheet: View {
     @State private var aiPrompt = ""
     let onDismiss: () -> Void
     @Environment(\.dismiss) private var dismiss
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     private static let popularIcons = EditCategorySheet.popularIcons
 
@@ -762,7 +768,7 @@ struct AddCategorySheet: View {
                         .fill(pickedColor)
                         .frame(width: 40, height: 40)
                     Image(systemName: icon)
-                        .foregroundStyle(theme.selectedForeground)
+                        .foregroundStyle(theme.selectedForegroundColor)
                 }
                 Text(name.isEmpty ? "New Category" : name)
                     .font(.title3)
@@ -787,7 +793,7 @@ struct AddCategorySheet: View {
                                 Image(systemName: ic)
                                     .font(.body)
                                     .frame(width: 32, height: 32)
-                                    .foregroundStyle(icon == ic ? theme.selectedForeground : .primary)
+                                    .foregroundStyle(icon == ic ? theme.selectedForegroundColor : .primary)
                                     .background(
                                         RoundedRectangle(cornerRadius: 6)
                                             .fill(icon == ic ? pickedColor : theme.dividerColor.opacity(0.15))
@@ -825,7 +831,7 @@ struct AddCategorySheet: View {
 struct RulesTab: View {
     @State private var showAddSheet = false
     @State private var customRules: [Rule] = RuleEngine.shared.allCustomRules
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     var body: some View {
         VStack(spacing: 0) {
@@ -835,10 +841,10 @@ struct RulesTab: View {
                         VStack(spacing: 8) {
                             Image(systemName: "text.badge.plus")
                                 .font(.title2)
-                                .foregroundStyle(theme.secondaryText)
+                                .foregroundStyle(theme.secondaryTextColor)
                             Text("No custom rules yet")
                                 .font(.subheadline)
-                                .foregroundStyle(theme.secondaryText)
+                                .foregroundStyle(theme.secondaryTextColor)
                             Text("Rules let you override the default categorization for specific apps, websites, or window titles.")
                                 .font(.caption)
                                 .foregroundStyle(.tertiary)
@@ -857,7 +863,7 @@ struct RulesTab: View {
                                     .font(.subheadline.bold())
                                 Text(rule.matchType.rawValue.replacingOccurrences(of: "([a-z])([A-Z])", with: "$1 $2", options: .regularExpression).capitalized)
                                     .font(.caption)
-                                    .foregroundStyle(theme.secondaryText)
+                                    .foregroundStyle(theme.secondaryTextColor)
                             }
                             Spacer()
                             HStack(spacing: 4) {
@@ -895,7 +901,7 @@ struct RulesTab: View {
                             .foregroundStyle(theme.infoColor)
                         Text("Built-in rules: \(RuleEngine.shared.defaultRuleCount). Custom rules take priority over defaults.")
                             .font(.caption)
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                     }
                 } header: {
                     Text("Default Rules")
@@ -917,6 +923,7 @@ struct RulesTab: View {
             AddRuleSheet {
                 customRules = RuleEngine.shared.allCustomRules
             }
+            .withEnvironment()
         }
     }
 
@@ -985,36 +992,37 @@ struct AddRuleSheet: View {
 
 // MARK: - Appearance Tab
 struct AppearanceTab: View {
-    @Bindable var settings = AppSettings.shared
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(SettingsStorage.self) private var settings
+    @Environment(Theme.self) private var theme
 
     var body: some View {
+        @Bindable var settings = settings
         Form {
             Section("Theme") {
                 Picker("App Theme", selection: $settings.appTheme) {
-                    ForEach(AppTheme.allCases) { theme in
+                    ForEach(ColorSetName.allCases) { colorSetName in
                         HStack {
                             Circle()
-                                .fill(theme.accentColor)
+                                .fill(colorSetName.colorSet.accentColor)
                                 .frame(width: 12, height: 12)
-                            Text(theme.rawValue)
+                            Text(colorSetName.rawValue)
                         }
-                        .tag(theme)
+                        .tag(colorSetName)
                     }
                 }
                 .pickerStyle(.radioGroup)
 
                 Text(themeDescription)
                     .font(.caption)
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
             }
 
             Section("Preview") {
                 HStack(spacing: 12) {
-                    themePreviewBox("Card", color: settings.appTheme.cardBg)
-                    themePreviewBox("BG", color: settings.appTheme.timelineBg)
-                    themePreviewBox("Sidebar", color: settings.appTheme.sidebarBg)
-                    themePreviewBox("Accent", color: settings.appTheme.accentColor, textColor: settings.appTheme.selectedForeground)
+                    themePreviewBox("Card", color: theme.cardBackgroundColor)
+                    themePreviewBox("BG", color: theme.timelineBackgroundColor)
+                    themePreviewBox("Sidebar", color: theme.sidebarBackgroundColor)
+                    themePreviewBox("Accent", color: theme.accentColor, textColor: theme.selectedForegroundColor)
                 }
             }
         }
@@ -1049,7 +1057,7 @@ struct AppearanceTab: View {
 
 // MARK: - Privacy Tab
 struct PrivacyTab: View {
-    @Bindable var settings = AppSettings.shared
+    @Environment(SettingsStorage.self) private var settings
     @State private var showClearConfirm = false
     @State private var showClearAIConfirm = false
     @State private var showClearTodayConfirm = false
@@ -1061,26 +1069,27 @@ struct PrivacyTab: View {
     @State private var clearError: String?
     @State private var newBundleID = ""
     @State private var storageStats: (activities: Int, aiRecords: Int, segments: Int, bytes: Int64) = (0, 0, 0, 0)
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     var body: some View {
+        @Bindable var settings = settings
         Form {
             Section("Data Collection") {
                 Toggle("Capture Window Titles", isOn: $settings.captureWindowTitles)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("FlowTrack tracks which apps you use. Window titles add context but may contain sensitive info.")
                         .font(.caption)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                     Text("All data is stored locally. Nothing is sent to a server unless you use an API-based AI provider.")
                         .font(.caption)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
             }
 
             Section("Excluded Apps") {
                 if settings.excludedBundleIDs.isEmpty {
                     Text("No apps excluded")
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                         .font(.callout)
                 } else {
                     ForEach(settings.excludedBundleIDs, id: \.self) { bundle in
@@ -1108,7 +1117,7 @@ struct PrivacyTab: View {
                     .disabled(newBundleID.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
                 Text("Excluded apps are never tracked or stored.")
-                    .font(.caption).foregroundStyle(theme.secondaryText)
+                    .font(.caption).foregroundStyle(theme.secondaryTextColor)
             }
 
             Section("AI Provider Privacy") {
@@ -1117,7 +1126,7 @@ struct PrivacyTab: View {
                         .font(.callout)
                     Text("CLI providers (Claude Code, ChatGPT Codex) process data through your local installation. API providers send data to their respective cloud services.")
                         .font(.caption)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
             }
 
@@ -1128,35 +1137,35 @@ struct PrivacyTab: View {
                     Spacer()
                     Text("\(storageStats.activities)")
                         .font(.system(.body, design: .monospaced))
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
                 HStack {
                     Label("AI Summaries", systemImage: "sparkles")
                     Spacer()
                     Text("\(storageStats.aiRecords)")
                         .font(.system(.body, design: .monospaced))
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
                 HStack {
                     Label("AI Segments", systemImage: "rectangle.split.3x1")
                     Spacer()
                     Text("\(storageStats.segments)")
                         .font(.system(.body, design: .monospaced))
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
                 HStack {
                     Label("Tasks", systemImage: "checklist")
                     Spacer()
                     Text("\(TodoStore.shared.todos.count) tasks · \(TodoStore.shared.timerSessions.count) sessions")
                         .font(.system(.body, design: .monospaced))
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
                 HStack {
                     Label("Database Size", systemImage: "internaldrive")
                     Spacer()
                     Text(formatBytes(storageStats.bytes))
                         .font(.system(.body, design: .monospaced))
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
                 Button("Refresh") { refreshStats() }
                     .font(.caption)
@@ -1194,7 +1203,7 @@ struct PrivacyTab: View {
                 Button("Clear Today's AI Analysis") {
                     showClearAIConfirm = true
                 }
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
             }
 
             // ── Tasks & Timer ──────────────────────────────────────────────────
@@ -1222,7 +1231,7 @@ struct PrivacyTab: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("API keys are stored securely in the macOS Keychain.")
                         .font(.caption)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
                 Button("Remove All API Keys") {
                     for provider in AIProviderType.allCases where provider.needsAPIKey {
@@ -1352,14 +1361,14 @@ struct PrivacyTab: View {
 // MARK: - Export Tab
 struct ExportTab: View {
     @State private var exportResult: String?
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     var body: some View {
         Form {
             Section("Export Activities") {
                 Text("Export your activity data as CSV or JSON for analysis in other tools.")
                     .font(.caption)
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
 
                 HStack {
                     Button("Export Today as CSV") { exportCSV(for: Date()) }

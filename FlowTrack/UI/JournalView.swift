@@ -5,7 +5,7 @@ import CryptoKit
 // MARK: - JournalView (router)
 struct JournalView: View {
     @Bindable private var store = JournalStore.shared
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     var body: some View {
         Group {
@@ -18,7 +18,7 @@ struct JournalView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(theme.timelineBg)
+        .background(theme.timelineBackgroundColor)
     }
 }
 
@@ -30,7 +30,7 @@ private struct JournalSetupView: View {
     @State private var confirm      = ""
     @State private var errorMessage = ""
     @State private var isWorking    = false
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     private var strength: Int {
         var s = 0
@@ -70,10 +70,10 @@ private struct JournalSetupView: View {
                     }
                     Text("Create Your Journal")
                         .font(.title2.weight(.bold))
-                        .foregroundStyle(theme.primaryText)
+                        .foregroundStyle(theme.primaryTextColor)
                     Text("Your entries are encrypted with AES-256.\nOnly you can read them — even if the database is opened directly.")
                         .font(.subheadline)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                         .multilineTextAlignment(.center)
                         .lineSpacing(3)
                 }
@@ -99,7 +99,7 @@ private struct JournalSetupView: View {
                             .onSubmit { if canCreate { createPassword() } }
                     }
                 }
-                .background(theme.cardBg, in: RoundedRectangle(cornerRadius: 12))
+                .background(theme.cardBackgroundColor, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
                         .stroke(theme.dividerColor.opacity(0.08), lineWidth: 1)
@@ -128,7 +128,7 @@ private struct JournalSetupView: View {
                         }
                     }
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(theme.selectedForeground)
+                    .foregroundStyle(theme.selectedForegroundColor)
                     .frame(maxWidth: 320)
                     .padding(.vertical, 12)
                     .background(
@@ -143,7 +143,7 @@ private struct JournalSetupView: View {
                 HStack(spacing: 5) {
                     Image(systemName: "lock.shield.fill").font(.caption).foregroundStyle(theme.successColor)
                     Text("AES-256-GCM · PBKDF2-SHA256 · Stored locally · Never transmitted")
-                        .font(.caption2).foregroundStyle(theme.secondaryText)
+                        .font(.caption2).foregroundStyle(theme.secondaryTextColor)
                 }
 
                 Spacer(minLength: 20)
@@ -162,7 +162,7 @@ private struct JournalSetupView: View {
                 .padding(.leading, 14)
             Text(label)
                 .font(.subheadline)
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
                 .frame(width: 68, alignment: .leading)
             content()
                 .frame(maxWidth: .infinity)
@@ -175,12 +175,12 @@ private struct JournalSetupView: View {
         HStack(spacing: 8) {
             Image(systemName: "waveform.path.ecg")
                 .font(.system(size: 11))
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
                 .frame(width: 22)
                 .padding(.leading, 14)
             Text("Strength")
                 .font(.caption)
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
                 .frame(width: 68, alignment: .leading)
             HStack(spacing: 4) {
                 ForEach(0..<5) { i in
@@ -233,7 +233,7 @@ private struct JournalUnlockView: View {
     @State private var isWorking    = false
     @State private var showReset    = false
     @FocusState private var focused: Bool
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     var body: some View {
         VStack(spacing: 0) {
@@ -250,10 +250,10 @@ private struct JournalUnlockView: View {
                 VStack(spacing: 6) {
                     Text("Journal Locked")
                         .font(.title2.weight(.bold))
-                        .foregroundStyle(theme.primaryText)
+                        .foregroundStyle(theme.primaryTextColor)
                     Text("Enter your password to continue")
                         .font(.subheadline)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
 
                 // Password field
@@ -284,7 +284,7 @@ private struct JournalUnlockView: View {
 
                 Button("Forgot password?") { showReset = true }
                     .font(.caption)
-                    .foregroundStyle(theme.secondaryText.opacity(0.7))
+                    .foregroundStyle(theme.secondaryTextColor.opacity(0.7))
                     .buttonStyle(.plain)
             }
             Spacer()
@@ -292,6 +292,7 @@ private struct JournalUnlockView: View {
         .onAppear { focused = true }
         .sheet(isPresented: $showReset) {
             JournalResetSheet(isPresented: $showReset)
+                .withEnvironment()
         }
     }
 
@@ -324,7 +325,7 @@ struct JournalResetSheet: View {
     @Binding var isPresented: Bool
     @State private var step = 1
     @State private var confirmText = ""
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     var body: some View {
         VStack(spacing: 24) {
@@ -335,9 +336,9 @@ struct JournalResetSheet: View {
             if step == 1 {
                 VStack(spacing: 10) {
                     Text("Reset Journal Password")
-                        .font(.title3.weight(.bold)).foregroundStyle(theme.primaryText)
+                        .font(.title3.weight(.bold)).foregroundStyle(theme.primaryTextColor)
                     Text("This will **permanently delete all journal entries**.\nThis cannot be undone.")
-                        .font(.subheadline).foregroundStyle(theme.secondaryText)
+                        .font(.subheadline).foregroundStyle(theme.secondaryTextColor)
                         .multilineTextAlignment(.center)
                 }
                 HStack(spacing: 12) {
@@ -351,9 +352,9 @@ struct JournalResetSheet: View {
             } else {
                 VStack(spacing: 10) {
                     Text("Final Confirmation")
-                        .font(.title3.weight(.bold)).foregroundStyle(theme.primaryText)
+                        .font(.title3.weight(.bold)).foregroundStyle(theme.primaryTextColor)
                     Text("Type **DELETE** to permanently erase all journal entries and the password.")
-                        .font(.subheadline).foregroundStyle(theme.secondaryText)
+                        .font(.subheadline).foregroundStyle(theme.secondaryTextColor)
                         .multilineTextAlignment(.center)
                 }
                 TextField("Type DELETE", text: $confirmText)
@@ -364,7 +365,7 @@ struct JournalResetSheet: View {
                         JournalStore.shared.resetAll()
                         isPresented = false
                     }
-                    .foregroundStyle(confirmText == "DELETE" ? theme.errorColor : theme.secondaryText)
+                    .foregroundStyle(confirmText == "DELETE" ? theme.errorColor : theme.secondaryTextColor)
                     .disabled(confirmText != "DELETE")
                     .font(.subheadline.weight(.semibold))
                 }
@@ -373,7 +374,7 @@ struct JournalResetSheet: View {
         }
         .padding(32)
         .frame(width: 400)
-        .background(theme.cardBg)
+        .background(theme.cardBackgroundColor)
     }
 }
 
@@ -382,7 +383,7 @@ struct JournalResetSheet: View {
 // ─────────────────────────────────────────────────────────────────────────────
 private struct JournalEditorView: View {
     @Bindable private var store = JournalStore.shared
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     @State private var currentDate: Date = .init()
     @State private var text: String = ""
@@ -419,7 +420,7 @@ private struct JournalEditorView: View {
                     if text.isEmpty {
                         Text("Write something…")
                             .font(.system(size: 15, design: .serif))
-                            .foregroundStyle(theme.secondaryText.opacity(0.4))
+                            .foregroundStyle(theme.secondaryTextColor.opacity(0.4))
                             .padding(.horizontal, 28)
                             .padding(.top, 20)
                             .allowsHitTesting(false)
@@ -445,10 +446,10 @@ private struct JournalEditorView: View {
                 VStack(spacing: 1) {
                     Text(headerDateString)
                         .font(.headline.weight(.semibold))
-                        .foregroundStyle(theme.primaryText)
+                        .foregroundStyle(theme.primaryTextColor)
                     Text(dayOfWeek)
                         .font(.caption2)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
                 .frame(minWidth: 140)
 
@@ -462,7 +463,7 @@ private struct JournalEditorView: View {
                 if isSaving {
                     HStack(spacing: 4) {
                         ProgressView().scaleEffect(0.5).frame(width: 12, height: 12)
-                        Text("Saving…").font(.caption2).foregroundStyle(theme.secondaryText)
+                        Text("Saving…").font(.caption2).foregroundStyle(theme.secondaryTextColor)
                     }
                 }
 
@@ -476,7 +477,7 @@ private struct JournalEditorView: View {
                         }
                     } label: {
                         Image(systemName: "clock.arrow.circlepath")
-                            .font(.system(size: 13)).foregroundStyle(theme.secondaryText)
+                            .font(.system(size: 13)).foregroundStyle(theme.secondaryTextColor)
                     }
                     .menuStyle(.borderlessButton).frame(width: 28)
                 }
@@ -488,7 +489,7 @@ private struct JournalEditorView: View {
                     Label(isPreview ? "Edit" : "Preview",
                           systemImage: isPreview ? "pencil" : "eye")
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(isPreview ? theme.selectedForeground : theme.secondaryText)
+                        .foregroundStyle(isPreview ? theme.selectedForegroundColor : theme.secondaryTextColor)
                         .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(
                             isPreview ? theme.accentColor : theme.dividerColor.opacity(0.12),
@@ -500,7 +501,7 @@ private struct JournalEditorView: View {
                 // Lock
                 Button { store.lock() } label: {
                     Image(systemName: "lock.fill")
-                        .font(.system(size: 13)).foregroundStyle(theme.secondaryText)
+                        .font(.system(size: 13)).foregroundStyle(theme.secondaryTextColor)
                 }
                 .buttonStyle(.plain).help("Lock journal")
             }
@@ -509,20 +510,20 @@ private struct JournalEditorView: View {
             if !isPreview {
                 Divider().opacity(0.4)
                 // Markdown toolbar
-                MarkdownToolbarView(theme: theme) { action in
+                MarkdownToolbarView { action in
                     applyMarkdown(action)
                 }
                 .padding(.horizontal, 12).padding(.vertical, 6)
             }
         }
-        .background(theme.cardBg)
+        .background(theme.cardBackgroundColor)
     }
 
     private func navButton(icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
                 .frame(width: 26, height: 26)
                 .background(theme.dividerColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
         }
@@ -535,12 +536,12 @@ private struct JournalEditorView: View {
         HStack(spacing: 12) {
             Text("\(wordCount) words")
                 .font(.caption2.monospacedDigit())
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
             Text("·")
-                .foregroundStyle(theme.secondaryText.opacity(0.4))
+                .foregroundStyle(theme.secondaryTextColor.opacity(0.4))
             Text("\(text.count) characters")
                 .font(.caption2.monospacedDigit())
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
             Spacer()
             if store.entryDates.contains(dateKey) {
                 Label("Encrypted", systemImage: "lock.shield.fill")
@@ -549,7 +550,7 @@ private struct JournalEditorView: View {
             }
         }
         .padding(.horizontal, 28).padding(.vertical, 6)
-        .background(theme.cardBg)
+        .background(theme.cardBackgroundColor)
     }
 
     // MARK: - Logic
@@ -649,7 +650,7 @@ enum MarkdownAction: CaseIterable {
 }
 
 private struct MarkdownToolbarView: View {
-    let theme: AppTheme
+    @Environment(Theme.self) private var theme
     let onAction: (MarkdownAction) -> Void
 
     // Groups with dividers between them
@@ -688,7 +689,7 @@ private struct MarkdownToolbarView: View {
                         .frame(width: 22, height: 22)
                 }
             }
-            .foregroundStyle(theme.secondaryText)
+            .foregroundStyle(theme.secondaryTextColor)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -811,7 +812,7 @@ enum MarkdownFormatter {
 // ─────────────────────────────────────────────────────────────────────────────
 private struct MarkdownEditorNSView: NSViewRepresentable {
     @Binding var text: String
-    let theme: AppTheme
+    let theme: Theme
     let onReady: (NSTextView) -> Void
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -888,7 +889,7 @@ private struct MarkdownEditorNSView: NSViewRepresentable {
 // ─────────────────────────────────────────────────────────────────────────────
 private struct MarkdownPreviewView: NSViewRepresentable {
     let text: String
-    let theme: AppTheme
+    let theme: Theme
 
     func makeNSView(context: Context) -> NSScrollView {
         let sv = NSTextView.scrollableTextView()

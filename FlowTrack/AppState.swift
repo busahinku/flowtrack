@@ -25,7 +25,7 @@ final class AppState {
 
     private var aiTimer: Timer?
     private var refreshTimer: Timer?
-    let settings = AppSettings.shared
+    let settings = SettingsStorage.shared
 
     // Session rebuild cache — skip expensive rebuild when nothing changed
     private var cachedSessionDate: Date?

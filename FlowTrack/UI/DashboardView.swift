@@ -32,7 +32,7 @@ struct DashboardView: View {
     @State private var selectedTab: DashboardTab? = .timeline
     @Bindable private var appState = AppState.shared
 
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     var body: some View {
         NavigationSplitView {
@@ -73,7 +73,7 @@ private struct SidebarView: View {
     @Bindable private var todoStore = TodoStore.shared
     @ObservedObject private var tracker = ActivityTracker.shared
 
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     var body: some View {
         List(selection: $selectedTab) {
@@ -97,7 +97,7 @@ private struct SidebarView: View {
                     if !tracker.currentApp.isEmpty {
                         Text(tracker.currentApp)
                             .font(.caption2)
-                            .foregroundStyle(theme.secondaryText)
+                            .foregroundStyle(theme.secondaryTextColor)
                             .lineLimit(1)
                     }
                 }
@@ -107,7 +107,7 @@ private struct SidebarView: View {
                     .frame(width: 8, height: 8)
             }
             .font(.subheadline)
-            .foregroundStyle(theme.secondaryText)
+            .foregroundStyle(theme.secondaryTextColor)
             .listRowSeparator(.hidden)
             .selectionDisabled()
         }
@@ -169,7 +169,7 @@ private struct SidebarView: View {
     private var focusRing: some View {
         ZStack {
             Circle()
-                .stroke(theme.secondaryText.opacity(0.15), lineWidth: 5)
+                .stroke(theme.secondaryTextColor.opacity(0.15), lineWidth: 5)
             Circle()
                 .trim(from: 0, to: focusScorePercent)
                 .stroke(theme.accentColor, style: StrokeStyle(lineWidth: 5, lineCap: .round))
@@ -180,7 +180,7 @@ private struct SidebarView: View {
                     .font(.system(size: 12, weight: .bold, design: .rounded))
                 Text("Focus")
                     .font(.system(size: 8))
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
             }
         }
         .frame(width: 46, height: 46)
@@ -197,7 +197,7 @@ private struct SidebarView: View {
                     .foregroundStyle(appState.isRunningAI ? theme.warningColor : .secondary)
                 Text(appState.isRunningAI ? "AI Processing…" : "AI Idle")
                     .font(.caption)
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
                 Spacer()
                 if let nextRun = appState.aiNextRunTime {
                     let rem = max(0, nextRun.timeIntervalSince(Date()))
@@ -212,7 +212,7 @@ private struct SidebarView: View {
             SettingsLink {
                 Label("Settings", systemImage: "gear")
                     .font(.subheadline)
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
@@ -231,7 +231,7 @@ private struct SidebarView: View {
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
             Text(label)
                 .font(.caption2)
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
         }
     }
 
@@ -246,7 +246,7 @@ private struct SidebarView: View {
 
     private var totalActiveTime: String {
         let secs = appState.timeSlots.filter { !$0.isIdle }.reduce(0.0) { $0 + $1.activeDuration }
-        return Theme.formatDuration(secs)
+        return secs.formattedDuration()
     }
 
     private var distractionTime: String {
@@ -254,7 +254,7 @@ private struct SidebarView: View {
             .filter { $0.category.rawValue == "Distraction" }
             .reduce(0.0) { $0 + $1.activeDuration }
         guard secs > 0 else { return "—" }
-        return Theme.formatDuration(secs)
+        return secs.formattedDuration()
     }
 
     private var todayTrackedTime: String {
@@ -263,7 +263,7 @@ private struct SidebarView: View {
         }
         let total = sessions.reduce(0.0) { $0 + $1.duration }
         guard total >= 60 else { return "—" }
-        return Theme.formatDuration(total)
+        return total.formattedDuration()
     }
 }
 

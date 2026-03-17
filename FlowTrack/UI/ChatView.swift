@@ -13,7 +13,7 @@ struct ChatView: View {
     @State private var streamingText: String = ""
     @State private var isStreaming = false
 
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,7 +27,7 @@ struct ChatView: View {
             Divider()
             inputBar
         }
-        .background(theme.timelineBg)
+        .background(theme.timelineBackgroundColor)
         .toolbarBackground(.hidden, for: .windowToolbar)
         .navigationTitle("")
         .toolbar {
@@ -332,7 +332,7 @@ struct ChatView: View {
 private struct MessageBubble: View {
     let message: ChatMessage
     @State private var isHovered = false
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -356,7 +356,7 @@ private struct MessageBubble: View {
         case .user:
             Text(message.content)
                 .font(.system(size: 13))
-                .foregroundStyle(theme.selectedForeground)
+                .foregroundStyle(theme.selectedForegroundColor)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .background(theme.accentColor, in: RoundedRectangle(cornerRadius: 16))
@@ -431,7 +431,7 @@ private struct StreamingBubble: View {
 private struct MarkdownBubble: View {
     let text: String
     var showCursor: Bool = false
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     var body: some View {
         MarkdownRenderer(text: text, showCursor: showCursor)
@@ -615,14 +615,14 @@ private enum MDBlock: Equatable {
 private struct ThinkingIndicator: View {
     @State private var phase = 0
     private let timer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             HStack(spacing: 5) {
                 ForEach(0..<3, id: \.self) { i in
                     Circle()
-                        .fill(theme.secondaryText.opacity(phase == i ? 0.85 : 0.25))
+                        .fill(theme.secondaryTextColor.opacity(phase == i ? 0.85 : 0.25))
                         .frame(width: 6, height: 6)
                         .scaleEffect(phase == i ? 1.25 : 1.0)
                         .animation(.easeInOut(duration: 0.35), value: phase)
@@ -648,13 +648,14 @@ private struct SuggestionChip: View {
     let icon: String
     let action: () -> Void
     @State private var isHovered = false
+    @Environment(Theme.self) private var theme
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 7) {
                 Image(systemName: icon)
                     .font(.system(size: 12))
-                    .foregroundStyle(AppSettings.shared.appTheme.accentColor)
+                    .foregroundStyle(theme.accentColor)
                 Text(label)
                     .font(.system(size: 12))
                     .foregroundStyle(.primary)
@@ -666,8 +667,8 @@ private struct SuggestionChip: View {
             .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(isHovered ? AppSettings.shared.appTheme.dividerColor.opacity(0.06) : AppSettings.shared.appTheme.dividerColor.opacity(0.03))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppSettings.shared.appTheme.dividerColor.opacity(0.08)))
+                    .fill(isHovered ? theme.dividerColor.opacity(0.06) : theme.dividerColor.opacity(0.03))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.dividerColor.opacity(0.08)))
             )
         }
         .buttonStyle(.plain)

@@ -1000,7 +1000,7 @@ final class Database: Sendable {
 
     /// Scheduled data retention — call on startup, runs at most once per week.
     func pruneOldActivitiesIfScheduled() {
-        let retentionDays = AppSettings.shared.retentionDays
+        let retentionDays = SettingsStorage.shared.retentionDays
         guard retentionDays > 0 else { return }
         let lastPruneKey = "lastPruneDate"
         let lastPrune = UserDefaults.standard.object(forKey: lastPruneKey) as? Date ?? .distantPast

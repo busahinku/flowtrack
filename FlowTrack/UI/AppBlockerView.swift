@@ -4,7 +4,7 @@ import AppKit
 // MARK: - AppBlockerView
 struct AppBlockerView: View {
     @Bindable private var store = AppBlockerStore.shared
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
     @State private var showAddCard = false
     @State private var editingCard: BlockCard? = nil
 
@@ -26,7 +26,7 @@ struct AppBlockerView: View {
             }
             .padding(20)
         }
-        .background(theme.timelineBg)
+        .background(theme.timelineBackgroundColor)
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 Button { showAddCard = true } label: {
@@ -36,12 +36,14 @@ struct AppBlockerView: View {
         }
         .sheet(isPresented: $showAddCard) {
             BlockCardSheet(isPresented: $showAddCard)
+                .withEnvironment()
         }
         .sheet(item: $editingCard) { card in
             BlockCardSheet(isPresented: Binding(
                 get: { editingCard != nil },
                 set: { if !$0 { editingCard = nil } }
             ), editingCard: card)
+                .withEnvironment()
         }
     }
 
@@ -56,47 +58,47 @@ struct AppBlockerView: View {
                     .shadow(color: Color.purple.opacity(0.4), radius: 10, y: 4)
                 Image(systemName: "shield.fill")
                     .font(.system(size: 26))
-                    .foregroundStyle(theme.selectedForeground)
+                    .foregroundStyle(theme.selectedForegroundColor)
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text("Focus Shield")
                     .font(.title2.weight(.bold))
-                    .foregroundStyle(theme.primaryText)
+                    .foregroundStyle(theme.primaryTextColor)
                 Text("Block distracting sites and apps by creating focus cards.")
                     .font(.caption)
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
             }
             Spacer()
             Button { showAddCard = true } label: {
                 Label("New Card", systemImage: "plus.circle.fill")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(theme.selectedForeground)
+                    .foregroundStyle(theme.selectedForegroundColor)
                     .padding(.horizontal, 14).padding(.vertical, 7)
                     .background(theme.accentColor, in: RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
         }
         .padding(16)
-        .background(theme.cardBg, in: RoundedRectangle(cornerRadius: 14))
+        .background(theme.cardBackgroundColor, in: RoundedRectangle(cornerRadius: 14))
     }
 
     // MARK: - Empty State
     private var emptyState: some View {
         VStack(spacing: 20) {
             Image(systemName: "shield.fill").font(.system(size: 52))
-                .foregroundStyle(theme.secondaryText.opacity(0.4))
+                .foregroundStyle(theme.secondaryTextColor.opacity(0.4))
             Text("No Focus Cards Yet")
                 .font(.headline)
-                .foregroundStyle(theme.primaryText)
+                .foregroundStyle(theme.primaryTextColor)
             Text("Create cards to group distracting websites and apps.\nEnable a card to block everything in it.")
                 .font(.subheadline)
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
                 .multilineTextAlignment(.center)
             VStack(spacing: 10) {
                 Button { showAddCard = true } label: {
                     Label("Create Card Manually", systemImage: "plus.circle.fill")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(theme.selectedForeground)
+                        .foregroundStyle(theme.selectedForegroundColor)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
                         .background(theme.accentColor, in: RoundedRectangle(cornerRadius: 10))
@@ -118,7 +120,7 @@ struct AppBlockerView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(40)
-        .background(theme.cardBg, in: RoundedRectangle(cornerRadius: 14))
+        .background(theme.cardBackgroundColor, in: RoundedRectangle(cornerRadius: 14))
     }
 }
 
@@ -128,7 +130,7 @@ private struct BlockCardRow: View {
     let onEdit: () -> Void
     @State private var expanded = false
     private var store: AppBlockerStore { AppBlockerStore.shared }
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
 
     private var usedSeconds: Int { store.usageToday(for: card.id) }
     private var limitSeconds: Int { card.dailyLimitMinutes * 60 }
@@ -142,7 +144,7 @@ private struct BlockCardRow: View {
             mainRow
             if expanded { expandedDetail }
         }
-        .background(theme.cardBg, in: RoundedRectangle(cornerRadius: 14))
+        .background(theme.cardBackgroundColor, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(
             card.isEnabled ? card.accentColor.opacity(0.25) : theme.dividerColor.opacity(0.1),
             lineWidth: 1
@@ -181,7 +183,7 @@ private struct BlockCardRow: View {
             } label: {
                 Image(systemName: expanded ? "chevron.up" : "chevron.down")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(theme.secondaryText)
+                    .foregroundStyle(theme.secondaryTextColor)
                     .frame(width: 24, height: 24)
                     .background(theme.dividerColor.opacity(0.1), in: Circle())
             }
@@ -201,7 +203,7 @@ private struct BlockCardRow: View {
             HStack(spacing: 8) {
                 Text(card.name)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(card.isEnabled ? theme.primaryText : theme.secondaryText)
+                    .foregroundStyle(card.isEnabled ? theme.primaryTextColor : theme.secondaryTextColor)
                 if card.isEnabled {
                     Text(card.isAlwaysBlock ? "Always On" : "Active")
                         .font(.system(size: 9, weight: .bold))
@@ -213,15 +215,15 @@ private struct BlockCardRow: View {
             HStack(spacing: 6) {
                 if !card.websites.isEmpty {
                     Label("\(card.websites.count) site\(card.websites.count == 1 ? "" : "s")", systemImage: "globe")
-                        .font(.caption2).foregroundStyle(theme.secondaryText)
+                        .font(.caption2).foregroundStyle(theme.secondaryTextColor)
                 }
                 if !card.apps.isEmpty {
                     Label("\(card.apps.count) app\(card.apps.count == 1 ? "" : "s")", systemImage: "app.fill")
-                        .font(.caption2).foregroundStyle(theme.secondaryText)
+                        .font(.caption2).foregroundStyle(theme.secondaryTextColor)
                 }
                 if card.websites.isEmpty && card.apps.isEmpty {
                     Text("Empty — add sites or apps")
-                        .font(.caption2).foregroundStyle(theme.secondaryText.opacity(0.6))
+                        .font(.caption2).foregroundStyle(theme.secondaryTextColor.opacity(0.6))
                 }
             }
             if !card.isAlwaysBlock && card.isEnabled && limitSeconds > 0 {
@@ -242,7 +244,7 @@ private struct BlockCardRow: View {
             }.frame(height: 3)
             Text("\(usedSeconds / 60)/\(card.dailyLimitMinutes)m")
                 .font(.system(size: 9).monospacedDigit())
-                .foregroundStyle(usageFraction >= 0.9 ? theme.errorColor : theme.secondaryText)
+                .foregroundStyle(usageFraction >= 0.9 ? theme.errorColor : theme.secondaryTextColor)
                 .frame(width: 44, alignment: .trailing)
         }
     }
@@ -253,10 +255,10 @@ private struct BlockCardRow: View {
             if !card.websites.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Label("Websites", systemImage: "globe")
-                        .font(.caption.weight(.semibold)).foregroundStyle(theme.secondaryText)
+                        .font(.caption.weight(.semibold)).foregroundStyle(theme.secondaryTextColor)
                     FlowLayout(spacing: 6) {
                         ForEach(card.websites, id: \.self) { site in
-                            Text(site).font(.caption2).foregroundStyle(theme.primaryText)
+                            Text(site).font(.caption2).foregroundStyle(theme.primaryTextColor)
                                 .padding(.horizontal, 8).padding(.vertical, 4)
                                 .background(theme.dividerColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
                         }
@@ -266,10 +268,10 @@ private struct BlockCardRow: View {
             if !card.apps.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Label("Apps", systemImage: "app.fill")
-                        .font(.caption.weight(.semibold)).foregroundStyle(theme.secondaryText)
+                        .font(.caption.weight(.semibold)).foregroundStyle(theme.secondaryTextColor)
                     FlowLayout(spacing: 6) {
                         ForEach(Array(card.apps)) { app in
-                            Text(app.displayName).font(.caption2).foregroundStyle(theme.primaryText)
+                            Text(app.displayName).font(.caption2).foregroundStyle(theme.primaryTextColor)
                                 .padding(.horizontal, 8).padding(.vertical, 4)
                                 .background(theme.dividerColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
                         }
@@ -293,7 +295,7 @@ private struct BlockCardRow: View {
 struct BlockCardSheet: View {
     @Binding var isPresented: Bool
     var editingCard: BlockCard? = nil
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
     private var store: AppBlockerStore { AppBlockerStore.shared }
 
     // Card fields
@@ -338,7 +340,7 @@ struct BlockCardSheet: View {
             HStack(spacing: 12) {
                 Text(isEditing ? "Edit Card" : "New Focus Card")
                     .font(.headline)
-                    .foregroundStyle(theme.primaryText)
+                    .foregroundStyle(theme.primaryTextColor)
                 Spacer()
                 if !isEditing {
                     Button {
@@ -346,7 +348,7 @@ struct BlockCardSheet: View {
                     } label: {
                         Label("AI Setup", systemImage: "sparkles")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(showAI ? theme.selectedForeground : theme.accentColor)
+                            .foregroundStyle(showAI ? theme.selectedForegroundColor : theme.accentColor)
                             .padding(.horizontal, 10).padding(.vertical, 5)
                             .background(showAI ? theme.accentColor : theme.accentColor.opacity(0.1),
                                         in: RoundedRectangle(cornerRadius: 7))
@@ -355,7 +357,7 @@ struct BlockCardSheet: View {
                 }
                 Button { isPresented = false } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                         .font(.title3)
                 }
                 .buttonStyle(.plain)
@@ -405,7 +407,7 @@ struct BlockCardSheet: View {
                                     .fill(col)
                                     .frame(width: 22, height: 22)
                                     .overlay(
-                                        Circle().stroke(theme.primaryText.opacity(0.9), lineWidth: colorName == c ? 2 : 0)
+                                        Circle().stroke(theme.primaryTextColor.opacity(0.9), lineWidth: colorName == c ? 2 : 0)
                                             .padding(2)
                                     )
                                     .overlay(
@@ -417,7 +419,7 @@ struct BlockCardSheet: View {
                         }
                     }
                     .padding(14)
-                    .background(theme.cardBg, in: RoundedRectangle(cornerRadius: 12))
+                    .background(theme.cardBackgroundColor, in: RoundedRectangle(cornerRadius: 12))
 
                     // Limit
                     VStack(alignment: .leading, spacing: 10) {
@@ -428,7 +430,7 @@ struct BlockCardSheet: View {
                             HStack {
                                 Text("Daily limit:")
                                     .font(.subheadline)
-                                    .foregroundStyle(theme.secondaryText)
+                                    .foregroundStyle(theme.secondaryTextColor)
                                 Spacer()
                                 Stepper("\(limitMinutes) min/day", value: $limitMinutes, in: 5...480, step: 5)
                                     .font(.subheadline)
@@ -436,7 +438,7 @@ struct BlockCardSheet: View {
                         }
                     }
                     .padding(14)
-                    .background(theme.cardBg, in: RoundedRectangle(cornerRadius: 12))
+                    .background(theme.cardBackgroundColor, in: RoundedRectangle(cornerRadius: 12))
 
                     // Content tabs
                     VStack(spacing: 10) {
@@ -453,7 +455,7 @@ struct BlockCardSheet: View {
                         }
                     }
                     .padding(14)
-                    .background(theme.cardBg, in: RoundedRectangle(cornerRadius: 12))
+                    .background(theme.cardBackgroundColor, in: RoundedRectangle(cornerRadius: 12))
                 }
                 .padding(16)
             }
@@ -468,12 +470,12 @@ struct BlockCardSheet: View {
                         .background(theme.dividerColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
 
                 Button { save() } label: {
                     Text(isEditing ? "Save Changes" : "Create Card")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(name.isEmpty ? theme.secondaryText : theme.selectedForeground)
+                        .foregroundStyle(name.isEmpty ? theme.secondaryTextColor : theme.selectedForegroundColor)
                         .frame(maxWidth: .infinity).padding(.vertical, 9)
                         .background(name.isEmpty ? theme.dividerColor.opacity(0.1) : theme.accentColor,
                                     in: RoundedRectangle(cornerRadius: 9))
@@ -484,7 +486,7 @@ struct BlockCardSheet: View {
             .padding(16)
         }
         .frame(width: 440, height: 620)
-        .background(theme.sidebarBg)
+        .background(theme.sidebarBackgroundColor)
         .onAppear { populate() }
     }
 
@@ -493,11 +495,11 @@ struct BlockCardSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: "sparkles").foregroundStyle(theme.accentColor).font(.caption.weight(.semibold))
-                Text("Generate with AI").font(.subheadline.weight(.semibold)).foregroundStyle(theme.primaryText)
+                Text("Generate with AI").font(.subheadline.weight(.semibold)).foregroundStyle(theme.primaryTextColor)
             }
             Text("Describe what to block (e.g. \"social media\", \"gaming sites\", \"news\")")
                 .font(.caption)
-                .foregroundStyle(theme.secondaryText)
+                .foregroundStyle(theme.secondaryTextColor)
             HStack(spacing: 8) {
                 TextField("e.g. social media distractions", text: $aiPrompt)
                     .textFieldStyle(.roundedBorder)
@@ -510,7 +512,7 @@ struct BlockCardSheet: View {
                     } else {
                         Text("Generate")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(aiPrompt.isEmpty ? theme.secondaryText : theme.selectedForeground)
+                            .foregroundStyle(aiPrompt.isEmpty ? theme.secondaryTextColor : theme.selectedForegroundColor)
                             .padding(.horizontal, 10).padding(.vertical, 6)
                             .background(aiPrompt.isEmpty ? theme.dividerColor.opacity(0.1) : theme.accentColor,
                                         in: RoundedRectangle(cornerRadius: 7))
@@ -538,24 +540,24 @@ struct BlockCardSheet: View {
                 Button("Add", action: addSite)
                     .buttonStyle(.plain)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(newSite.isEmpty ? theme.secondaryText : theme.accentColor)
+                    .foregroundStyle(newSite.isEmpty ? theme.secondaryTextColor : theme.accentColor)
                     .disabled(newSite.isEmpty)
             }
             if websites.isEmpty {
                 Text("No websites added yet")
                     .font(.caption)
-                    .foregroundStyle(theme.secondaryText.opacity(0.5))
+                    .foregroundStyle(theme.secondaryTextColor.opacity(0.5))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
             } else {
                 VStack(spacing: 0) {
                     ForEach(websites, id: \.self) { site in
                         HStack {
-                            Image(systemName: "globe").font(.caption).foregroundStyle(theme.secondaryText)
-                            Text(site).font(.subheadline).foregroundStyle(theme.primaryText)
+                            Image(systemName: "globe").font(.caption).foregroundStyle(theme.secondaryTextColor)
+                            Text(site).font(.subheadline).foregroundStyle(theme.primaryTextColor)
                             Spacer()
                             Button { websites.removeAll { $0 == site } } label: {
-                                Image(systemName: "xmark").font(.caption2).foregroundStyle(theme.secondaryText)
+                                Image(systemName: "xmark").font(.caption2).foregroundStyle(theme.secondaryTextColor)
                             }
                             .buttonStyle(.plain)
                         }
@@ -574,7 +576,7 @@ struct BlockCardSheet: View {
                 .textFieldStyle(.roundedBorder)
             if installedApps.isEmpty {
                 Text("Loading apps…")
-                    .font(.caption).foregroundStyle(theme.secondaryText)
+                    .font(.caption).foregroundStyle(theme.secondaryTextColor)
                     .frame(maxWidth: .infinity).padding(.vertical, 12)
             } else {
                 ScrollView {
@@ -603,12 +605,12 @@ struct BlockCardSheet: View {
                     Image(nsImage: icon).resizable().frame(width: 22, height: 22)
                 } else {
                     Image(systemName: "app.fill").frame(width: 22, height: 22)
-                        .foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(theme.secondaryTextColor)
                 }
                 VStack(alignment: .leading, spacing: 1) {
                     Text(app.name).font(.subheadline)
-                        .foregroundStyle(isSelected ? theme.accentColor : theme.primaryText)
-                    Text(app.bundleID).font(.caption2).foregroundStyle(theme.secondaryText)
+                        .foregroundStyle(isSelected ? theme.accentColor : theme.primaryTextColor)
+                    Text(app.bundleID).font(.caption2).foregroundStyle(theme.secondaryTextColor)
                 }
                 Spacer()
                 if isSelected {
@@ -627,7 +629,7 @@ struct BlockCardSheet: View {
         Button { tab = index } label: {
             Text(title)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(tab == index ? theme.selectedForeground : theme.secondaryText)
+                .foregroundStyle(tab == index ? theme.selectedForegroundColor : theme.secondaryTextColor)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 7)
                 .background(tab == index ? theme.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 7))
@@ -690,7 +692,7 @@ struct BlockCardSheet: View {
         Include 5-15 relevant domain names without www or https prefixes.
         """
         let userMessage = "Create a focus card for blocking: \"\(aiPrompt)\""
-        let settings = AppSettings.shared
+        let settings = SettingsStorage.shared
         let provider = AIProviderFactory.create(for: settings.aiProvider, model: settings.modelName(for: settings.aiProvider))
         do {
             let raw = try await provider.chat(
@@ -753,7 +755,7 @@ struct BlockCardSheet: View {
 private struct IconPickerView: View {
     @Binding var selected: String
     @Binding var isPresented: Bool
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
     private let icons = [
         "nosign", "shield.fill", "phone.down.fill", "xmark.octagon.fill", "lock.fill",
         "gamecontroller.fill", "iphone", "bubble.left.fill", "newspaper.fill", "film.fill",
@@ -774,7 +776,7 @@ private struct IconPickerView: View {
                             .frame(width: 36, height: 36)
                         Image(systemName: icon)
                             .font(.system(size: 18))
-                            .foregroundStyle(selected == icon ? theme.accentColor : theme.primaryText)
+                            .foregroundStyle(selected == icon ? theme.accentColor : theme.primaryTextColor)
                     }
                     .frame(width: 40, height: 40)
                 }

@@ -17,12 +17,13 @@ struct OnboardingView: View {
     @State private var testResult: String?
     @State private var testIsSuccess = false
 
-    private var theme: AppTheme { AppSettings.shared.appTheme }
+    @Environment(Theme.self) private var theme
+    @Environment(SettingsStorage.self) private var settings
     private let totalSteps = 4
 
     /// Whether the current theme uses a dark background
     private var isDarkGradient: Bool {
-        switch theme {
+        switch theme.selectedColorSet {
         case .dark, .midnight: return true
         case .light, .pastel: return false
         case .system: return NSApp?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -49,8 +50,8 @@ struct OnboardingView: View {
     }
 
     /// Foreground color that contrasts with the onboarding gradient
-    private var onboardingPrimary: Color { theme.primaryText }
-    private var onboardingSecondary: Color { theme.secondaryText }
+    private var onboardingPrimary: Color { theme.primaryTextColor }
+    private var onboardingSecondary: Color { theme.secondaryTextColor }
     /// Subtle overlay for cards/chips on the gradient background
     private var overlayBg: Color { isDarkGradient ? Color.white : Color.black }
 
@@ -216,7 +217,7 @@ struct OnboardingView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(theme.accentColor)
-                    .foregroundStyle(theme.selectedForeground)
+                    .foregroundStyle(theme.selectedForegroundColor)
 
                     Button("Open Accessibility Settings \u{2192}") {
                         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
@@ -483,7 +484,7 @@ struct OnboardingView: View {
                 .disabled(!canProgress)
             } else {
                 Button {
-                    AppSettings.shared.hasCompletedOnboarding = true
+                    settings.hasCompletedOnboarding = true
                     isPresented = false
                 } label: {
                     Text("Open FlowTrack")
@@ -492,7 +493,7 @@ struct OnboardingView: View {
                         .padding(.vertical, 10)
                         .background(theme.successColor.opacity(0.75))
                         .clipShape(Capsule())
-                        .foregroundStyle(theme.selectedForeground)
+                        .foregroundStyle(theme.selectedForegroundColor)
                 }
                 .buttonStyle(.plain)
             }
@@ -515,10 +516,10 @@ struct OnboardingView: View {
     }
 
     private func saveAISettings() {
-        AppSettings.shared.aiProvider = selectedProvider
+        settings.aiProvider = selectedProvider
         switch selectedProvider {
         case .ollama:
-            AppSettings.shared.setModelName(ollamaModel, for: .ollama)
+            settings.setModelName(ollamaModel, for: .ollama)
         case .claude, .openai, .gemini:
             if !apiKey.isEmpty {
                 SecureStore.shared.save(key: apiKey, for: selectedProvider.rawValue)
