@@ -23,10 +23,24 @@ struct LMStudioProvider: AIProvider, Sendable {
     }
 
     func checkHealth() async throws -> Bool {
-        let request = URLRequest(url: URL(string: "http://localhost:1234/v1/models")!)
-        let (_, response) = try await URLSession.shared.data(for: request)
+        let url = URL(string: "http://localhost:1234/v1/models")!
+        let request = URLRequest(url: url)
+        let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw AIError.networkError("LM Studio not running")
+        }
+
+        // Validate the configured model is loaded (skip if "default")
+        if model != "default" {
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let models = json["data"] as? [[String: Any]] else {
+                throw AIError.networkError("Could not read loaded models from LM Studio")
+            }
+            let loadedIDs = models.compactMap { $0["id"] as? String }
+            guard loadedIDs.contains(where: { $0 == model || $0.contains(model) }) else {
+                let available = loadedIDs.joined(separator: ", ")
+                throw AIError.modelNotFound("'\(model)' not loaded. Available: \(available)")
+            }
         }
         return true
     }

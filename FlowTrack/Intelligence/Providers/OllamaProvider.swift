@@ -23,10 +23,29 @@ struct OllamaProvider: AIProvider, Sendable {
     }
 
     func checkHealth() async throws -> Bool {
-        let request = URLRequest(url: URL(string: "http://localhost:11434/api/tags")!)
-        let (_, response) = try await URLSession.shared.data(for: request)
+        let url = URL(string: "http://localhost:11434/api/tags")!
+        let request = URLRequest(url: url)
+        let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw AIError.networkError("Ollama not running")
+        }
+
+        // Validate the configured model is actually installed
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let models = json["models"] as? [[String: Any]] else {
+            throw AIError.networkError("Could not read installed models from Ollama")
+        }
+
+        let installedNames = models.compactMap { $0["name"] as? String }
+        let modelMatches = installedNames.contains { installed in
+            // Exact match or match without ":latest" tag
+            installed == model
+                || installed == "\(model):latest"
+                || installed.split(separator: ":").first.map(String.init) == model
+        }
+        guard modelMatches else {
+            let available = installedNames.joined(separator: ", ")
+            throw AIError.modelNotFound("'\(model)' not installed. Available: \(available)")
         }
         return true
     }

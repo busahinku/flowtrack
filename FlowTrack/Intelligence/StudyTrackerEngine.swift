@@ -26,6 +26,12 @@ final class StudyTrackerEngine {
         case ai
     }
 
+    private struct KeywordMatchResult {
+        let todo: TodoItem
+        /// true when at least one keyword matched in window title or URL (not just app name)
+        let hasContentMatch: Bool
+    }
+
     // MARK: - Observable State
 
     /// Whether this engine auto-started the current stopwatch session.
@@ -103,7 +109,8 @@ final class StudyTrackerEngine {
     }
 
     /// Called by ActivityTracker after every category resolution (~every 5 seconds).
-    func checkActivity(category: Category, appName: String, windowTitle: String, url: String? = nil) {
+    func checkActivity(category: Category, appName: String, windowTitle: String,
+                       url: String? = nil, bundleID: String = "", documentPath: String? = nil) {
         guard category != .idle else { return }
 
         let autoCatchTodos = TodoStore.shared.todos.filter { $0.autoCatch && $0.status != .done }
@@ -119,9 +126,23 @@ final class StudyTrackerEngine {
             return
         }
 
+        // Extract structured metadata for richer keyword matching
+        let metadata: ContentMetadata?
+        if let url = url {
+            metadata = ContentMetadataExtractor.extract(url: url, windowTitle: windowTitle, appName: appName)
+        } else {
+            metadata = ContentMetadataExtractor.extractNativeApp(windowTitle: windowTitle, appName: appName, bundleID: bundleID)
+        }
+
         // ── Tier 1: instant keyword match ────────────────────────────
-        if let matched = keywordMatch(appName: appName, windowTitle: windowTitle, url: url, todos: autoCatchTodos) {
-            handleMatched(todo: matched, grace: keywordStartGrace, source: .keyword, appName: appName, windowTitle: windowTitle, url: url)
+        if let result = keywordMatch(windowTitle: windowTitle, url: url, metadata: metadata, documentPath: documentPath, todos: autoCatchTodos) {
+            // When already tracking the SAME todo, require a content match (title/URL)
+            // to keep the timer alive. App-name-only is too weak a signal.
+            if isAutoTracking && matchedTodoId == result.todo.id && !result.hasContentMatch {
+                handleUnmatched()
+                return
+            }
+            handleMatched(todo: result.todo, grace: keywordStartGrace, source: .keyword, hasContentMatch: result.hasContentMatch, appName: appName, windowTitle: windowTitle, url: url, bundleID: bundleID, documentPath: documentPath)
             return
         }
 
@@ -152,54 +173,169 @@ final class StudyTrackerEngine {
 
     // MARK: - Matching
 
-    /// Instant keyword match: checks window title, URL, and app name against todo keywords.
-    private func keywordMatch(appName: String, windowTitle: String, url: String?, todos: [TodoItem]) -> TodoItem? {
+    /// Score-based keyword match: picks the best-matching todo instead of first-match-wins.
+    /// Scores against multiple signals: window title, URL path segments, ContentMetadata fields,
+    /// document path components, and todo title word overlap.
+    private func keywordMatch(windowTitle: String, url: String?, metadata: ContentMetadata?,
+                              documentPath: String?, todos: [TodoItem]) -> KeywordMatchResult? {
         let title = windowTitle.lowercased()
-        let app = appName.lowercased()
-        let urlLower = url?.lowercased() ?? ""
+        let urlKeywords = parseURLKeywords(url)
+        let contentTitle = metadata?.contentTitle?.lowercased() ?? ""
+        let subcategory = metadata?.subcategory?.lowercased() ?? ""
+        let docComponents = parseDocumentPathComponents(documentPath)
+
+        // Collect all content signals for todo-title overlap matching
+        let allContentSignals = [title, contentTitle, subcategory] + urlKeywords + docComponents
+
+        var bestResult: KeywordMatchResult?
+        var bestScore = 0
 
         for todo in todos {
+            var score = 0
+            var hasContentMatch = false
+
             let keywords = todo.parsedKeywords
-            guard !keywords.isEmpty else { continue }
             for keyword in keywords {
-                // Skip keywords shorter than 3 chars — prevents "go", "ai", "js" matching everything
                 guard keyword.count >= 3 else { continue }
-                if title.contains(keyword) || app.contains(keyword) || urlLower.contains(keyword) {
-                    return todo
+                if title.contains(keyword) {
+                    score += 3; hasContentMatch = true
+                }
+                if urlKeywords.contains(where: { $0.contains(keyword) }) {
+                    score += 2; hasContentMatch = true
+                }
+                if !contentTitle.isEmpty && contentTitle.contains(keyword) {
+                    score += 3; hasContentMatch = true
+                }
+                if !subcategory.isEmpty && subcategory.contains(keyword) {
+                    score += 3; hasContentMatch = true
+                }
+                if docComponents.contains(where: { $0.contains(keyword) }) {
+                    score += 2; hasContentMatch = true
                 }
             }
-            // Also match the todo title itself against the window title
+
+            // Also match the todo title words against all content signals
             let todoTitleLower = todo.title.lowercased()
             let titleWords = todoTitleLower.split(separator: " ").filter { $0.count > 3 }
-            let matchCount = titleWords.filter { title.contains($0) || urlLower.contains($0) }.count
-            // Require at least 2 filterable words and at least 2 matches (or half, whichever is larger)
+            let matchCount = titleWords.filter { word in
+                allContentSignals.contains(where: { $0.contains(word) })
+            }.count
             if titleWords.count >= 2 && matchCount >= max(2, (titleWords.count + 1) / 2) {
-                return todo
+                score += matchCount * 2
+                hasContentMatch = true
+            }
+
+            if score > bestScore {
+                bestScore = score
+                bestResult = KeywordMatchResult(todo: todo, hasContentMatch: hasContentMatch)
             }
         }
-        return nil
+
+        return bestResult
+    }
+
+    /// Parses a URL into lowercased path segments, query param values, and domain name (without TLD).
+    private func parseURLKeywords(_ urlString: String?) -> [String] {
+        guard let urlString, let components = URLComponents(string: urlString) else { return [] }
+        var keywords: [String] = []
+
+        // Domain without TLD: "udemy.com" → "udemy"
+        if let host = components.host?.lowercased() {
+            let parts = host.split(separator: ".")
+            if let domain = parts.dropLast().last { // drop TLD, take domain name
+                keywords.append(String(domain))
+            }
+        }
+
+        // Path segments: "/course/logic-design/lecture/5" → ["course", "logic-design", "lecture", "5"]
+        if let path = components.path.isEmpty ? nil : components.path {
+            let segments = path.split(separator: "/").map { String($0).lowercased() }
+            keywords.append(contentsOf: segments)
+        }
+
+        // Query param values: "?q=logic+design" → ["logic", "design"]
+        if let queryItems = components.queryItems {
+            for item in queryItems {
+                guard let value = item.value, !value.isEmpty else { continue }
+                let words = value.lowercased()
+                    .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                    .filter { !$0.isEmpty }
+                keywords.append(contentsOf: words)
+            }
+        }
+
+        return keywords
+    }
+
+    /// Extracts lowercased path components from a document file path.
+    private func parseDocumentPathComponents(_ path: String?) -> [String] {
+        guard let path, !path.isEmpty else { return [] }
+        return path.split(separator: "/").map { String($0).lowercased() }
     }
 
     // MARK: - State Transitions
 
-    private func handleMatched(todo: TodoItem, grace: TimeInterval, source: MatchSource, appName: String, windowTitle: String, url: String?) {
+    private func handleMatched(todo: TodoItem, grace: TimeInterval, source: MatchSource, hasContentMatch: Bool = true, appName: String, windowTitle: String, url: String?, bundleID: String = "", documentPath: String? = nil) {
         // Cancel any pending stop
         cancelPendingStop()
         unmatchedSince = nil
 
         if isAutoTracking {
-            // Already tracking — update linked todo if different
-            if matchedTodoId != todo.id {
-                matchedTodoId = todo.id
-                TimerStore.shared.setTodo(todo.id)
-                studyLog.info("Study tracker: switched to todo \"\(todo.title)\"")
+            if matchedTodoId == todo.id {
+                // Same todo still matches — cancel any pending switch to a different todo
+                cancelPendingStart()
+                pendingMatchTodoId = nil
+                return
+            }
+
+            // Different todo matched while tracking — schedule a grace-period switch
+            // instead of switching instantly (prevents spurious laps from transient matches).
+            let newMatchId = todo.id
+            if pendingMatchTodoId == newMatchId && pendingStartTask != nil {
+                return // already scheduling a switch to this todo
+            }
+
+            pendingMatchTodoId = newMatchId
+            cancelPendingStart()
+
+            let capturedTodo = todo
+            pendingStartTask = Task { [weak self] in
+                do { try await Task.sleep(for: .seconds(grace)) } catch { return }
+                guard let self, self.isAutoTracking else { return }
+
+                // Re-verify the new todo still matches after the grace period
+                let currentApp = ActivityTracker.shared.currentApp
+                let currentTitle = ActivityTracker.shared.currentTitle
+                let currentURL = ActivityTracker.shared.currentURL
+                let activeTodos = TodoStore.shared.todos.filter { $0.autoCatch && $0.status != .done }
+                // Re-extract fresh metadata for re-verification
+                let recheckMetadata: ContentMetadata?
+                if let url = currentURL {
+                    recheckMetadata = ContentMetadataExtractor.extract(url: url, windowTitle: currentTitle, appName: currentApp)
+                } else {
+                    recheckMetadata = ContentMetadataExtractor.extractNativeApp(windowTitle: currentTitle, appName: currentApp, bundleID: "")
+                }
+                let recheck = self.keywordMatch(windowTitle: currentTitle, url: currentURL, metadata: recheckMetadata, documentPath: nil, todos: activeTodos)
+
+                guard recheck?.todo.id == capturedTodo.id else {
+                    self.cancelPendingStart()
+                    self.pendingMatchTodoId = nil
+                    return
+                }
+
+                self.matchedTodoId = capturedTodo.id
+                TimerStore.shared.setTodo(capturedTodo.id)
+                self.pendingStartTask = nil
+                self.pendingMatchTodoId = nil
+                studyLog.info("Study tracker: switched to todo \"\(capturedTodo.title)\" (after grace)")
             }
             return
         }
 
         // Instant restart: if returning to the same todo that was just stopped,
-        // skip the grace period entirely and resume immediately.
-        if todo.id == lastTrackedTodoId {
+        // skip the grace period only when we have a content match (title/URL).
+        // App-name-only matches go through the normal grace period.
+        if todo.id == lastTrackedTodoId && hasContentMatch {
             startAutoTracking(todo: todo, appName: appName, windowTitle: windowTitle)
             return
         }
@@ -234,7 +370,13 @@ final class StudyTrackerEngine {
             switch source {
             case .keyword:
                 let activeTodos = TodoStore.shared.todos.filter { $0.autoCatch && $0.status != .done }
-                stillMatches = self.keywordMatch(appName: currentApp, windowTitle: currentTitle, url: recheckURL, todos: activeTodos)?.id == capturedTodo.id
+                let recheckMetadata: ContentMetadata?
+                if let url = recheckURL {
+                    recheckMetadata = ContentMetadataExtractor.extract(url: url, windowTitle: currentTitle, appName: currentApp)
+                } else {
+                    recheckMetadata = ContentMetadataExtractor.extractNativeApp(windowTitle: currentTitle, appName: currentApp, bundleID: "")
+                }
+                stillMatches = self.keywordMatch(windowTitle: currentTitle, url: recheckURL, metadata: recheckMetadata, documentPath: nil, todos: activeTodos)?.todo.id == capturedTodo.id
             case .ai:
                 stillMatches = self.contextKey(appName: currentApp, windowTitle: currentTitle, url: recheckURL) == capturedContextKey
             }
@@ -302,7 +444,7 @@ final class StudyTrackerEngine {
             guard !self.isAutoTracking else { return }
 
             if let todo = matchedTodo {
-                self.handleMatched(todo: todo, grace: self.aiStartGrace, source: .ai, appName: capturedApp, windowTitle: capturedTitle, url: url)
+                self.handleMatched(todo: todo, grace: self.aiStartGrace, source: .ai, appName: capturedApp, windowTitle: capturedTitle, url: url, bundleID: "", documentPath: nil)
             }
         }
     }

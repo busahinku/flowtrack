@@ -220,6 +220,9 @@ final class ActivityTracker: ObservableObject {
 
     // Title change debounce — prevents micro-segments from rapid title changes
     private var titleChangeDebounceTask: Task<Void, Never>?
+    // Guards segment-boundary state during title-change debounce — prevents URL fetch
+    // from overwriting lastSaved* (old segment data) before debounce fires endCurrentSegment()
+    private var awaitingTitleDebounce = false
 
     // MARK: - AXObserver State (event-driven title change detection)
     private var axObserver: AXObserver?
@@ -451,6 +454,7 @@ final class ActivityTracker: ObservableObject {
         isBrowserFetchPending = false
         titleChangeDebounceTask?.cancel()
         titleChangeDebounceTask = nil
+        awaitingTitleDebounce = false
 
         // End the previous app's segment — write one accurate record
         endCurrentSegment()
@@ -516,14 +520,14 @@ final class ActivityTracker: ObservableObject {
                 let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: resolvedTitle, url: info.url, isIdle: false, contentMetadata: metadata)
                 self.checkDistractionAlert(category: cat)
                 FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url)
-                StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url)
+                StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url, bundleID: bundleID, documentPath: self.lastSavedDocumentPath)
                 self.lastSavedCategory = cat
             }
         } else {
             let cat = resolveCategory(appName: appName, bundleID: bundleID, title: title, url: nil, isIdle: false)
             checkDistractionAlert(category: cat)
             FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: title)
-            StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: title)
+            StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: title, bundleID: bundleID, documentPath: lastSavedDocumentPath)
             lastSavedCategory = cat
         }
     }
@@ -533,6 +537,9 @@ final class ActivityTracker: ObservableObject {
     private func handleScreenSleep() {
         isScreenAsleep = true
         isBrowserFetchPending = false
+        titleChangeDebounceTask?.cancel()
+        titleChangeDebounceTask = nil
+        awaitingTitleDebounce = false
         idleTimer?.invalidate(); idleTimer = nil
         checkpointTimer?.invalidate(); checkpointTimer = nil
         unregisterAXObserver()
@@ -583,7 +590,7 @@ final class ActivityTracker: ObservableObject {
             let cat = resolveCategory(appName: appName, bundleID: bundleID, title: title, url: nil, isIdle: false)
             checkDistractionAlert(category: cat)
             FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: title)
-            StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: title)
+            StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: title, bundleID: bundleID, documentPath: lastSavedDocumentPath)
             lastSavedCategory = cat
         }
     }
@@ -662,13 +669,14 @@ final class ActivityTracker: ObservableObject {
         // Pass nil for URL because cachedBrowserURL is stale (from the previous tab) when
         // switching tabs. The full URL-based check follows when updateBrowserInfo completes.
         let immediateCategory = resolveCategory(appName: appName, bundleID: bundleID, title: newTitle, url: nil, isIdle: false)
-        StudyTrackerEngine.shared.checkActivity(category: immediateCategory, appName: appName, windowTitle: newTitle)
+        StudyTrackerEngine.shared.checkActivity(category: immediateCategory, appName: appName, windowTitle: newTitle, bundleID: bundleID, documentPath: lastSavedDocumentPath)
         FocusModeEngine.shared.checkActivity(category: immediateCategory, appName: appName, windowTitle: newTitle)
 
         // For browsers: start URL fetch immediately in parallel so it's ready when debounce fires.
         // This eliminates the sequential 2s+1s delay (now: 0.3s debounce with URL pre-fetched).
         if isBrowser {
             browserURLTask?.cancel()
+            cachedBrowserURL = nil  // Clear stale URL from previous tab
             browserFetchGeneration &+= 1
             let fetchGen = browserFetchGeneration
             let trackingGen = trackingGeneration
@@ -683,27 +691,32 @@ final class ActivityTracker: ObservableObject {
                 self.isBrowserFetchPending = false
                 self.cachedBrowserURL = info.url
                 self.currentURL = info.url
-                self.lastSavedURL = info.url
                 let resolvedTitle = info.pageTitle.flatMap { $0.isEmpty ? nil : $0 } ?? newTitle
-                if self.currentTitle == newTitle || self.lastSavedTitle == newTitle || self.lastSavedTitle.isEmpty {
-                    self.currentTitle = resolvedTitle
+                self.currentTitle = resolvedTitle
+                // Only update segment-boundary state if debounce already resolved
+                // (old segment already written). If debounce is pending, these will be
+                // set from cache when the debounce fires.
+                if !self.awaitingTitleDebounce {
+                    self.lastSavedURL = info.url
                     self.lastSavedTitle = resolvedTitle
+                    let metadata = ContentMetadataExtractor.extract(url: info.url, windowTitle: resolvedTitle, appName: appName)
+                    let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: resolvedTitle, url: info.url, isIdle: false, contentMetadata: metadata)
+                    self.lastSavedCategory = cat
+                    self.checkDistractionAlert(category: cat)
+                    FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url)
+                    StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url, bundleID: bundleID, documentPath: self.lastSavedDocumentPath)
                 }
-                let metadata = ContentMetadataExtractor.extract(url: info.url, windowTitle: resolvedTitle, appName: appName)
-                let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: resolvedTitle, url: info.url, isIdle: false, contentMetadata: metadata)
-                self.checkDistractionAlert(category: cat)
-                FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url)
-                StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url)
-                self.lastSavedCategory = cat
             }
         }
 
         // Debounce: browsers get 0.3s (near-instant), other apps get 2s (avoids micro-segments)
         let debounceDelay: Double = isBrowser ? 0.3 : 2.0
         titleChangeDebounceTask?.cancel()
+        awaitingTitleDebounce = true
         titleChangeDebounceTask = Task {
             try? await Task.sleep(for: .seconds(debounceDelay))
             guard !Task.isCancelled else { return }
+            self.awaitingTitleDebounce = false
 
             // After debounce: if segment is very short (< 15s for non-browser, < 5s for browser),
             // update title in-place instead of splitting
@@ -711,7 +724,12 @@ final class ActivityTracker: ObservableObject {
             let minSegmentAge: TimeInterval = isBrowser ? 5 : 15
             if segmentAge < minSegmentAge {
                 self.lastSavedTitle = self.currentTitle
-                if !isBrowser {
+                if isBrowser {
+                    self.lastSavedURL = self.cachedBrowserURL
+                    let metadata = ContentMetadataExtractor.extract(url: self.cachedBrowserURL, windowTitle: self.currentTitle, appName: appName)
+                    let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: self.currentTitle, url: self.cachedBrowserURL, isIdle: false, contentMetadata: metadata)
+                    self.lastSavedCategory = cat
+                } else {
                     self.lastSavedURL = nil
                     self.cachedBrowserURL = nil
                     self.currentURL = nil
@@ -728,6 +746,9 @@ final class ActivityTracker: ObservableObject {
             self.lastSavedTitle = self.currentTitle
             if isBrowser {
                 self.lastSavedURL = self.cachedBrowserURL
+                let metadata = ContentMetadataExtractor.extract(url: self.cachedBrowserURL, windowTitle: self.currentTitle, appName: appName)
+                let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: self.currentTitle, url: self.cachedBrowserURL, isIdle: false, contentMetadata: metadata)
+                self.lastSavedCategory = cat
             } else {
                 self.lastSavedURL = nil
                 self.cachedBrowserURL = nil
@@ -769,7 +790,7 @@ final class ActivityTracker: ObservableObject {
                 let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: resolvedTitle, url: info.url, isIdle: false, contentMetadata: metadata)
                 self.checkDistractionAlert(category: cat)
                 FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url)
-                StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url)
+                StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url, bundleID: bundleID, documentPath: self.lastSavedDocumentPath)
                 self.lastSavedCategory = cat
             }
         } else {
@@ -777,7 +798,7 @@ final class ActivityTracker: ObservableObject {
             let cat = resolveCategory(appName: appName, bundleID: bundleID, title: title, url: nil, isIdle: false)
             checkDistractionAlert(category: cat)
             FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: title)
-            StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: title)
+            StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: title, bundleID: bundleID, documentPath: lastSavedDocumentPath)
             lastSavedCategory = cat
         }
     }
@@ -918,7 +939,8 @@ final class ActivityTracker: ObservableObject {
         }
 
         guard let scriptAppName = descriptor.appleScriptAppName else {
-            return (nil, nil)
+            // No AppleScript — try AX-based URL extraction (works for WebKit/Gecko browsers like Orion, DuckDuckGo)
+            return (fetchFirefoxURL(bundleID: bundleID), nil)
         }
 
         // AppleScript that returns "url|||title" in a single call to avoid two round-trips.
