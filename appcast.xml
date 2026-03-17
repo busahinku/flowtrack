@@ -6,14 +6,14 @@
     <description>Updates for FlowTrack</description>
     <language>en</language>
     <item>
-      <title>FlowTrack 0.5</title>
-      <description><![CDATA[<p>Enrich keyword matching with structured metadata (URL segments, editor
-  projects, document paths), add AX URL fallback for Orion/DuckDuckGo</p>]]></description>
-      <pubDate>Wed, 18 Mar 2026 01:29:48 +0300</pubDate>
-      <sparkle:version>5000</sparkle:version>
-      <sparkle:shortVersionString>0.5</sparkle:shortVersionString>
+      <title>FlowTrack 0.6</title>
+      <description><![CDATA[<p>Enrich keyword matching with structured metadata (URL segments,
+  editor projects, document paths), add AX URL fallback for Orion/DuckDuckGo</p>]]></description>
+      <pubDate>Wed, 18 Mar 2026 01:35:36 +0300</pubDate>
+      <sparkle:version>6000</sparkle:version>
+      <sparkle:shortVersionString>0.6</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/busahinku/flowtrack/releases/download/v0.5/FlowTrack-v0.5.dmg" type="application/octet-stream" length="7457671" sparkle:edSignature="y421kHHZuuAwazAwdLEVUP2+pcI/h796R/As2jRuz5QTqLXpOxSKVvToHqkpROgOnpjUA50vShe0DOrRAKrRBQ==" />
+      <enclosure url="https://github.com/busahinku/flowtrack/releases/download/v0.6/FlowTrack-v0.6.dmg" type="application/octet-stream" length="7457370" sparkle:edSignature="gIM+dsKj7mZfRluqCxpA4ocPcJ4s7hYCOOFfoGdkf2NPOHKWsiKpMj5a1DmL4yXLDNJi0c5B5doLuPXZIJdyBQ==" />
     </item>
   </channel>
 </rss>
