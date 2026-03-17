@@ -87,6 +87,7 @@ struct OnboardingView: View {
             }
         }
         .frame(width: 580, height: 500)
+        .interactiveDismissDisabled()
         .onAppear { startPermissionPolling() }
         .onDisappear { permissionTimer?.invalidate() }
     }
@@ -440,7 +441,7 @@ struct OnboardingView: View {
         HStack {
             if step > 0 {
                 Button {
-                    withAnimation { step -= 1 }
+                    withAnimation { step = max(0, step - 1) }
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "chevron.left")
