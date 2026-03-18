@@ -186,10 +186,14 @@ struct AITab: View {
     @State private var apiKeyInput = ""
     @State private var testResult: String?
     @State private var isTesting = false
+    @State private var isCheckingAllProviders = false
     @State private var modelInput = ""
     @State private var savedIndicator = false
+    @State private var modelSavedIndicator = false
+    @State private var modelSetError: String? = nil
     @State private var cliDetected: [String: String?] = [:]
     @State private var providerHealth: [String: ProviderHealthStatus] = [:]
+    @State private var ollamaInstalledModels: [String] = []
     // Fallback inline config
     @State private var fb1KeyInput = ""
     @State private var fb2KeyInput = ""
