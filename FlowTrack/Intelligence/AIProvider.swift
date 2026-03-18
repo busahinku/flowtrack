@@ -477,14 +477,14 @@ struct AIPromptBuilder {
 
 // MARK: - AIHTTPHelper
 struct AIHTTPHelper {
-    static func sendRequest(url: URL, headers: [String: String], body: Data) async throws -> (Data, HTTPURLResponse) {
+    static func sendRequest(url: URL, headers: [String: String], body: Data, timeout: TimeInterval = 30) async throws -> (Data, HTTPURLResponse) {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.httpBody = body
         for (key, value) in headers {
             request.setValue(value, forHTTPHeaderField: key)
         }
-        request.timeoutInterval = 30
+        request.timeoutInterval = timeout
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
