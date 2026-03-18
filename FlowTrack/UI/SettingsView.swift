@@ -207,7 +207,13 @@ struct AITab: View {
         @Bindable var settings = settings
         Form {
             Section("Primary Provider") {
-                Picker("Provider", selection: $settings.aiProvider) {
+                Picker("Provider", selection: Binding(
+                    get: { settings.aiProvider },
+                    set: { newPrimary in
+                        settings.aiProvider = newPrimary
+                        normalizeFallbackProviders(for: newPrimary)
+                    }
+                )) {
                     ForEach(AIProviderType.allCases) { provider in
                         HStack {
                             statusDot(for: provider)
@@ -267,30 +273,56 @@ struct AITab: View {
                             if isTesting {
                                 ProgressView().controlSize(.small)
                             }
-                            Text(isTesting ? "Testing..." : "Send Test Request")
+                            Text(isTesting ? "Testing..." : "Test Connection")
                         }
                     }
-                    .disabled(isTesting)
+                    .disabled(isTesting || isCheckingAllProviders)
 
                     Spacer()
 
-                    Button("Check All Providers") {
+                    Button(action: {
                         Task { await checkAllProviders() }
+                    }) {
+                        HStack {
+                            if isCheckingAllProviders {
+                                ProgressView().controlSize(.small)
+                            }
+                            Text(isCheckingAllProviders ? "Checking..." : "Check All Providers")
+                        }
                     }
                     .font(.caption)
-                    .disabled(isTesting)
+                    .disabled(isTesting || isCheckingAllProviders)
                 }
 
                 if let result = testResult {
                     Text(result)
                         .font(.caption)
-                        .foregroundStyle(result.contains("✓") ? theme.successColor : theme.errorColor)
+                        .foregroundStyle(result.hasPrefix("✓") ? theme.successColor : theme.errorColor)
                         .textSelection(.enabled)
                 }
             }
         }
         .formStyle(.grouped)
-        .onAppear { refreshCLIDetection() }
+        .onAppear {
+            refreshCLIDetection()
+            Task { ollamaInstalledModels = await OllamaProvider.fetchInstalledModels() }
+        }
+        .onDisappear {
+            apiKeyInput = ""
+            testResult = nil
+            isTesting = false
+            isCheckingAllProviders = false
+            modelInput = ""
+            savedIndicator = false
+            modelSavedIndicator = false
+            modelSetError = nil
+            fb1KeyInput = ""
+            fb2KeyInput = ""
+            fb1ModelInput = ""
+            fb2ModelInput = ""
+            fb1SavedIndicator = false
+            fb2SavedIndicator = false
+        }
     }
 
     @ViewBuilder
@@ -380,32 +412,62 @@ struct AITab: View {
             HStack {
                 Text("Model:")
                     .font(.caption)
-                TextField("Model", text: Binding(
-                    get: { modelBinding.wrappedValue.isEmpty ? currentModel : modelBinding.wrappedValue },
-                    set: { modelBinding.wrappedValue = $0 }
+                TextField(currentModel, text: Binding(
+                    get: { modelBinding.wrappedValue },
+                    set: { modelBinding.wrappedValue = $0; modelSetError = nil }
                 ))
                 .textFieldStyle(.roundedBorder)
                 Button("Set") {
-                    settings.setModelName(modelBinding.wrappedValue.isEmpty ? currentModel : modelBinding.wrappedValue, for: provider)
+                    let name = modelBinding.wrappedValue.isEmpty ? currentModel : modelBinding.wrappedValue
+                    if provider == .ollama, !ollamaInstalledModels.isEmpty {
+                        let isInstalled = ollamaInstalledModels.contains(where: {
+                            $0 == name ||
+                            $0.hasPrefix(name + ":") ||
+                            name == ($0.components(separatedBy: ":").first ?? $0)
+                        })
+                        if !isInstalled {
+                            modelSetError = "'\(name)' is not installed. Use a model from the Quick list."
+                            return
+                        }
+                    }
+                    modelSetError = nil
+                    settings.setModelName(name, for: provider)
                     modelBinding.wrappedValue = ""
+                    modelSavedIndicator = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { modelSavedIndicator = false }
                 }
+                if modelSavedIndicator {
+                    Text("Set ✓")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
+            }
+            if let err = modelSetError, provider == .ollama {
+                Text(err)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
             }
             Text(provider.modelHint)
                 .font(.caption2)
                 .foregroundStyle(theme.secondaryTextColor)
 
-            HStack(spacing: 4) {
-                Text("Quick:")
-                    .font(.caption2)
-                    .foregroundStyle(theme.secondaryTextColor)
-                ForEach(provider.suggestedModels, id: \.self) { model in
-                    Button(model) {
-                        settings.setModelName(model, for: provider)
-                        modelBinding.wrappedValue = ""
+            let quickModels = provider == .ollama ? ollamaInstalledModels : provider.suggestedModels
+            if !quickModels.isEmpty {
+                HStack(spacing: 4) {
+                    Text("Quick:")
+                        .font(.caption2)
+                        .foregroundStyle(theme.secondaryTextColor)
+                    ForEach(quickModels, id: \.self) { model in
+                        Button(model) {
+                            modelSetError = nil
+                            settings.setModelName(model, for: provider)
+                            modelSavedIndicator = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { modelSavedIndicator = false }
+                        }
+                        .font(.caption2)
+                        .buttonStyle(.bordered)
+                        .tint(settings.modelName(for: provider) == model ? theme.accentColor : nil)
                     }
-                    .font(.caption2)
-                    .buttonStyle(.bordered)
-                    .tint(currentModel == model ? .blue : nil)
                 }
             }
         }
@@ -471,23 +533,28 @@ struct AITab: View {
             }
         }
 
-        // Model selection — setting modelBinding triggers re-render so displayed model updates
+        let savedModel = settings.modelName(for: provider)
+        let displayedModel = modelBinding.wrappedValue.isEmpty ? savedModel : modelBinding.wrappedValue
+
         HStack {
             Text("Model:")
                 .font(.caption2)
-                .foregroundStyle(theme.secondaryTextColor)
-            Text(settings.modelName(for: provider))
+                .foregroundStyle(.secondary)
+            Text(displayedModel)
                 .font(.caption2)
             Spacer()
-            ForEach(provider.suggestedModels.prefix(3), id: \.self) { model in
+            let quickModels = provider == .ollama
+                ? Array(ollamaInstalledModels.prefix(3))
+                : Array(provider.suggestedModels.prefix(3))
+            ForEach(quickModels, id: \.self) { model in
                 Button(model) {
+                    modelBinding.wrappedValue = model
                     settings.setModelName(model, for: provider)
-                    modelBinding.wrappedValue = ""
                 }
                 .font(.caption2)
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
-                .tint(settings.modelName(for: provider) == model ? .blue : nil)
+                .tint(displayedModel == model ? theme.accentColor : nil)
             }
         }
     }
@@ -508,34 +575,23 @@ struct AITab: View {
         }
     }
 
+    private func normalizeFallbackProviders(for primary: AIProviderType) {
+        if settings.secondaryProvider == primary {
+            settings.secondaryProvider = nil
+        }
+        if settings.tertiaryProvider == primary || settings.tertiaryProvider == settings.secondaryProvider {
+            settings.tertiaryProvider = nil
+        }
+    }
+
     private func testConnection() {
         isTesting = true
         testResult = nil
         let providerType = settings.aiProvider
         Task {
-            if providerType.needsAPIKey && !SecureStore.shared.hasKey(for: providerType.rawValue) {
-                testResult = "✗ No API key saved for \(providerType.rawValue). Save a key first."
-                isTesting = false
-                return
-            }
-            if providerType.isCLI {
-                let cmd = providerType.cliCommand ?? ""
-                if CLIProvider.detectCLI(command: cmd) == nil {
-                    testResult = "✗ CLI '\(cmd)' not found. Install it first."
-                    isTesting = false
-                    return
-                }
-            }
-
-            let provider = AIProviderFactory.create(for: providerType)
             settingsLog.debug("Testing \(providerType.rawValue, privacy: .public) AI provider")
             do {
-                let result = try await provider.categorize(
-                    appName: "Safari",
-                    bundleID: "com.apple.Safari",
-                    windowTitle: "GitHub - Swift",
-                    url: "https://github.com"
-                )
+                let result = try await runProviderProbe(for: providerType)
                 testResult = "✓ Success! Categorized as: \(result.rawValue)"
                 providerHealth[providerType.rawValue] = .healthy
             } catch {
@@ -547,18 +603,48 @@ struct AITab: View {
     }
 
     private func checkAllProviders() async {
+        isCheckingAllProviders = true
+        testResult = nil
         let chain: [AIProviderType] = [settings.aiProvider] +
             [settings.secondaryProvider, settings.tertiaryProvider].compactMap { $0 }
+        var lines: [String] = []
+        var failures = 0
         for pt in chain {
             providerHealth[pt.rawValue] = .checking
-            let provider = AIProviderFactory.create(for: pt)
             do {
-                _ = try await provider.checkHealth()
+                let result = try await runProviderProbe(for: pt)
                 providerHealth[pt.rawValue] = .healthy
+                lines.append("✓ \(pt.rawValue): \(result.rawValue)")
             } catch {
                 providerHealth[pt.rawValue] = .unhealthy(error.localizedDescription)
+                lines.append("✗ \(pt.rawValue): \(error.localizedDescription)")
+                failures += 1
             }
         }
+        let summary = failures == 0
+            ? "✓ All providers passed"
+            : "✗ \(failures)/\(chain.count) providers failed"
+        testResult = ([summary] + lines).joined(separator: "\n")
+        isCheckingAllProviders = false
+    }
+
+    private func runProviderProbe(for providerType: AIProviderType) async throws -> Category {
+        if providerType.needsAPIKey && !SecureStore.shared.hasKey(for: providerType.rawValue) {
+            throw AIError.noAPIKey
+        }
+        if providerType.isCLI {
+            let cmd = providerType.cliCommand ?? ""
+            if CLIProvider.detectCLI(command: cmd) == nil {
+                throw AIError.cliNotFound(cmd)
+            }
+        }
+        let provider = AIProviderFactory.create(for: providerType)
+        return try await provider.categorize(
+            appName: "Safari",
+            bundleID: "com.apple.Safari",
+            windowTitle: "GitHub - Swift",
+            url: "https://github.com"
+        )
     }
 }
 
