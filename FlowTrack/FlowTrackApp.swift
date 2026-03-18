@@ -72,7 +72,9 @@ class FlowTrackAppDelegate: NSObject, NSApplicationDelegate {
 
     func showDashboard() {
         FocusModeEngine.shared.pauseForDashboard()
-        NSApp.setActivationPolicy(.regular)
+        if SettingsStorage.shared.showDockIcon {
+            NSApp.setActivationPolicy(.regular)
+        }
         NSApp.activate(ignoringOtherApps: true)
 
         if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "dashboard" }) {
