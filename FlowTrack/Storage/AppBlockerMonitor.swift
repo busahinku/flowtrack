@@ -23,20 +23,26 @@ final class AppBlockerMonitor {
     private init() {}
 
     func start() {
+        store.applyBlocking()
         updateActive()
         monitorLog.info("AppBlockerMonitor started")
     }
 
     /// Call after any change to store.cards (add/remove/enable) to start/stop the timer appropriately.
     func updateActive() {
-        let hasActiveBlocks = store.cards.contains(where: \.isEnabled)
-        if hasActiveBlocks && tickTimer == nil {
-            tickTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+        let needsLiveMonitoring = store.cards.contains { card in
+            card.isEnabled && (!card.apps.isEmpty || (!card.isAlwaysBlock && !card.websites.isEmpty))
+        }
+        if needsLiveMonitoring && tickTimer == nil {
+            lastTickDate = Date()
+            let timer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
                 guard let self else { return }
                 Task { @MainActor in self.tick() }
             }
-            tickTimer?.tolerance = 1
-        } else if !hasActiveBlocks {
+            timer.tolerance = 1
+            RunLoop.main.add(timer, forMode: .common)
+            tickTimer = timer
+        } else if !needsLiveMonitoring {
             stop()
         }
     }
@@ -53,9 +59,14 @@ final class AppBlockerMonitor {
 
         // Reset per-day notification dedup set when the calendar day rolls over
         let today = Calendar.current.component(.day, from: now)
-        if today != lastNotifResetDay { notifiedCardIds.removeAll(); lastNotifResetDay = today }
+        if today != lastNotifResetDay {
+            notifiedCardIds.removeAll()
+            lastNotifResetDay = today
+            store.applyBlocking()
+        }
 
         let currentBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+        let currentURL = tracker.currentURL ?? ""
 
         for card in store.cards where card.isEnabled {
             // --- App enforcement ---
@@ -63,7 +74,7 @@ final class AppBlockerMonitor {
                 let matchedApp = card.apps.first {
                     $0.bundleID.lowercased() == currentBundleID.lowercased()
                 }
-                if let matched = matchedApp {
+                if matchedApp != nil {
                     if card.isAlwaysBlock {
                         terminateApp(bundleID: currentBundleID, cardId: card.id, cardName: card.name, limitMinutes: 0)
                     } else {
@@ -73,20 +84,26 @@ final class AppBlockerMonitor {
                         if used >= limit {
                             terminateApp(bundleID: currentBundleID, cardId: card.id, cardName: card.name, limitMinutes: card.dailyLimitMinutes)
                         }
-                        _ = matched // suppress unused-var warning
                     }
                 }
             }
 
-            // --- Website time-limit enforcement ---
-            if !card.websites.isEmpty && !card.isAlwaysBlock {
-                let used  = store.usageToday(for: card.id)
-                let limit = card.dailyLimitMinutes * 60
-                if used >= limit {
-                    store.blockCardNow(cardId: card.id)
-                    if !notifiedCardIds.contains(card.id) {
-                        notifiedCardIds.insert(card.id)
-                        sendBlockNotification(name: card.name, limitMinutes: card.dailyLimitMinutes)
+            // --- Website enforcement ---
+            if !card.websites.isEmpty && !currentURL.isEmpty {
+                let onBlockedSite = card.websites.contains { domain in
+                    DomainMatcher.url(currentURL, matches: domain)
+                }
+                if onBlockedSite && !card.isAlwaysBlock {
+                    // Track time spent on time-limited websites
+                    store.recordUsage(cardId: card.id, addSeconds: elapsed)
+                    let used  = store.usageToday(for: card.id)
+                    let limit = card.dailyLimitMinutes * 60
+                    if used >= limit {
+                        store.blockCardNow(cardId: card.id)
+                        if !notifiedCardIds.contains(card.id) {
+                            notifiedCardIds.insert(card.id)
+                            sendBlockNotification(name: card.name, limitMinutes: card.dailyLimitMinutes)
+                        }
                     }
                 }
             }

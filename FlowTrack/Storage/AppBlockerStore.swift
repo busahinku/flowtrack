@@ -46,15 +46,21 @@ final class AppBlockerStore {
     func addCard(_ card: BlockCard) {
         cards.append(card); saveCards()
         if card.isEnabled { applyBlocking() }
+        AppBlockerMonitor.shared.updateActive()
     }
     func updateCard(_ card: BlockCard) {
         guard let i = cards.firstIndex(where: { $0.id == card.id }) else { return }
         cards[i] = card; saveCards(); applyBlocking()
+        AppBlockerMonitor.shared.updateActive()
     }
-    func deleteCard(id: String) { cards.removeAll { $0.id == id }; saveCards(); applyBlocking() }
+    func deleteCard(id: String) {
+        cards.removeAll { $0.id == id }; saveCards(); applyBlocking()
+        AppBlockerMonitor.shared.updateActive()
+    }
     func toggleCard(id: String) {
         guard let i = cards.firstIndex(where: { $0.id == id }) else { return }
         cards[i].isEnabled.toggle(); saveCards(); applyBlocking()
+        AppBlockerMonitor.shared.updateActive()
     }
 
     // MARK: - Usage
@@ -80,7 +86,9 @@ final class AppBlockerStore {
 
     /// Apply always-block cards' websites to /etc/hosts and set up pfctl port-redirect.
     func applyBlocking() {
-        let domains = cards.filter { $0.isEnabled && $0.isAlwaysBlock }.flatMap(\.websites)
+        let domains = DomainMatcher.normalizedDomains(
+            cards.filter { $0.isEnabled && $0.isAlwaysBlock }.flatMap(\.websites)
+        )
         rewriteHostsBlock(domains: domains)
     }
 
@@ -88,7 +96,7 @@ final class AppBlockerStore {
     func blockCardNow(cardId: String) {
         guard let card = cards.first(where: { $0.id == cardId }) else { return }
         let already = cards.filter { $0.isEnabled && $0.isAlwaysBlock }.flatMap(\.websites)
-        rewriteHostsBlock(domains: Array(Set(already + card.websites)))
+        rewriteHostsBlock(domains: DomainMatcher.normalizedDomains(already + card.websites))
     }
 
     private let hostsBegin = "# FlowTrack-Blocked-Begin"
@@ -108,11 +116,9 @@ final class AppBlockerStore {
 
         // Build new FlowTrack section
         var newSection = ""
-        if !domains.isEmpty {
-            let lines = domains.flatMap { d -> [String] in
-                let d = d.lowercased().trimmingCharacters(in: .init(charactersIn: "/ "))
-                // Strip leading www. before adding both bare and www. entries to avoid www.www. duplication
-                let bare = d.hasPrefix("www.") ? String(d.dropFirst(4)) : d
+        let normalizedDomains = DomainMatcher.normalizedDomains(domains)
+        if !normalizedDomains.isEmpty {
+            let lines = normalizedDomains.flatMap { bare -> [String] in
                 return ["127.0.0.1 \(bare)", "127.0.0.1 www.\(bare)"]
             }.joined(separator: "\n")
             newSection = "\(hostsBegin)\n\(lines)\n\(hostsEnd)"
@@ -136,15 +142,16 @@ final class AppBlockerStore {
 
         // pfctl redirect rule for custom block page on port 8080
         let pfPart: String
-        if domains.isEmpty {
+        var pfTmpToClean: URL? = nil
+        if normalizedDomains.isEmpty {
             pfPart = "pfctl -a com.flowtrack -F all 2>/dev/null; true"
         } else {
-            // Write pf rule to a temp file too
+            // Write pf rule to a temp file — cleaned up after AppleScript execution
             let pfTmp = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("flowtrack_pf_\(UUID().uuidString).conf")
-            defer { try? FileManager.default.removeItem(at: pfTmp) }
             let pfRule = "rdr pass on lo0 proto tcp from any to 127.0.0.1 port {80,443} -> 127.0.0.1 port 8080\n"
             if let _ = try? pfRule.write(to: pfTmp, atomically: true, encoding: .utf8) {
                 pfPart = "pfctl -a com.flowtrack -f \(pfTmp.path) 2>/dev/null; pfctl -e 2>/dev/null; true"
+                pfTmpToClean = pfTmp
             } else {
                 pfPart = "true"
             }
@@ -158,7 +165,7 @@ final class AppBlockerStore {
             appleScript.executeAndReturnError(&errDict)
             if errDict == nil {
                 let log = Logger(subsystem: "com.flowtrack", category: "AppBlocker")
-                log.info("Hosts file updated: \(domains.count) domain(s) blocked")
+                log.info("Hosts file updated: \(normalizedDomains.count) domain(s) blocked")
                 Task { @MainActor in BlockPageServer.shared.start() }
             } else {
                 let log = Logger(subsystem: "com.flowtrack", category: "AppBlocker")
@@ -166,6 +173,7 @@ final class AppBlockerStore {
             }
         }
         try? FileManager.default.removeItem(at: tmp)
+        if let pfTmp = pfTmpToClean { try? FileManager.default.removeItem(at: pfTmp) }
     }
 
     func removeAllBlocking() {

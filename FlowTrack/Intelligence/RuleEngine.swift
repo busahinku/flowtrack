@@ -1,26 +1,12 @@
 import Foundation
 
-// Browser bundleIDs that must never be learned at the app level.
-// These apps change category per URL/tab — only domain rules are valid.
-private let browserBundleIDs: Set<String> = [
-    "com.apple.safari",
-    "com.apple.safaritechnologypreview",
-    "com.google.chrome",
-    "com.google.chrome.canary",
-    "org.mozilla.firefox",
-    "org.mozilla.nightly",
-    "company.thebrowser.browser",   // Arc
-    "com.brave.browser",
-    "com.microsoft.edgemac",
-    "com.opera.opera",
-    "com.vivaldi.vivaldi",
-    "com.kagi.orion",
-    "com.duckduckgo.macos.browser",
-    "com.chromium.chromium",
-]
-
 private func isBrowserBundleID(_ bundleID: String) -> Bool {
-    browserBundleIDs.contains(bundleID.lowercased())
+    BrowserCatalog.isBrowser(bundleID: bundleID)
+}
+
+private struct RuleMatch {
+    let category: Category
+    let rule: Rule
 }
 
 final class RuleEngine: @unchecked Sendable {
@@ -68,12 +54,6 @@ final class RuleEngine: @unchecked Sendable {
         customRules = rules
     }
 
-    private static func extractDomain(from urlString: String) -> String {
-        guard let components = URLComponents(string: urlString), let host = components.host else { return "" }
-        let h = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
-        return h
-    }
-
     private func loadLearnedRules() {
         guard let data = try? Data(contentsOf: learnedRulesURL),
               let rules = try? JSONDecoder().decode([Rule].self, from: data) else {
@@ -96,7 +76,7 @@ final class RuleEngine: @unchecked Sendable {
                 return Rule(matchType: rule.matchType, pattern: rule.pattern, category: mapped)
             }
             migrated = true
-            return Rule(matchType: rule.matchType, pattern: rule.pattern, category: "Work")
+            return Rule(matchType: rule.matchType, pattern: rule.pattern, category: Category.uncategorized.rawValue)
         }
         if migrated { saveLearnedRules() }
         for rule in learnedRules where rule.matchType == .bundleID {
@@ -111,7 +91,9 @@ final class RuleEngine: @unchecked Sendable {
             rule.matchType == .bundleID && isBrowserBundleID(rule.pattern)
         }
         // Also clean category cache entries for browsers
-        for bid in browserBundleIDs { categoryCache.removeValue(forKey: bid) }
+        for bid in categoryCache.keys.filter(isBrowserBundleID) {
+            categoryCache.removeValue(forKey: bid)
+        }
         if learnedRules.count < before { saveLearnedRules() }
     }
 
@@ -129,6 +111,16 @@ final class RuleEngine: @unchecked Sendable {
 
     // MARK: - Categorize
     func categorize(appName: String, bundleID: String, windowTitle: String, url: String?, contentMetadata: ContentMetadata? = nil) -> Category? {
+        categorizeWithResult(
+            appName: appName,
+            bundleID: bundleID,
+            windowTitle: windowTitle,
+            url: url,
+            contentMetadata: contentMetadata
+        )?.category
+    }
+
+    func categorizeWithResult(appName: String, bundleID: String, windowTitle: String, url: String?, contentMetadata: ContentMetadata? = nil) -> ClassificationResult? {
         lock.lock()
         let customSnap = customRules
         let defaultSnap = defaultRules
@@ -137,28 +129,66 @@ final class RuleEngine: @unchecked Sendable {
         lock.unlock()
 
         // 1. Custom rules (user-defined, highest priority — always wins)
-        if let cat = matchRules(customSnap, appName: appName, bundleID: bundleID, windowTitle: windowTitle, url: url) {
-            return cat
+        if let match = matchRulesWithRule(customSnap, appName: appName, bundleID: bundleID, windowTitle: windowTitle, url: url) {
+            return ClassificationResult(
+                category: match.category,
+                confidence: .high,
+                source: .customRule,
+                reason: "Matched custom \(match.rule.matchType.rawValue) rule",
+                ruleId: match.rule.id
+            )
         }
         // 2. Content metadata — checked BEFORE default domain rules so that content-aware
         //    signals (e.g. "YouTube tutorial = Work") override broad domain rules
         //    (e.g. "youtube.com → Distraction"). Custom rules above still take precedence.
         if let metadata = contentMetadata, let cat = metadataCategory(metadata) {
-            return cat
+            return ClassificationResult(
+                category: cat,
+                confidence: .medium,
+                source: .contentMetadata,
+                reason: "Matched extracted content metadata",
+                ruleId: nil
+            )
         }
         // 3. Default rules (built-in broad-stroke domain/app rules)
-        if let cat = matchRules(defaultSnap, appName: appName, bundleID: bundleID, windowTitle: windowTitle, url: url) {
-            return cat
+        if let match = matchRulesWithRule(defaultSnap, appName: appName, bundleID: bundleID, windowTitle: windowTitle, url: url) {
+            return ClassificationResult(
+                category: match.category,
+                confidence: .high,
+                source: .defaultRule,
+                reason: "Matched built-in \(match.rule.matchType.rawValue) rule",
+                ruleId: match.rule.id
+            )
         }
         // 4. AI-learned rules + cache
-        if let cat = matchRules(learnedSnap, appName: appName, bundleID: bundleID, windowTitle: windowTitle, url: url) {
-            return cat
+        if let match = matchRulesWithRule(learnedSnap, appName: appName, bundleID: bundleID, windowTitle: windowTitle, url: url) {
+            return ClassificationResult(
+                category: match.category,
+                confidence: .medium,
+                source: .learnedRule,
+                reason: "Matched AI-learned \(match.rule.matchType.rawValue) rule",
+                ruleId: match.rule.id
+            )
         }
         // 5. Cache lookup by bundle ID
-        if let cached { return cached }
+        if let cached, !isBrowserBundleID(bundleID) {
+            return ClassificationResult(
+                category: cached,
+                confidence: .medium,
+                source: .cache,
+                reason: "Matched cached non-browser bundle ID",
+                ruleId: nil
+            )
+        }
         // 6. Smart fallback based on bundle ID patterns + window title heuristics
         if let cat = smartCategorize(appName: appName, bundleID: bundleID, windowTitle: windowTitle) {
-            return cat
+            return ClassificationResult(
+                category: cat,
+                confidence: .low,
+                source: .smartHeuristic,
+                reason: "Matched local heuristic",
+                ruleId: nil
+            )
         }
         return nil
     }
@@ -382,14 +412,11 @@ final class RuleEngine: @unchecked Sendable {
     }
 
     private func isBrowser(appName: String, bundleID: String) -> Bool {
-        let browserNames = ["safari", "chrome", "firefox", "arc", "brave", "edge", "opera", "vivaldi", "chromium", "orion", "duckduckgo"]
-        let browserBIDs = ["webkit", "chrome", "firefox", "browser", "arc"]
-        return browserNames.contains(where: { appName.contains($0) }) ||
-               browserBIDs.contains(where: { bundleID.lowercased().contains($0) })
+        BrowserCatalog.isBrowser(appName: appName, bundleID: bundleID)
     }
 
     /// Ensure a category name maps to a valid CategoryManager category.
-    /// Unknown legacy names are remapped; completely unknown names default to Work.
+    /// Unknown legacy names are remapped; completely unknown names stay uncategorized.
     private func validatedCategory(_ name: String) -> Category {
         let validNames = CategoryManager.shared.allCategories.map { $0.name }
         if validNames.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) {
@@ -401,11 +428,15 @@ final class RuleEngine: @unchecked Sendable {
             "entertainment": "Distraction", "personal": "Distraction", "health": "Distraction"
         ]
         if let mapped = legacyMap[name.lowercased()] { return Category(rawValue: mapped) }
-        return .work
+        return .uncategorized
     }
 
     // MARK: - Rule Matching
     private func matchRules(_ rules: [Rule], appName: String, bundleID: String, windowTitle: String, url: String?) -> Category? {
+        matchRulesWithRule(rules, appName: appName, bundleID: bundleID, windowTitle: windowTitle, url: url)?.category
+    }
+
+    private func matchRulesWithRule(_ rules: [Rule], appName: String, bundleID: String, windowTitle: String, url: String?) -> RuleMatch? {
         for rule in rules {
             let matched: Bool
             switch rule.matchType {
@@ -417,10 +448,7 @@ final class RuleEngine: @unchecked Sendable {
                 matched = bid == pattern || bid.hasPrefix(pattern + ".")
             case .domain:
                 if let url = url {
-                    let extracted = RuleEngine.extractDomain(from: url).lowercased()
-                    let pattern = rule.pattern.lowercased()
-                    // Match: exact domain, or subdomain suffix (e.g. "github.com" matches "api.github.com")
-                    matched = extracted == pattern || extracted.hasSuffix("." + pattern)
+                    matched = DomainMatcher.url(url, matches: rule.pattern)
                 } else {
                     matched = false
                 }
@@ -428,7 +456,7 @@ final class RuleEngine: @unchecked Sendable {
                 matched = windowTitle.lowercased().contains(rule.pattern.lowercased())
             }
             if matched {
-                return validatedCategory(rule.category)
+                return RuleMatch(category: validatedCategory(rule.category), rule: rule)
             }
         }
         return nil
@@ -440,17 +468,15 @@ final class RuleEngine: @unchecked Sendable {
         guard !bundleID.isEmpty, category != .uncategorized, category != .idle else { return }
         // Validate category against CategoryManager — don't learn invalid categories
         let validated = validatedCategory(category.rawValue)
+        guard validated != .uncategorized, validated != .idle else { return }
 
         let bid = bundleID.lowercased()
 
         // For browsers: learn the domain, not the bundleID.
         // Learning bundleID for a browser would poison ALL future browsing to one category.
         if isBrowserBundleID(bid) {
-            if let url = url {
-                let domain = RuleEngine.extractDomain(from: url)
-                if !domain.isEmpty && domain != "unknown" {
-                    learnDomainFromAI(domain: domain, category: validated)
-                }
+            if let url = url, let domain = DomainMatcher.host(from: url) {
+                learnDomainFromAI(domain: domain, category: validated)
             }
             // If no URL available, don't learn anything — can't associate a browser app with a single category
             return
@@ -475,8 +501,9 @@ final class RuleEngine: @unchecked Sendable {
 
     /// Learn a domain → category mapping from AI results.
     private func learnDomainFromAI(domain: String, category: Category) {
-        let d = domain.lowercased()
+        guard let d = DomainMatcher.normalizedDomain(domain) else { return }
         let validated = validatedCategory(category.rawValue)
+        guard validated != .uncategorized, validated != .idle else { return }
         // Don't learn if already covered by default/custom domain rules
         let fakeURL = "https://\(d)"
         lock.lock()
@@ -490,7 +517,7 @@ final class RuleEngine: @unchecked Sendable {
         defer { lock.unlock() }
         // Check if this domain already has a learned rule
         guard !learnedRules.contains(where: { $0.matchType == .domain && $0.pattern.lowercased() == d }) else { return }
-        let rule = Rule(matchType: .domain, pattern: domain, category: validated.rawValue)
+        let rule = Rule(matchType: .domain, pattern: d, category: validated.rawValue)
         learnedRules.append(rule)
         saveLearnedRules()
     }

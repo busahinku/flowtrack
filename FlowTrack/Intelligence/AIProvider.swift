@@ -111,35 +111,73 @@ struct AIProviderFactory {
 
 // MARK: - AIPromptBuilder
 struct AIPromptBuilder {
-    // MARK: - URL Sanitization
-    /// Strips URL to domain only before sending to external AI providers (avoids leaking tokens/query params).
-    static func domainOnly(from urlString: String) -> String {
-        guard let components = URLComponents(string: urlString), let host = components.host else {
-            return "unknown"  // never leak full URL with tokens/params to AI
-        }
-        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    private static func categoriesForAI(includeUncategorized: Bool = true) -> [CategoryDefinition] {
+        CategoryManager.shared.allCategories.filter { !$0.isSystem || (includeUncategorized && $0.name == Category.uncategorized.rawValue) }
     }
 
-    static func categorizationPrompt(appName: String, bundleID: String, windowTitle: String, url: String?) -> String {
-        let categories = CategoryManager.shared.allCategories
-        let categoryLines = categories.map { cat in
+    private static func categoryLines(from categories: [CategoryDefinition]) -> String {
+        categories.map { cat in
             if !cat.aiPrompt.isEmpty {
                 return "- \(cat.name): \(cat.aiPrompt)"
             }
             if cat.isSystem { return "- \(cat.name)" }
             return "- \(cat.name): \(cat.isProductive ? "productive" : "non-productive") activity"
         }.joined(separator: "\n")
+    }
+
+    private static func redactSecrets(_ value: String) -> String {
+        let replacements: [(pattern: String, template: String)] = [
+            (#"(?i)\b(api[_-]?key|token|secret|password|passwd|pwd)=([^\s&]+)"#, "$1=[redacted]"),
+            (#"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{12,}"#, "bearer [redacted]")
+        ]
+        var redacted = value
+        for replacement in replacements {
+            guard let regex = try? NSRegularExpression(pattern: replacement.pattern) else { continue }
+            let range = NSRange(redacted.startIndex..<redacted.endIndex, in: redacted)
+            redacted = regex.stringByReplacingMatches(in: redacted, range: range, withTemplate: replacement.template)
+        }
+        return redacted
+    }
+
+    private static func safePromptField(_ value: String, limit: Int = 180) -> String {
+        let noSecrets = redactSecrets(value)
+        let noControls = noSecrets.unicodeScalars.map { scalar in
+            CharacterSet.controlCharacters.contains(scalar) ? " " : String(scalar)
+        }.joined()
+        let compacted = noControls
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        return String(compacted.prefix(limit))
+    }
+
+    private static func cleanGeneratedText(_ text: String?, limit: Int) -> String? {
+        guard let text else { return nil }
+        let cleaned = safePromptField(text, limit: limit)
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\"'`")))
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
+    // MARK: - URL Sanitization
+    /// Strips URL to domain only before sending to external AI providers (avoids leaking tokens/query params).
+    static func domainOnly(from urlString: String) -> String {
+        DomainMatcher.host(from: urlString) ?? "unknown"
+    }
+
+    static func categorizationPrompt(appName: String, bundleID: String, windowTitle: String, url: String?) -> String {
+        let categories = categoriesForAI()
+        let categoryDescription = categoryLines(from: categories)
         let categoryNames = categories.map(\.name).joined(separator: ", ")
 
         var prompt = """
         You are a productivity tracker AI. Categorize this computer activity into EXACTLY one category.
 
         Categories:
-        \(categoryLines)
+        \(categoryDescription)
 
         Activity to categorize:
-        App: \(appName) (\(bundleID))
-        Window Title: \(windowTitle)
+        App: \(safePromptField(appName, limit: 80)) (\(safePromptField(bundleID, limit: 120)))
+        Window Title: \(safePromptField(windowTitle))
         """
         if let url = url { prompt += "\nURL/Domain: \(domainOnly(from: url))" }
         prompt += "\n\nRespond with ONLY the category name (\(categoryNames)), nothing else."
@@ -147,24 +185,20 @@ struct AIPromptBuilder {
     }
 
     static func batchCategorizationPrompt(items: [BatchCategorizeItem]) -> String {
-        let categories = CategoryManager.shared.allCategories
-        let categoryLines = categories.map { cat -> String in
-            if !cat.aiPrompt.isEmpty { return "- \(cat.name): \(cat.aiPrompt)" }
-            if cat.isSystem { return "- \(cat.name)" }
-            return "- \(cat.name): \(cat.isProductive ? "productive" : "non-productive") activity"
-        }.joined(separator: "\n")
+        let categories = categoriesForAI()
+        let categoryDescription = categoryLines(from: categories)
         let categoryNames = categories.map(\.name).joined(separator: ", ")
 
         var prompt = """
         You are a productivity tracker AI. Categorize each computer activity into EXACTLY one category.
 
         Categories:
-        \(categoryLines)
+        \(categoryDescription)
 
         Activities to categorize:
         """
         for item in items {
-            var line = "\n\(item.index). App:\(item.appName) | Title:\(item.windowTitle)"
+            var line = "\n\(item.index). App:\(safePromptField(item.appName, limit: 80)) | Title:\(safePromptField(item.windowTitle))"
             if let url = item.url { line += " | Domain:\(domainOnly(from: url))" }
             prompt += line
         }
@@ -200,7 +234,9 @@ struct AIPromptBuilder {
     }
 
     static func titlePrompt(activities: [ActivitySummary], category: Category) -> String {
-        let apps = activities.prefix(10).map { "\($0.appName): \($0.title)" }.joined(separator: "\n")
+        let apps = activities.prefix(10).map {
+            "\(safePromptField($0.appName, limit: 80)): \(safePromptField($0.title))"
+        }.joined(separator: "\n")
         return """
         Generate a short title (5-10 words) for this time block.
         Category: \(category.rawValue)
@@ -214,7 +250,7 @@ struct AIPromptBuilder {
 
     static func summaryPrompt(activities: [ActivitySummary]) -> String {
         let apps = activities.prefix(15).map {
-            var line = "\($0.appName) (\(Int($0.duration))s): \($0.title)"
+            var line = "\(safePromptField($0.appName, limit: 80)) (\(Int($0.duration))s): \(safePromptField($0.title))"
             if let url = $0.url { line += " [\(domainOnly(from: url))]" }
             return line
         }.joined(separator: "\n")
@@ -228,10 +264,99 @@ struct AIPromptBuilder {
     }
 
     static func parseCategory(_ text: String) -> Category? {
-        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "\"", with: "")
-            .replacingOccurrences(of: ".", with: "")
-        // Legacy category names AI might still return → remap to new 2-category system
+        if let jsonCategory = parseCategoryFromJSON(text) {
+            return jsonCategory
+        }
+        for candidate in categoryCandidates(from: text) {
+            if let category = exactCategory(named: candidate) {
+                return category
+            }
+        }
+        return nil
+    }
+
+    private static func parseCategoryFromJSON(_ text: String) -> Category? {
+        let cleaned = text
+            .replacingOccurrences(of: "```json", with: "")
+            .replacingOccurrences(of: "```", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = cleaned.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) else {
+            return nil
+        }
+        if let dict = object as? [String: Any],
+           let category = dict["category"] as? String {
+            return exactCategory(named: normalizedCategoryCandidate(category))
+        }
+        if let array = object as? [[String: Any]],
+           let category = array.first?["category"] as? String {
+            return exactCategory(named: normalizedCategoryCandidate(category))
+        }
+        return nil
+    }
+
+    private static func categoryCandidates(from text: String) -> [String] {
+        let cleaned = text
+            .replacingOccurrences(of: "```json", with: "")
+            .replacingOccurrences(of: "```", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        var candidates = [cleaned]
+        let lines = cleaned.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        candidates.append(contentsOf: lines.prefix(3))
+
+        for line in lines.prefix(3) {
+            let lower = line.lowercased()
+            if lower.contains("category"), let colon = line.firstIndex(of: ":") {
+                candidates.append(String(line[line.index(after: colon)...]))
+            }
+            if let colon = line.firstIndex(of: ":") {
+                let prefix = line[..<colon].trimmingCharacters(in: .whitespacesAndNewlines)
+                if Int(prefix) != nil {
+                    candidates.append(String(line[line.index(after: colon)...]))
+                }
+            }
+        }
+
+        var seen: Set<String> = []
+        return candidates.compactMap { raw in
+            let normalized = normalizedCategoryCandidate(raw)
+            guard !normalized.isEmpty, seen.insert(normalized.lowercased()).inserted else { return nil }
+            return normalized
+        }
+    }
+
+    private static func normalizedCategoryCandidate(_ text: String) -> String {
+        var candidate = text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'`[]{}(),.; "))
+        candidate = candidate.replacingOccurrences(
+            of: #"^\d+[\.\):]\s*"#,
+            with: "",
+            options: .regularExpression
+        )
+        if candidate.hasPrefix("-") {
+            candidate.removeFirst()
+        }
+        candidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let prefixes = ["the category is", "category is", "category", "answer is", "answer", "result is", "result"]
+        for prefix in prefixes {
+            let lower = candidate.lowercased()
+            guard lower == prefix || lower.hasPrefix(prefix + " ") || lower.hasPrefix(prefix + ":") else { continue }
+            candidate.removeFirst(prefix.count)
+            candidate = candidate.trimmingCharacters(in: CharacterSet(charactersIn: " :-"))
+            break
+        }
+        return candidate.trimmingCharacters(in: CharacterSet(charactersIn: "\"'`[]{}(),.; "))
+    }
+
+    private static func exactCategory(named name: String) -> Category? {
+        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+        // Legacy category names AI might still return; keep exact matching only.
         let legacyMap: [String: Category] = [
             "entertainment": .distraction, "personal": .distraction,
             "creative": .work, "learning": .work, "productivity": .work,
@@ -240,9 +365,7 @@ struct AIPromptBuilder {
         if let mapped = legacyMap[cleaned.lowercased()] { return mapped }
         let allCats = CategoryManager.shared.allCategories
         if let match = allCats.first(where: { $0.name.lowercased() == cleaned.lowercased() }) {
-            return Category(rawValue: match.name)
-        }
-        if let match = allCats.first(where: { cleaned.lowercased().contains($0.name.lowercased()) }) {
+            if match.name == Category.idle.rawValue { return nil }
             return Category(rawValue: match.name)
         }
         return nil
@@ -267,8 +390,8 @@ struct AIPromptBuilder {
                 ? "\(Int(a.duration / 60))m\(Int(a.duration.truncatingRemainder(dividingBy: 60)))s"
                 : "\(Int(a.duration))s"
 
-            var line = "\(start)–\(end) | \(a.appName)"
-            if !a.windowTitle.isEmpty { line += " | \"\(a.windowTitle.prefix(80))\"" }
+            var line = "\(start)–\(end) | \(safePromptField(a.appName, limit: 80))"
+            if !a.windowTitle.isEmpty { line += " | \"\(safePromptField(a.windowTitle, limit: 80))\"" }
             if let url = a.url { line += " [\(domainOnly(from: url))]" }
 
             // Rich metadata hints
@@ -276,19 +399,18 @@ struct AIPromptBuilder {
             if let metaJSON = a.contentMetadata,
                let metaData = metaJSON.data(using: .utf8),
                let meta = try? JSONDecoder().decode(ContentMetadata.self, from: metaData) {
-                if let site = meta.siteName { hints.append(site) }
-                if let ct = meta.contentType { hints.append(ct) }
-                if let ct = meta.contentTitle { hints.append("\"\(ct.prefix(50))\"") }
-                if let sub = meta.subcategory { hints.append(sub) }
-                if let d = meta.detail { hints.append(d) }
+                if let site = meta.siteName { hints.append(safePromptField(site, limit: 40)) }
+                if let ct = meta.contentType { hints.append(safePromptField(ct, limit: 40)) }
+                if let ct = meta.contentTitle { hints.append("\"\(safePromptField(ct, limit: 50))\"") }
+                if let sub = meta.subcategory { hints.append(safePromptField(sub, limit: 40)) }
+                if let d = meta.detail { hints.append(safePromptField(d, limit: 40)) }
             }
             if !hints.isEmpty { line += " {\(hints.joined(separator: ", "))}" }
             line += " (\(durationStr))"
             lines.append(line)
         }
 
-        let categoriesList = CategoryManager.shared.allCategories
-            .filter { !$0.isSystem || $0.name == "Uncategorized" }
+        let categoriesList = categoriesForAI()
             .map { $0.name }
             .joined(separator: ", ")
 
@@ -389,9 +511,12 @@ struct AIPromptBuilder {
                 continue
             }
 
-            let category = parseCategory(catStr) ?? .uncategorized
-            let title = obj["title"] as? String
-            let summary = obj["summary"] as? String
+            guard let category = parseCategory(catStr) else {
+                aiLogger.debug("Skipping segment \(startStr)-\(endStr): invalid category")
+                continue
+            }
+            let title = cleanGeneratedText(obj["title"] as? String, limit: 100)
+            let summary = cleanGeneratedText(obj["summary"] as? String, limit: 500)
 
             let segActivities = activities.filter { a in
                 a.timestamp >= clampedStart && a.timestamp < clampedEnd && !a.isIdle
@@ -460,7 +585,7 @@ struct AIPromptBuilder {
         var totals: [String: TimeInterval] = [:]
         for a in nonIdle { totals[a.category.rawValue, default: 0] += a.duration }
         let best = totals.max { $0.value < $1.value }
-        let category = Category(rawValue: best?.key ?? Category.work.rawValue)
+        let category = best.flatMap { parseCategory($0.key) } ?? .uncategorized
         let apps = buildAppEntries(from: nonIdle)
 
         return [WindowSegmentResult(

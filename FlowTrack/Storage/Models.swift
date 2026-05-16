@@ -29,6 +29,31 @@ struct Category: RawRepresentable, Codable, Hashable, Sendable {
     }
 }
 
+enum ClassificationConfidence: String, Codable, Sendable {
+    case high, medium, low
+}
+
+enum ClassificationSource: String, Codable, Sendable {
+    case customRule
+    case contentMetadata
+    case defaultRule
+    case learnedRule
+    case cache
+    case smartHeuristic
+}
+
+struct ClassificationResult: Codable, Sendable {
+    let category: Category
+    let confidence: ClassificationConfidence
+    let source: ClassificationSource
+    let reason: String
+    let ruleId: String?
+
+    var needsReview: Bool {
+        confidence == .low || category == .uncategorized
+    }
+}
+
 // MARK: - GRDB DatabaseValueConvertible
 import GRDB
 
@@ -226,6 +251,10 @@ struct Rule: Codable, Identifiable, Hashable, Sendable {
     let pattern: String
     let category: String
 
+    enum CodingKeys: String, CodingKey {
+        case id, matchType, pattern, category
+    }
+
     enum MatchType: String, Codable, Sendable {
         case appName, bundleID, domain, titleContains
 
@@ -250,6 +279,14 @@ struct Rule: Codable, Identifiable, Hashable, Sendable {
         self.matchType = matchType
         self.pattern = pattern
         self.category = category
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.matchType = try container.decode(MatchType.self, forKey: .matchType)
+        self.pattern = try container.decode(String.self, forKey: .pattern)
+        self.category = try container.decode(String.self, forKey: .category)
+        self.id = (try? container.decode(String.self, forKey: .id)) ?? "\(matchType.rawValue):\(pattern)"
     }
 }
 

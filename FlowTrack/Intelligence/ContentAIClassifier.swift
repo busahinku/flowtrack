@@ -68,14 +68,19 @@ actor ContentAIClassifier {
 
         do {
             let response = try await provider.chat(messages: messages, systemPrompt: system)
-            let isEd = response
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let answer = response
+                .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".!\"'`")))
                 .lowercased()
-                .hasPrefix("educational")
-            classifierLog.info(
-                "AI: '\(title.prefix(50))' → \(isEd ? "educational ✅" : "entertainment 🚫")"
-            )
-            return isEd
+            if answer == "educational" {
+                classifierLog.info("AI video title classification completed: educational")
+                return true
+            }
+            if answer == "entertainment" {
+                classifierLog.info("AI video title classification completed: entertainment")
+                return false
+            }
+            classifierLog.debug("AI returned an invalid video title classification; falling back to keywords")
+            return nil
         } catch {
             classifierLog.debug("AI call failed (\(error.localizedDescription)) — falling back to keywords")
             return nil

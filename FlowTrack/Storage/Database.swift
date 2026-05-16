@@ -854,22 +854,26 @@ final class Database: Sendable {
     /// Fetch browser activities (Safari, Chrome, Firefox, Arc, Edge) that have a URL.
     /// These may have been mis-categorized by poisoned learned rules.
     func browserActivitiesWithURL(limit: Int = 3000) throws -> [ActivityRecord] {
-        let browserBundleIDs = [
-            "com.apple.Safari", "com.google.Chrome", "org.mozilla.firefox",
-            "company.thebrowser.Browser", "com.microsoft.edgemac", "com.operasoftware.Opera",
-            "com.brave.Browser", "com.vivaldi.Vivaldi", "com.duckduckgo.macos.browser"
-        ]
-        let placeholders = browserBundleIDs.map { _ in "?" }.joined(separator: ", ")
+        let browserBundleIDs = Array(BrowserCatalog.knownBrowserBundleIDs).sorted()
+        let browserBundleIDPrefixes = BrowserCatalog.knownBrowserBundleIDPrefixes
+        let exactPlaceholders = browserBundleIDs.map { _ in "?" }.joined(separator: ", ")
+        let prefixClauses = browserBundleIDPrefixes.map { _ in "lower(bundleID) LIKE ?" }.joined(separator: " OR ")
+        let bundleClauses = [
+            browserBundleIDs.isEmpty ? nil : "lower(bundleID) IN (\(exactPlaceholders))",
+            prefixClauses.isEmpty ? nil : prefixClauses
+        ].compactMap(\.self).joined(separator: " OR ")
+
         return try dbQueue.read { db in
             let sql = """
                 SELECT * FROM activities
-                WHERE bundleID IN (\(placeholders))
+                WHERE (\(bundleClauses))
                 AND url IS NOT NULL AND url != ''
                 AND isIdle = 0
                 ORDER BY timestamp DESC
                 LIMIT ?
             """
             var args: [DatabaseValue] = browserBundleIDs.map { $0.databaseValue }
+            args.append(contentsOf: browserBundleIDPrefixes.map { "\($0)%".databaseValue })
             args.append(limit.databaseValue)
             return try ActivityRecord.fetchAll(db, sql: sql, arguments: StatementArguments(args))
         }

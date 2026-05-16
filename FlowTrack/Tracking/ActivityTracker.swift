@@ -8,130 +8,8 @@ import OSLog
 
 private let trackerLogger = Logger(subsystem: "com.flowtrack", category: "ActivityTracker")
 
-private struct BrowserDescriptor: Sendable {
-    let bundleIDs: Set<String>
-    let nameMarkers: [String]
-    let usesSafariScript: Bool
-    let usesChromiumScript: Bool
-    let usesFirefoxAX: Bool
-    let appleScriptAppName: String?
-}
-
 private nonisolated func browserDescriptor(appName: String, bundleID: String) -> BrowserDescriptor? {
-    let browserDescriptors: [BrowserDescriptor] = [
-        BrowserDescriptor(
-            bundleIDs: ["com.apple.safari"],
-            nameMarkers: ["safari"],
-            usesSafariScript: true,
-            usesChromiumScript: false,
-            usesFirefoxAX: false,
-            appleScriptAppName: "Safari"
-        ),
-        BrowserDescriptor(
-            bundleIDs: ["com.apple.safaritechnologypreview"],
-            nameMarkers: ["safari technology preview"],
-            usesSafariScript: true,
-            usesChromiumScript: false,
-            usesFirefoxAX: false,
-            appleScriptAppName: "Safari Technology Preview"
-        ),
-        BrowserDescriptor(
-            bundleIDs: ["com.google.chrome"],
-            nameMarkers: ["google chrome"],
-            usesSafariScript: false,
-            usesChromiumScript: true,
-            usesFirefoxAX: false,
-            appleScriptAppName: "Google Chrome"
-        ),
-        BrowserDescriptor(
-            bundleIDs: ["com.google.chrome.canary"],
-            nameMarkers: ["chrome canary"],
-            usesSafariScript: false,
-            usesChromiumScript: true,
-            usesFirefoxAX: false,
-            appleScriptAppName: "Google Chrome Canary"
-        ),
-        BrowserDescriptor(
-            bundleIDs: ["com.brave.browser"],
-            nameMarkers: ["brave browser", "brave"],
-            usesSafariScript: false,
-            usesChromiumScript: true,
-            usesFirefoxAX: false,
-            appleScriptAppName: "Brave Browser"
-        ),
-        BrowserDescriptor(
-            bundleIDs: ["com.microsoft.edgemac"],
-            nameMarkers: ["microsoft edge", "edge"],
-            usesSafariScript: false,
-            usesChromiumScript: true,
-            usesFirefoxAX: false,
-            appleScriptAppName: "Microsoft Edge"
-        ),
-        BrowserDescriptor(
-            bundleIDs: ["com.opera.opera"],
-            nameMarkers: ["opera"],
-            usesSafariScript: false,
-            usesChromiumScript: true,
-            usesFirefoxAX: false,
-            appleScriptAppName: "Opera"
-        ),
-        BrowserDescriptor(
-            bundleIDs: ["com.vivaldi.vivaldi"],
-            nameMarkers: ["vivaldi"],
-            usesSafariScript: false,
-            usesChromiumScript: true,
-            usesFirefoxAX: false,
-            appleScriptAppName: "Vivaldi"
-        ),
-        BrowserDescriptor(
-            bundleIDs: ["company.thebrowser.browser"],
-            nameMarkers: ["arc"],
-            usesSafariScript: false,
-            usesChromiumScript: true,
-            usesFirefoxAX: false,
-            appleScriptAppName: "Arc"
-        ),
-        BrowserDescriptor(
-            bundleIDs: ["com.chromium.chromium"],
-            nameMarkers: ["chromium"],
-            usesSafariScript: false,
-            usesChromiumScript: true,
-            usesFirefoxAX: false,
-            appleScriptAppName: "Chromium"
-        ),
-        BrowserDescriptor(
-            bundleIDs: ["org.mozilla.firefox", "org.mozilla.nightly"],
-            nameMarkers: ["firefox", "nightly"],
-            usesSafariScript: false,
-            usesChromiumScript: false,
-            usesFirefoxAX: true,
-            appleScriptAppName: nil
-        ),
-        BrowserDescriptor(
-            bundleIDs: ["com.kagi.orion"],
-            nameMarkers: ["orion"],
-            usesSafariScript: false,
-            usesChromiumScript: false,
-            usesFirefoxAX: false,
-            appleScriptAppName: nil
-        ),
-        BrowserDescriptor(
-            bundleIDs: ["com.duckduckgo.macos.browser"],
-            nameMarkers: ["duckduckgo"],
-            usesSafariScript: false,
-            usesChromiumScript: false,
-            usesFirefoxAX: false,
-            appleScriptAppName: nil
-        ),
-    ]
-    let normalizedBundleID = bundleID.lowercased()
-    let normalizedName = appName.lowercased()
-    if let exactBundleMatch = browserDescriptors.first(where: { $0.bundleIDs.contains(normalizedBundleID) }) {
-        return exactBundleMatch
-    }
-    return browserDescriptors.first {
-        $0.nameMarkers.contains(where: { normalizedName.contains($0) })
-    }
+    BrowserCatalog.descriptor(appName: appName, bundleID: bundleID)
 }
 
 @MainActor
@@ -227,6 +105,7 @@ final class ActivityTracker: ObservableObject {
     // MARK: - AXObserver State (event-driven title change detection)
     private var axObserver: AXObserver?
     private var axObserverContext: UnsafeMutableRawPointer?
+    private var observedFocusedWindow: AXUIElement?
     private var observedPID: pid_t = 0
 
     private init() {}
@@ -322,10 +201,12 @@ final class ActivityTracker: ObservableObject {
     private func scheduleIdleTimer() {
         idleTimer?.invalidate()
         // 30s interval with 20% tolerance for OS timer coalescing (saves energy)
-        idleTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
+        let timer = Timer(timeInterval: 30, repeats: true) { _ in
             Task { @MainActor [weak self] in self?.idleTimerFired() }
         }
-        idleTimer?.tolerance = 6
+        timer.tolerance = 6
+        RunLoop.main.add(timer, forMode: .common)
+        idleTimer = timer
     }
 
     private func idleTimerFired() {
@@ -339,7 +220,7 @@ final class ActivityTracker: ObservableObject {
         // Smart exception: if an app is preventing display sleep (video call, presentation, media),
         // don't mark as idle — the user is actively engaged even without keyboard/mouse input.
         if nowIdle && hasActiveDisplayAssertion() {
-            if !nowIdle { lastActivity = Date() }
+            lastActivity = Date()
             return  // Skip idle transition
         }
 
@@ -387,10 +268,12 @@ final class ActivityTracker: ObservableObject {
 
     private func scheduleCheckpointTimer() {
         checkpointTimer?.invalidate()
-        checkpointTimer = Timer.scheduledTimer(withTimeInterval: 5 * 60, repeats: true) { _ in
+        let timer = Timer(timeInterval: 5 * 60, repeats: true) { _ in
             Task { @MainActor [weak self] in self?.writeCheckpoint() }
         }
-        checkpointTimer?.tolerance = 30
+        timer.tolerance = 30
+        RunLoop.main.add(timer, forMode: .common)
+        checkpointTimer = timer
     }
 
     /// Write a partial record every 5 minutes for the in-progress segment.
@@ -436,6 +319,45 @@ final class ActivityTracker: ObservableObject {
         lastCheckpointDate = nil
     }
 
+    private func cancelPendingFocusWork() {
+        browserFetchGeneration &+= 1
+        browserFetchTask?.cancel()
+        browserFetchTask = nil
+        browserURLTask?.cancel()
+        browserURLTask = nil
+        titleChangeDebounceTask?.cancel()
+        titleChangeDebounceTask = nil
+        isBrowserFetchPending = false
+        awaitingTitleDebounce = false
+    }
+
+    private func clearTrackedSegmentState(currentAppName: String = "", currentWindowTitle: String = "") {
+        currentApp = currentAppName
+        currentTitle = currentWindowTitle
+        currentURL = nil
+        cachedBrowserURL = nil
+        lastBrowserTitle = ""
+        lastSavedBundleID = ""
+        lastSavedTitle = ""
+        lastSavedURL = nil
+        lastSavedIsIdle = false
+        lastSavedAppName = ""
+        lastSavedCategory = .uncategorized
+        lastSavedDocumentPath = nil
+        lastFrontmostPID = 0
+        lastTitleFetchDate = .distantPast
+        currentSegmentStart = Date()
+        lastCheckpointDate = nil
+    }
+
+    private func parkTrackingForIgnoredApp(appName: String, bundleID: String, reason: String) {
+        cancelPendingFocusWork()
+        endCurrentSegment()
+        unregisterAXObserver()
+        clearTrackedSegmentState(currentAppName: appName)
+        trackerLogger.debug("Tracking parked for \(appName, privacy: .public) (\(bundleID, privacy: .public)): \(reason, privacy: .public)")
+    }
+
     // MARK: - App Switch Handler (event-driven, instant)
 
     private func handleAppSwitch(app: NSRunningApplication?) {
@@ -443,18 +365,20 @@ final class ActivityTracker: ObservableObject {
         let bundleID = app.bundleIdentifier ?? ""
         let appName = app.localizedName ?? "Unknown"
 
-        // loginwindow = macOS screen lock — treat as idle, never record as activity
-        guard bundleID != "com.apple.loginwindow" && appName.lowercased() != "loginwindow" else { return }
-        if SettingsStorage.shared.excludedBundleIDs.contains(bundleID) { return }
+        // loginwindow = macOS screen lock. Close the active segment before parking so
+        // time behind the lock screen is not counted as the previous app.
+        if bundleID == "com.apple.loginwindow" || appName.lowercased() == "loginwindow" {
+            parkTrackingForIgnoredApp(appName: "", bundleID: bundleID, reason: "screen lock")
+            return
+        }
+        if SettingsStorage.shared.excludedBundleIDs.contains(bundleID) {
+            parkTrackingForIgnoredApp(appName: appName, bundleID: bundleID, reason: "excluded app")
+            return
+        }
         guard bundleID != lastSavedBundleID else { return } // same app, skip
 
         // Cancel any pending browser URL debounce from previous app
-        browserURLTask?.cancel()
-        browserURLTask = nil
-        isBrowserFetchPending = false
-        titleChangeDebounceTask?.cancel()
-        titleChangeDebounceTask = nil
-        awaitingTitleDebounce = false
+        cancelPendingFocusWork()
 
         // End the previous app's segment — write one accurate record
         endCurrentSegment()
@@ -567,8 +491,14 @@ final class ActivityTracker: ObservableObject {
         guard let frontApp = NSWorkspace.shared.frontmostApplication else { return }
         let appName = frontApp.localizedName ?? "Unknown"
         let bundleID = frontApp.bundleIdentifier ?? ""
-        guard !SettingsStorage.shared.excludedBundleIDs.contains(bundleID) else { return }
-        guard bundleID != "com.apple.loginwindow" else { return }
+        guard bundleID != "com.apple.loginwindow", appName.lowercased() != "loginwindow" else {
+            clearTrackedSegmentState()
+            return
+        }
+        guard !SettingsStorage.shared.excludedBundleIDs.contains(bundleID) else {
+            clearTrackedSegmentState(currentAppName: appName)
+            return
+        }
         currentApp = appName
         let windowInfo = SettingsStorage.shared.captureWindowTitles ? getWindowInfo(for: frontApp) : (title: "", documentPath: nil)
         let title = windowInfo.title
@@ -622,16 +552,38 @@ final class ActivityTracker: ObservableObject {
         axObserver = obs
         axObserverContext = selfPtr
         observedPID = pid
+        observeFocusedWindowTitle(for: app)
         trackerLogger.debug("AXObserver registered for PID \(pid)")
     }
 
     private func unregisterAXObserver() {
         if let obs = axObserver {
+            if let window = observedFocusedWindow {
+                AXObserverRemoveNotification(obs, window, kAXTitleChangedNotification as CFString)
+            }
             CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(obs), .defaultMode)
         }
         axObserver = nil
         axObserverContext = nil
+        observedFocusedWindow = nil
         observedPID = 0
+    }
+
+    private func observeFocusedWindowTitle(for app: NSRunningApplication) {
+        guard let obs = axObserver, let context = axObserverContext else { return }
+
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        var windowRef: AnyObject?
+        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowRef) == .success,
+              let windowRef,
+              CFGetTypeID(windowRef as CFTypeRef) == AXUIElementGetTypeID() else { return }
+
+        let window = windowRef as! AXUIElement
+        if let oldWindow = observedFocusedWindow {
+            AXObserverRemoveNotification(obs, oldWindow, kAXTitleChangedNotification as CFString)
+        }
+        AXObserverAddNotification(obs, window, kAXTitleChangedNotification as CFString, context)
+        observedFocusedWindow = window
     }
 
     /// Called by the AXObserver C callback when window title changes within the same app.
@@ -640,10 +592,11 @@ final class ActivityTracker: ObservableObject {
     func handleAXTitleChange() {
         guard isTracking, !isScreenAsleep, !isCurrentlyIdle else { return }
         guard let frontApp = NSWorkspace.shared.frontmostApplication else { return }
+        observeFocusedWindowTitle(for: frontApp)
 
         let windowInfo = SettingsStorage.shared.captureWindowTitles ? getWindowInfo(for: frontApp) : (title: "", documentPath: nil)
         let newTitle = windowInfo.title
-        lastSavedDocumentPath = windowInfo.documentPath
+        let newDocumentPath = windowInfo.documentPath
         guard newTitle != lastSavedTitle && !newTitle.isEmpty else { return }
 
         let appName = frontApp.localizedName ?? "Unknown"
@@ -658,6 +611,7 @@ final class ActivityTracker: ObservableObject {
         if lastSavedTitle.isEmpty {
             currentTitle = newTitle
             lastSavedTitle = newTitle
+            lastSavedDocumentPath = newDocumentPath
             updateBrowserInfo(appName: appName, bundleID: bundleID, title: newTitle)
             return
         }
@@ -669,7 +623,7 @@ final class ActivityTracker: ObservableObject {
         // Pass nil for URL because cachedBrowserURL is stale (from the previous tab) when
         // switching tabs. The full URL-based check follows when updateBrowserInfo completes.
         let immediateCategory = resolveCategory(appName: appName, bundleID: bundleID, title: newTitle, url: nil, isIdle: false)
-        StudyTrackerEngine.shared.checkActivity(category: immediateCategory, appName: appName, windowTitle: newTitle, bundleID: bundleID, documentPath: lastSavedDocumentPath)
+        StudyTrackerEngine.shared.checkActivity(category: immediateCategory, appName: appName, windowTitle: newTitle, bundleID: bundleID, documentPath: newDocumentPath)
         FocusModeEngine.shared.checkActivity(category: immediateCategory, appName: appName, windowTitle: newTitle)
 
         // For browsers: start URL fetch immediately in parallel so it's ready when debounce fires.
@@ -699,12 +653,13 @@ final class ActivityTracker: ObservableObject {
                 if !self.awaitingTitleDebounce {
                     self.lastSavedURL = info.url
                     self.lastSavedTitle = resolvedTitle
+                    self.lastSavedDocumentPath = newDocumentPath
                     let metadata = ContentMetadataExtractor.extract(url: info.url, windowTitle: resolvedTitle, appName: appName)
                     let cat = self.resolveCategory(appName: appName, bundleID: bundleID, title: resolvedTitle, url: info.url, isIdle: false, contentMetadata: metadata)
                     self.lastSavedCategory = cat
                     self.checkDistractionAlert(category: cat)
                     FocusModeEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url)
-                    StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url, bundleID: bundleID, documentPath: self.lastSavedDocumentPath)
+                    StudyTrackerEngine.shared.checkActivity(category: cat, appName: appName, windowTitle: resolvedTitle, url: info.url, bundleID: bundleID, documentPath: newDocumentPath)
                 }
             }
         }
@@ -724,6 +679,7 @@ final class ActivityTracker: ObservableObject {
             let minSegmentAge: TimeInterval = isBrowser ? 5 : 15
             if segmentAge < minSegmentAge {
                 self.lastSavedTitle = self.currentTitle
+                self.lastSavedDocumentPath = newDocumentPath
                 if isBrowser {
                     self.lastSavedURL = self.cachedBrowserURL
                     let metadata = ContentMetadataExtractor.extract(url: self.cachedBrowserURL, windowTitle: self.currentTitle, appName: appName)
@@ -744,6 +700,7 @@ final class ActivityTracker: ObservableObject {
             self.lastCheckpointDate = nil
 
             self.lastSavedTitle = self.currentTitle
+            self.lastSavedDocumentPath = newDocumentPath
             if isBrowser {
                 self.lastSavedURL = self.cachedBrowserURL
                 let metadata = ContentMetadataExtractor.extract(url: self.cachedBrowserURL, windowTitle: self.currentTitle, appName: appName)
@@ -807,7 +764,13 @@ final class ActivityTracker: ObservableObject {
 
     private func resolveCategory(appName: String, bundleID: String, title: String, url: String?, isIdle: Bool, contentMetadata: ContentMetadata? = nil) -> Category {
         if isIdle { return .idle }
-        return RuleEngine.shared.categorize(appName: appName, bundleID: bundleID, windowTitle: title, url: url, contentMetadata: contentMetadata) ?? .uncategorized
+        return RuleEngine.shared.categorizeWithResult(
+            appName: appName,
+            bundleID: bundleID,
+            windowTitle: title,
+            url: url,
+            contentMetadata: contentMetadata
+        )?.category ?? .uncategorized
     }
 
     private func writeRecord(appName: String, bundleID: String, title: String, url: String?, category: Category, isIdle: Bool, duration: TimeInterval, segmentStart: Date? = nil, contentMetadata: ContentMetadata? = nil, documentPath: String? = nil) {
@@ -928,47 +891,82 @@ final class ActivityTracker: ObservableObject {
     }
 
     /// Fetches both the URL and page title for the active browser tab.
-    /// Returns (url, pageTitle) — Firefox only returns url (no AppleScript access).
+    /// Returns (url, pageTitle). AppleScript is preferred when available, and AX URL
+    /// extraction is used as a lower-cost fallback for unsupported or denied browsers.
     nonisolated static func fetchBrowserInfo(appName: String, bundleID: String) async -> (url: String?, pageTitle: String?) {
         guard let descriptor = browserDescriptor(appName: appName, bundleID: bundleID) else {
             return (nil, nil)
         }
 
         if descriptor.usesFirefoxAX {
-            return (fetchFirefoxURL(bundleID: bundleID), nil)
+            return (fetchBrowserURLFromAccessibility(bundleID: bundleID), nil)
         }
 
-        guard let scriptAppName = descriptor.appleScriptAppName else {
-            // No AppleScript — try AX-based URL extraction (works for WebKit/Gecko browsers like Orion, DuckDuckGo)
-            return (fetchFirefoxURL(bundleID: bundleID), nil)
+        if let script = browserAppleScript(for: descriptor, appName: appName, bundleID: bundleID),
+           let raw = await executeBrowserAppleScript(script, appName: appName) {
+            let parsed = parseBrowserScriptResult(raw)
+            if parsed.url != nil || parsed.pageTitle != nil {
+                return parsed
+            }
         }
 
-        // AppleScript that returns "url|||title" in a single call to avoid two round-trips.
-        let script: String
+        return (fetchBrowserURLFromAccessibility(bundleID: bundleID), nil)
+    }
+
+    nonisolated private static func browserAppleScript(for descriptor: BrowserDescriptor, appName: String, bundleID: String) -> String? {
+        let fallbackName = descriptor.appleScriptAppName ?? appName
+        guard let target = appleScriptTarget(bundleID: bundleID, fallbackName: fallbackName) else { return nil }
+
+        // AppleScript returns "url|||title" in one call to avoid two browser round-trips.
         if descriptor.usesSafariScript {
-            script = """
-            tell application "\(scriptAppName)"
+            return """
+            tell \(target)
                 set t to current tab of front window
                 return (URL of t) & "|||" & (name of t)
             end tell
             """
-        } else if descriptor.usesChromiumScript {
-            script = """
-            tell application "\(scriptAppName)"
+        }
+        if descriptor.usesChromiumScript {
+            return """
+            tell \(target)
                 set t to active tab of front window
                 return (URL of t) & "|||" & (title of t)
             end tell
             """
-        } else {
-            return (nil, nil)
         }
+        return nil
+    }
 
+    nonisolated private static func appleScriptTarget(bundleID: String, fallbackName: String?) -> String? {
+        if !bundleID.isEmpty {
+            return "application id \"\(escapeAppleScriptString(bundleID))\""
+        }
+        if let fallbackName, !fallbackName.isEmpty {
+            return "application \"\(escapeAppleScriptString(fallbackName))\""
+        }
+        return nil
+    }
+
+    nonisolated private static func escapeAppleScriptString(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    nonisolated private static func parseBrowserScriptResult(_ raw: String) -> (url: String?, pageTitle: String?) {
+        let parts = raw.components(separatedBy: "|||")
+        let url = parts.count > 0 ? parts[0].trimmingCharacters(in: .whitespacesAndNewlines) : nil
+        let title = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespacesAndNewlines) : nil
+        return (url?.isEmpty == true ? nil : url, title?.isEmpty == true ? nil : title)
+    }
+
+    nonisolated private static func executeBrowserAppleScript(_ script: String, appName: String) async -> String? {
         return await withCheckedContinuation { continuation in
             let once = _Once()
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 3) {
                 if once.fulfill() {
                     trackerLogger.warning("AppleScript timed out for \(appName, privacy: .public)")
-                    continuation.resume(returning: (nil, nil))
+                    continuation.resume(returning: nil)
                 }
             }
             DispatchQueue.global(qos: .utility).async {
@@ -976,14 +974,7 @@ final class ActivityTracker: ObservableObject {
                 var error: NSDictionary?
                 let output = appleScript?.executeAndReturnError(&error)
                 if once.fulfill() {
-                    guard let raw = output?.stringValue else {
-                        continuation.resume(returning: (nil, nil)); return
-                    }
-                    let parts = raw.components(separatedBy: "|||")
-                    let url   = parts.count > 0 ? parts[0].trimmingCharacters(in: .whitespaces) : nil
-                    let title = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : nil
-                    continuation.resume(returning: (url?.isEmpty == true ? nil : url,
-                                                    title?.isEmpty == true ? nil : title))
+                    continuation.resume(returning: output?.stringValue)
                 }
             }
         }
@@ -994,49 +985,102 @@ final class ActivityTracker: ObservableObject {
         await fetchBrowserInfo(appName: appName, bundleID: bundleID).url
     }
 
-    /// Reads Firefox URL from the AXUIElement address bar (toolbar item with URL role).
-    /// Firefox doesn't support AppleScript URL access, so we use Accessibility API.
-    nonisolated private static func fetchFirefoxURL(bundleID: String) -> String? {
+    /// Reads a browser URL from the AXUIElement address bar. This covers Firefox and
+    /// browser variants whose AppleScript support is missing or blocked by permission.
+    nonisolated private static func fetchBrowserURLFromAccessibility(bundleID: String) -> String? {
         guard let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier?.lowercased() == bundleID.lowercased() }) else { return nil }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         var windowRef: AnyObject?
         guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowRef) == .success,
               let windowRef, CFGetTypeID(windowRef as CFTypeRef) == AXUIElementGetTypeID() else { return nil }
         let window = windowRef as! AXUIElement
-        // Traverse toolbar → address bar (search field with URL value)
-        if let url = searchAXForURL(element: window, depth: 0) {
-            return url
-        }
-        return nil
+        return searchAXForBestURL(element: window, depth: 0)?.url
     }
 
-    nonisolated private static func searchAXForURL(element: AXUIElement, depth: Int) -> String? {
-        guard depth < 8 else { return nil }
+    nonisolated private static func searchAXForBestURL(element: AXUIElement, depth: Int) -> AXURLCandidate? {
+        guard depth < 10 else { return nil }
         var roleRef: AnyObject?
         AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef)
         let role = roleRef as? String ?? ""
+        let label = axSearchLabel(for: element, role: role)
+
+        var best: AXURLCandidate?
 
         // Check if this element looks like an address bar (text field with a URL value)
         if role == kAXTextFieldRole || role == "AXComboBox" {
             var valueRef: AnyObject?
             AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &valueRef)
             if let value = valueRef as? String,
-               (value.hasPrefix("http://") || value.hasPrefix("https://") || value.hasPrefix("about:")) {
-                return value
+               let normalizedURL = normalizeBrowserURLCandidate(value) {
+                var score = 60 - depth
+                if role == "AXComboBox" { score += 6 }
+                if label.contains("address") || label.contains("location") || label.contains("url") || label.contains("omnibox") {
+                    score += 50
+                } else if label.contains("search") || label.contains("smart search") {
+                    score += 20
+                }
+                best = AXURLCandidate(url: normalizedURL, score: score)
             }
         }
+
+        guard role != "AXWebArea" else { return best }
 
         // Recurse into children — CF bridging returns [AnyObject], not [AXUIElement] directly
         var childrenRef: AnyObject?
         guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef) == .success,
-              let childArray = childrenRef as? [AnyObject] else { return nil }
+              let childArray = childrenRef as? [AnyObject] else { return best }
         let axTypeID = AXUIElementGetTypeID()
-        for child in childArray {
+        for child in childArray.prefix(80) {
             guard CFGetTypeID(child as CFTypeRef) == axTypeID else { continue }
             let axChild = child as! AXUIElement
-            if let found = searchAXForURL(element: axChild, depth: depth + 1) { return found }
+            if let found = searchAXForBestURL(element: axChild, depth: depth + 1),
+               best.map({ found.score > $0.score }) ?? true {
+                best = found
+            }
         }
-        return nil
+        return best
+    }
+
+    nonisolated private static func axSearchLabel(for element: AXUIElement, role: String) -> String {
+        let attributes: [CFString] = [
+            kAXTitleAttribute as CFString,
+            kAXDescriptionAttribute as CFString,
+            kAXHelpAttribute as CFString,
+            kAXPlaceholderValueAttribute as CFString,
+            "AXIdentifier" as CFString
+        ]
+        let pieces = attributes.compactMap { copyAXString(element: element, attribute: $0) }
+        return ([role] + pieces).joined(separator: " ").lowercased()
+    }
+
+    nonisolated private static func copyAXString(element: AXUIElement, attribute: CFString) -> String? {
+        var valueRef: AnyObject?
+        guard AXUIElementCopyAttributeValue(element, attribute, &valueRef) == .success else { return nil }
+        return valueRef as? String
+    }
+
+    nonisolated private static func normalizeBrowserURLCandidate(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let lower = trimmed.lowercased()
+
+        let acceptedSchemes = [
+            "http://", "https://", "about:", "chrome://", "edge://", "brave://",
+            "vivaldi://", "opera://", "arc://", "firefox://", "file://"
+        ]
+        if acceptedSchemes.contains(where: { lower.hasPrefix($0) }) {
+            return trimmed
+        }
+
+        if lower == "localhost" || lower.hasPrefix("localhost:") || lower.hasPrefix("localhost/") {
+            return "http://\(trimmed)"
+        }
+
+        guard !trimmed.contains(" "),
+              !trimmed.contains("@"),
+              let firstPart = trimmed.split(separator: "/").first,
+              firstPart.contains(".") else { return nil }
+        return "https://\(trimmed)"
     }
 
     private func checkIdle() -> Bool {
@@ -1112,6 +1156,11 @@ final class ActivityTracker: ObservableObject {
 }
 
 // MARK: - _Once (file-level to avoid @MainActor isolation from outer class)
+private struct AXURLCandidate: Sendable {
+    let url: String
+    let score: Int
+}
+
 /// Thread-safe one-shot flag — ensures a continuation is resumed exactly once.
 private final class _Once: @unchecked Sendable {
     nonisolated init() {}
