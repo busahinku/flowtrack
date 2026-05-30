@@ -72,18 +72,21 @@ class FlowTrackAppDelegate: NSObject, NSApplicationDelegate {
 
     func showDashboard() {
         FocusModeEngine.shared.pauseForDashboard()
+        let shouldShowDockIcon = SettingsStorage.shared.showDockIcon
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 
         if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "dashboard" }) {
             window.makeKeyAndOrderFront(nil)
             observeClose(of: window)
+            restoreDockVisibilityIfNeeded(shouldShowDockIcon: shouldShowDockIcon)
         } else {
             reopenDashboard?()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                 if let win = NSApp.windows.first(where: { $0.identifier?.rawValue == "dashboard" }) {
                     win.makeKeyAndOrderFront(nil)
                     self?.observeClose(of: win)
+                    self?.restoreDockVisibilityIfNeeded(shouldShowDockIcon: shouldShowDockIcon)
                 }
             }
         }
@@ -110,6 +113,14 @@ class FlowTrackAppDelegate: NSObject, NSApplicationDelegate {
                     self.windowCloseObserver = nil
                 }
             }
+        }
+    }
+
+    private func restoreDockVisibilityIfNeeded(shouldShowDockIcon: Bool) {
+        guard !shouldShowDockIcon else { return }
+        DispatchQueue.main.async {
+            guard !SettingsStorage.shared.showDockIcon else { return }
+            NSApp.setActivationPolicy(.accessory)
         }
     }
 }
